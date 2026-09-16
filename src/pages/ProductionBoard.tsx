@@ -48,6 +48,7 @@ export default function ProductionBoard() {
   const [showCutModal, setShowCutModal] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
   const [showPan111Modal, setShowPan111Modal] = useState(false);
+  const [showCreamModal, setShowCreamModal] = useState(false);
   
   // Timer state
   const [timers, setTimers] = useState<Record<string, number>>({});
@@ -70,6 +71,12 @@ export default function ProductionBoard() {
   // PAN111 form state
   const [pan111Form, setPan111Form] = useState({
     weight: 0,
+    recordedBy: '',
+  });
+  
+  // Cream form state
+  const [creamForm, setCreamForm] = useState({
+    litres: 0,
     recordedBy: '',
   });
   
@@ -156,10 +163,23 @@ export default function ProductionBoard() {
   const handleVatSelection = (roundId: string, vat: 'vat2' | 'vat3') => {
     updateProductionRound(roundId, { 
       vat, 
+      status: 'in_production',
+      actualInput: productionRounds.find(r => r.id === roundId)?.plannedInput || 0
+    });
+    showToast('success', `Started production in ${vat === 'vat2' ? 'Vat 2' : 'Vat 3'}`);
+  };
+
+  const handleStartCoagulation = (roundId: string) => {
+    updateProductionRound(roundId, { status: 'coagulation' });
+    showToast('success', 'Started coagulation');
+  };
+
+  const handleStartPressing = (roundId: string) => {
+    updateProductionRound(roundId, { 
       status: 'pressing',
       pressingStartedAt: new Date().toISOString()
     });
-    showToast('success', `Started production in ${vat === 'vat2' ? 'Vat 2' : 'Vat 3'}`);
+    showToast('success', 'Started pressing (30 min)');
   };
 
   const handleStartCooling = (roundId: string, location: 'tank' | 'chiller') => {
@@ -266,6 +286,50 @@ export default function ProductionBoard() {
     setPan111Form({ weight: 0, recordedBy: '' });
   };
 
+  const handleRecordCream = () => {
+    if (!selectedRound) return;
+    
+    const round = productionRounds.find(r => r.id === selectedRound);
+    if (!round || round.type !== 'C/S') {
+      showToast('error', 'Cream can only be recorded for C/S rounds');
+      return;
+    }
+
+    if (creamForm.litres <= 0) {
+      showToast('error', 'Please enter a valid cream quantity');
+      return;
+    }
+
+    updateProductionRound(selectedRound, {
+      creamRecovered: creamForm.litres,
+      creamRecoveredAt: new Date().toISOString(),
+      creamRecoveredBy: creamForm.recordedBy,
+    });
+
+    // Also create an intermediate lot for the cream
+    addIntermediateLot({
+      lotCode: `CREAM-${round.milkLotCode}-S${round.shiftNumber}-R${round.roundNumber}`,
+      productId: 'cream',
+      productName: 'Recovered Cream (from C/S)',
+      productClass: 'intermediate',
+      sourceBatchId: round.id,
+      sourceBatchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/C/S`,
+      producedQuantity: creamForm.litres,
+      currentQuantity: creamForm.litres,
+      uom: 'kg',
+      storageLocation: 'Chiller',
+      status: 'available',
+      producedAt: new Date().toISOString(),
+      sourceMilkLotCode: round.milkLotCode,
+      sourceShift: round.shiftNumber,
+      sourceRound: round.roundNumber,
+    });
+
+    showToast('success', `Cream recorded: ${creamForm.litres} kg`);
+    setShowCreamModal(false);
+    setCreamForm({ litres: 0, recordedBy: '' });
+  };
+
   const handleCreateShift = () => {
     if (!newShift.milkLotId) {
       showToast('error', 'Please select a milk lot');
@@ -360,6 +424,18 @@ export default function ProductionBoard() {
           <button onClick={() => handleVatSelection(round.id, 'vat3')} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">Vat 3</button>
         </div>
       );
+    } else if (round.status === 'in_production') {
+      buttons.push(
+        <button key="coagulation" onClick={() => handleStartCoagulation(round.id)} className="px-2 py-1 bg-violet-500 text-white rounded text-xs hover:bg-violet-600">
+          Start Coagulation
+        </button>
+      );
+    } else if (round.status === 'coagulation') {
+      buttons.push(
+        <button key="pressing" onClick={() => handleStartPressing(round.id)} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">
+          Start Pressing
+        </button>
+      );
     } else if (round.status === 'pressing') {
       const timer = timers[round.id] || 0;
       buttons.push(
@@ -404,12 +480,17 @@ export default function ProductionBoard() {
       );
     } else if (round.status === 'cut') {
       buttons.push(
-        <div key="cut-actions" className="flex gap-1">
+        <div key="cut-actions" className="flex gap-1 flex-wrap">
           <button onClick={() => handleClingwrap(round.id)} className="px-2 py-1 bg-pink-400 text-white rounded text-xs hover:bg-pink-500">Clingwrap</button>
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
           <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
             <Package className="w-3 h-3" /> Pack
           </button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ litres: 0, recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
         </div>
       );
     } else if (round.status === 'clingwrapped') {
@@ -592,6 +673,7 @@ export default function ProductionBoard() {
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Output</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Blocks</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream (kg)</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
@@ -625,6 +707,16 @@ export default function ProductionBoard() {
                                 {round.packedSkus.map((p, i) => (
                                   <div key={i}>{p.sku}: {p.cases}c + {p.loose}l</div>
                                 ))}
+                              </div>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {round.type === 'C/S' && round.creamRecovered ? (
+                              <div className="text-xs">
+                                <div className="font-medium text-amber-700">{round.creamRecovered} kg</div>
+                                {round.creamRecoveredBy && (
+                                  <div className="text-slate-500">by {round.creamRecoveredBy}</div>
+                                )}
                               </div>
                             ) : '—'}
                           </td>
@@ -751,6 +843,43 @@ export default function ProductionBoard() {
           <div className="flex gap-2 pt-2">
             <button onClick={handleRecordPan111} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record PAN111</button>
             <button onClick={() => setShowPan111Modal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Cream Modal */}
+      <Modal isOpen={showCreamModal} onClose={() => setShowCreamModal(false)} title="Record Cream Recovery (C/S Rounds Only)">
+        <div className="space-y-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <p className="text-xs text-amber-700">
+              <strong>Note:</strong> Cream is recovered from C/S (Rozana) rounds only. This cream will be used for butter/ghee production.
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Quantity (kg)</label>
+            <input 
+              type="number" 
+              value={creamForm.litres} 
+              onChange={(e) => setCreamForm({ ...creamForm, litres: parseFloat(e.target.value) || 0 })} 
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" 
+              step="0.1" 
+              min="0" 
+              placeholder="e.g., 12.5"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded By</label>
+            <input 
+              type="text" 
+              value={creamForm.recordedBy} 
+              onChange={(e) => setCreamForm({ ...creamForm, recordedBy: e.target.value })} 
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" 
+              placeholder="Worker name" 
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button onClick={handleRecordCream} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record Cream</button>
+            <button onClick={() => setShowCreamModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
       </Modal>
