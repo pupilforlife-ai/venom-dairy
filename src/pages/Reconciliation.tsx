@@ -192,7 +192,9 @@ export default function Reconciliation() {
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">
-                        {round.casesPacked ? `${round.casesPacked}c + ${round.loosePacked || 0}l` : '—'}
+                        {round.packedSkus && round.packedSkus.length > 0 
+                          ? round.packedSkus.map(p => `${p.cases}c + ${p.loose}l ${p.sku}`).join(', ')
+                          : '—'}
                       </td>
                       <td className="px-4 py-2.5">
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">

@@ -39,21 +39,38 @@ export interface ProductionRound {
   shiftNumber: number;
   roundNumber: number;
   type: 'D' | 'C/S' | 'Halloumi' | 'Butter' | 'Ghee';
-  // Status flow: scheduled → in_production → pressing → ready_cutting → cut → freezing → frozen → part_packed → packed → ready_handover → handed_over
-  status: 'scheduled' | 'in_production' | 'pressing' | 'ready_cutting' | 'cut' | 'freezing' | 'frozen' | 'part_packed' | 'packed' | 'ready_handover' | 'handed_over';
+  // Status flow: scheduled → in_production → pressing → cooling → resting → ready_cutting → cut → [clingwrapped] → [frozen] → packed → handed_over
+  status: 'scheduled' | 'in_production' | 'pressing' | 'cooling' | 'resting' | 'ready_cutting' | 'cut' | 'clingwrapped' | 'frozen' | 'packed' | 'handed_over';
   team: string[];
   plannedInput: number; // litres
   actualInput: number; // litres
   outputWeight: number; // kg gross manufactured output
   startTime: string;
   completedAt?: string;
+  
+  // Production details
+  vat?: 'vat2' | 'vat3';
+  pressingStartedAt?: string;
+  coolingStartedAt?: string;
+  coolingLocation?: 'tank' | 'chiller';
+  restingStartedAt?: string;
+  
+  // Cutting details
   cutBy?: string;
   cuttingType?: string;
+  blockWeights?: number[]; // individual block weights in kg
+  numberOfBlocks?: number;
+  
   // Intermediate balance (kg remaining after cutting/consumption)
   intermediateBalance?: number;
-  // Packing results
-  casesPacked?: number;
-  loosePacked?: number;
+  
+  // Packing results - supports multiple SKUs per round
+  packedSkus?: Array<{
+    sku: string;
+    cases: number;
+    loose: number;
+  }>;
+  
   notes?: string;
   locked: boolean;
 }
@@ -230,11 +247,17 @@ export const productionRounds: ProductionRound[] = [
     outputWeight: 72,
     startTime: '2026-06-16T18:00:00',
     completedAt: '2026-06-16T22:00:00',
+    vat: 'vat2',
+    pressingStartedAt: '2026-06-16T19:30:00',
+    coolingStartedAt: '2026-06-16T20:00:00',
+    coolingLocation: 'tank',
+    restingStartedAt: '2026-06-16T21:30:00',
     cutBy: 'Rajesh',
     cuttingType: '400g blocks',
+    blockWeights: [10.2, 10.1, 10.3, 10.0, 10.2, 10.4, 10.8],
+    numberOfBlocks: 7,
     intermediateBalance: 0,
-    casesPacked: 15,
-    loosePacked: 0,
+    packedSkus: [{ sku: 'MPAN400', cases: 15, loose: 0 }],
     locked: true,
   },
   {
@@ -245,15 +268,22 @@ export const productionRounds: ProductionRound[] = [
     shiftNumber: 1,
     roundNumber: 2,
     type: 'C/S',
-    status: 'frozen',
+    status: 'cut',
     team: ['Rajesh', 'Amit', 'Vikram'],
     plannedInput: 500,
     actualInput: 500,
     outputWeight: 68,
     startTime: '2026-06-16T20:30:00',
     completedAt: '2026-06-17T00:30:00',
+    vat: 'vat3',
+    pressingStartedAt: '2026-06-16T22:00:00',
+    coolingStartedAt: '2026-06-16T22:30:00',
+    coolingLocation: 'chiller',
+    restingStartedAt: '2026-06-17T00:30:00',
     cutBy: 'Amit',
     cuttingType: 'SPP pieces',
+    blockWeights: [9.5, 9.8, 9.6, 9.7, 9.9, 9.5, 10.0],
+    numberOfBlocks: 7,
     intermediateBalance: 68,
     locked: false,
   },
@@ -271,6 +301,7 @@ export const productionRounds: ProductionRound[] = [
     actualInput: 480,
     outputWeight: 0,
     startTime: '2026-06-17T06:00:00',
+    pressingStartedAt: '2026-06-17T07:30:00',
     locked: false,
   },
   {
@@ -323,11 +354,17 @@ export const productionRounds: ProductionRound[] = [
     outputWeight: 70,
     startTime: '2026-06-17T16:30:00',
     completedAt: '2026-06-17T20:00:00',
+    vat: 'vat2',
+    pressingStartedAt: '2026-06-17T18:00:00',
+    coolingStartedAt: '2026-06-17T18:30:00',
+    coolingLocation: 'tank',
+    restingStartedAt: '2026-06-17T20:00:00',
     cutBy: 'Suresh',
     cuttingType: '200g format',
+    blockWeights: [10.0, 10.2, 9.8, 10.1, 10.0, 9.9, 10.0],
+    numberOfBlocks: 7,
     intermediateBalance: 0,
-    casesPacked: 22,
-    loosePacked: 3,
+    packedSkus: [{ sku: 'RPAN200', cases: 22, loose: 3 }],
     locked: true,
   },
   {
@@ -361,10 +398,17 @@ export const productionRounds: ProductionRound[] = [
     outputWeight: 73,
     startTime: '2026-06-09T18:00:00',
     completedAt: '2026-06-09T22:00:00',
+    vat: 'vat2',
+    pressingStartedAt: '2026-06-09T19:30:00',
+    coolingStartedAt: '2026-06-09T20:00:00',
+    coolingLocation: 'tank',
+    restingStartedAt: '2026-06-09T21:30:00',
     cutBy: 'Rajesh',
+    cuttingType: '400g blocks',
+    blockWeights: [10.5, 10.3, 10.4, 10.6, 10.2, 10.5, 10.5],
+    numberOfBlocks: 7,
     intermediateBalance: 0,
-    casesPacked: 15,
-    loosePacked: 0,
+    packedSkus: [{ sku: 'MPAN400', cases: 15, loose: 0 }],
     locked: true,
   },
   {
@@ -382,10 +426,17 @@ export const productionRounds: ProductionRound[] = [
     outputWeight: 66,
     startTime: '2026-06-09T20:30:00',
     completedAt: '2026-06-10T00:30:00',
+    vat: 'vat3',
+    pressingStartedAt: '2026-06-09T22:00:00',
+    coolingStartedAt: '2026-06-09T22:30:00',
+    coolingLocation: 'chiller',
+    restingStartedAt: '2026-06-10T00:30:00',
     cutBy: 'Vikram',
+    cuttingType: '200g format',
+    blockWeights: [9.4, 9.5, 9.3, 9.6, 9.4, 9.5, 9.9],
+    numberOfBlocks: 7,
     intermediateBalance: 0,
-    casesPacked: 37,
-    loosePacked: 6,
+    packedSkus: [{ sku: 'RPAN200', cases: 37, loose: 6 }],
     locked: true,
   },
 ];
@@ -608,19 +659,19 @@ export const milkReconciliation = {
 };
 
 // ============================================================
-// STATUS FLOW — matches PRODUCT_SPEC.md Section 9
+// STATUS FLOW — Paneer production pipeline
 // ============================================================
 export const statusFlow = [
   'scheduled',
   'in_production',
   'pressing',
+  'cooling',
+  'resting',
   'ready_cutting',
   'cut',
-  'freezing',
+  'clingwrapped',
   'frozen',
-  'part_packed',
   'packed',
-  'ready_handover',
   'handed_over',
 ] as const;
 
@@ -628,13 +679,13 @@ export const statusLabels: Record<string, string> = {
   scheduled: 'Scheduled',
   in_production: 'In Production',
   pressing: 'Pressing',
+  cooling: 'Cooling',
+  resting: 'Resting',
   ready_cutting: 'Ready for Cutting',
   cut: 'Cut',
-  freezing: 'Freezing',
+  clingwrapped: 'Clingwrapped',
   frozen: 'Frozen',
-  part_packed: 'Part Packed',
   packed: 'Packed',
-  ready_handover: 'Ready for Handover',
   handed_over: 'Handed Over',
 };
 
@@ -642,12 +693,12 @@ export const statusColors: Record<string, string> = {
   scheduled: 'bg-slate-400',
   in_production: 'bg-blue-500',
   pressing: 'bg-purple-500',
+  cooling: 'bg-cyan-500',
+  resting: 'bg-teal-500',
   ready_cutting: 'bg-amber-500',
   cut: 'bg-orange-500',
-  freezing: 'bg-cyan-500',
+  clingwrapped: 'bg-pink-400',
   frozen: 'bg-indigo-500',
-  part_packed: 'bg-pink-500',
   packed: 'bg-emerald-500',
-  ready_handover: 'bg-teal-500',
   handed_over: 'bg-emerald-700',
 };

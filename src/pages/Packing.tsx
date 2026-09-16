@@ -98,8 +98,7 @@ export default function Packing() {
       if (round) {
         updateProductionRound(round.id, {
           status: 'packed',
-          casesPacked: packForm.cases,
-          loosePacked: packForm.loosePackets,
+          packedSkus: [{ sku: packForm.sku, cases: packForm.cases, loose: packForm.loosePackets }],
           intermediateBalance: 0,
         });
       }
