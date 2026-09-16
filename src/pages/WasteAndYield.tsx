@@ -1,10 +1,10 @@
 import {
   AlertTriangle,
-  TrendingUp,
   TrendingDown,
   Scale,
   Droplets,
   Plus,
+  Info,
 } from 'lucide-react';
 import {
   BarChart,
@@ -17,35 +17,27 @@ import {
   PieChart,
   Pie,
   Cell,
+  Legend,
 } from 'recharts';
 import { wasteEvents, yieldTrends } from '../data/mockData';
 
 const wasteByReason = [
-  { reason: 'Texture defect', kg: 8.5, color: '#ef4444' },
-  { reason: 'Spillage', kg: 15, color: '#f59e0b' },
-  { reason: 'Cutting loss', kg: 4.2, color: '#6366f1' },
-  { reason: 'Over-press', kg: 3.1, color: '#10b981' },
-  { reason: 'Contamination', kg: 1.5, color: '#ec4899' },
-];
-
-const weeklyWaste = [
-  { week: 'W20', waste: 18.2, target: 15 },
-  { week: 'W21', waste: 14.5, target: 15 },
-  { week: 'W22', waste: 12.8, target: 15 },
-  { week: 'W23', waste: 16.1, target: 15 },
-  { week: 'W24', waste: 11.3, target: 15 },
+  { reason: 'Texture defect', kg: 2.5, color: '#ef4444' },
+  { reason: 'Spillage', kg: 120, color: '#f59e0b', unit: 'L' },
+  { reason: 'Cutting loss', kg: 1.2, color: '#6366f1' },
+  { reason: 'Rejected popper', kg: 0.8, color: '#ec4899' },
 ];
 
 export default function WasteAndYield() {
-  const totalWaste = wasteEvents.reduce((s, w) => s + w.quantity, 0);
+  const totalWasteKg = wasteEvents.filter(w => w.unit === 'kg').reduce((s, w) => s + w.quantity, 0);
+  const totalWasteL = wasteEvents.filter(w => w.unit === 'L').reduce((s, w) => s + w.quantity, 0);
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Waste & Yield</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Track waste events and production yield</p>
+          <p className="text-sm text-slate-500 mt-0.5">Track waste events, recoverable intermediates, and production yield</p>
         </div>
         <button className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors">
           <Plus className="w-4 h-4" />
@@ -53,39 +45,47 @@ export default function WasteAndYield() {
         </button>
       </div>
 
+      {/* Important note */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2">
+        <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+        <p className="text-xs text-blue-700">
+          <strong>Note:</strong> PAN111 (recovered paneer) and recovered cream are <strong>not</strong> waste — they are intermediate materials tracked separately in Inventory.
+        </p>
+      </div>
+
       {/* Summary metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex items-center gap-2 text-slate-500 mb-1">
             <AlertTriangle className="w-4 h-4 text-red-500" />
-            <span className="text-xs font-medium uppercase tracking-wide">Today's Waste</span>
+            <span className="text-xs font-medium uppercase tracking-wide">Waste (Solid)</span>
           </div>
-          <p className="text-2xl font-bold text-red-600">{totalWaste.toFixed(1)}</p>
-          <p className="text-xs text-slate-400">kg total</p>
+          <p className="text-2xl font-bold text-red-600">{totalWasteKg.toFixed(1)}</p>
+          <p className="text-xs text-slate-400">kg this week</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center gap-2 text-slate-500 mb-1">
+            <Droplets className="w-4 h-4 text-amber-500" />
+            <span className="text-xs font-medium uppercase tracking-wide">Waste (Liquid)</span>
+          </div>
+          <p className="text-2xl font-bold text-amber-600">{totalWasteL}</p>
+          <p className="text-xs text-slate-400">L milk spilled</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex items-center gap-2 text-slate-500 mb-1">
             <Scale className="w-4 h-4 text-emerald-500" />
-            <span className="text-xs font-medium uppercase tracking-wide">Paneer Yield</span>
+            <span className="text-xs font-medium uppercase tracking-wide">Malai Yield</span>
           </div>
           <p className="text-2xl font-bold text-emerald-600">14.4%</p>
-          <p className="text-xs text-slate-400">kg per 100L</p>
+          <p className="text-xs text-slate-400">kg per 100L (target: 14.5%)</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex items-center gap-2 text-slate-500 mb-1">
-            <Droplets className="w-4 h-4 text-blue-500" />
+            <Scale className="w-4 h-4 text-indigo-500" />
             <span className="text-xs font-medium uppercase tracking-wide">Ghee Yield</span>
           </div>
-          <p className="text-2xl font-bold text-blue-600">70.0%</p>
+          <p className="text-2xl font-bold text-indigo-600">70.0%</p>
           <p className="text-xs text-slate-400">actual vs 70% target</p>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center gap-2 text-slate-500 mb-1">
-            <TrendingDown className="w-4 h-4 text-amber-500" />
-            <span className="text-xs font-medium uppercase tracking-wide">Waste Trend</span>
-          </div>
-          <p className="text-2xl font-bold text-amber-600">-15%</p>
-          <p className="text-xs text-slate-400">vs last week</p>
         </div>
       </div>
 
@@ -97,15 +97,7 @@ export default function WasteAndYield() {
           <div className="flex items-center gap-4">
             <ResponsiveContainer width="50%" height={180}>
               <PieChart>
-                <Pie
-                  data={wasteByReason}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={40}
-                  outerRadius={70}
-                  dataKey="kg"
-                  nameKey="reason"
-                >
+                <Pie data={wasteByReason} cx="50%" cy="50%" innerRadius={40} outerRadius={70} dataKey="kg" nameKey="reason">
                   {wasteByReason.map((entry, index) => (
                     <Cell key={index} fill={entry.color} />
                   ))}
@@ -118,33 +110,45 @@ export default function WasteAndYield() {
                 <div key={item.reason} className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
                   <span className="text-xs text-slate-600 flex-1">{item.reason}</span>
-                  <span className="text-xs font-medium text-slate-900">{item.kg} kg</span>
+                  <span className="text-xs font-medium text-slate-900">{item.kg} {item.unit || 'kg'}</span>
                 </div>
               ))}
             </div>
           </div>
         </div>
 
-        {/* Weekly waste trend */}
+        {/* Yield comparison */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <h3 className="text-sm font-semibold text-slate-900 mb-4">Weekly Waste Trend (kg)</h3>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={weeklyWaste}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="week" tick={{ fontSize: 12 }} stroke="#94a3b8" />
-              <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }} />
-              <Bar dataKey="waste" fill="#ef4444" radius={[4, 4, 0, 0]} name="Actual Waste" />
-              <Bar dataKey="target" fill="#e2e8f0" radius={[4, 4, 0, 0]} name="Target" />
-            </BarChart>
-          </ResponsiveContainer>
+          <h3 className="text-sm font-semibold text-slate-900 mb-4">Yield: Actual vs Target (kg/100L)</h3>
+          <div className="space-y-3">
+            {yieldTrends.map((y) => (
+              <div key={y.week}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-slate-700">{y.week}</span>
+                  <span className="text-xs text-slate-400">Target: {y.target}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-emerald-600 w-12">D: {y.malai}</span>
+                  <div className="flex-1 bg-slate-100 rounded-full h-2 relative overflow-hidden">
+                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(y.malai / 16) * 100}%` }} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs text-indigo-600 w-12">C/S: {y.rozana}</span>
+                  <div className="flex-1 bg-slate-100 rounded-full h-2 relative overflow-hidden">
+                    <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${(y.rozana / 16) * 100}%` }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Waste events table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200">
-          <h3 className="text-sm font-semibold text-slate-900">Recent Waste Events</h3>
+          <h3 className="text-sm font-semibold text-slate-900">Waste Events</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -152,9 +156,10 @@ export default function WasteAndYield() {
               <tr className="bg-slate-50 text-left">
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Date</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Product</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Batch</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Quantity</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Reason</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Recorded By</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">By</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -162,11 +167,14 @@ export default function WasteAndYield() {
                 <tr key={event.id} className="hover:bg-slate-50">
                   <td className="px-4 py-2.5 text-slate-600">{event.date}</td>
                   <td className="px-4 py-2.5 font-medium text-slate-900">{event.product}</td>
+                  <td className="px-4 py-2.5">
+                    {event.batchCode ? (
+                      <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{event.batchCode}</code>
+                    ) : <span className="text-slate-400">—</span>}
+                  </td>
                   <td className="px-4 py-2.5 text-slate-700">{event.quantity} {event.unit}</td>
                   <td className="px-4 py-2.5">
-                    <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded text-xs font-medium">
-                      {event.reason}
-                    </span>
+                    <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded text-xs font-medium">{event.reason}</span>
                   </td>
                   <td className="px-4 py-2.5 text-slate-500">{event.recordedBy}</td>
                 </tr>
@@ -176,31 +184,25 @@ export default function WasteAndYield() {
         </div>
       </div>
 
-      {/* Yield comparison */}
+      {/* Ghee formula yield */}
       <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <h3 className="text-sm font-semibold text-slate-900 mb-4">Yield: Actual vs Target</h3>
-        <div className="space-y-3">
-          {yieldTrends.map((y) => (
-            <div key={y.week} className="flex items-center gap-3">
-              <span className="text-sm font-medium text-slate-700 w-12">{y.week}</span>
-              <div className="flex-1 flex items-center gap-2">
-                <div className="flex-1 bg-slate-100 rounded-full h-3 relative overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${y.actual >= y.target ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                    style={{ width: `${(y.actual / 16) * 100}%` }}
-                  />
-                </div>
-                <span className="text-sm font-medium text-slate-900 w-12 text-right">{y.actual}%</span>
-              </div>
-              <span className="text-xs text-slate-400 w-16 text-right">
-                {y.actual >= y.target ? (
-                  <span className="text-emerald-600">+{(y.actual - y.target).toFixed(1)}</span>
-                ) : (
-                  <span className="text-red-600">{(y.actual - y.target).toFixed(1)}</span>
-                )}
-              </span>
-            </div>
-          ))}
+        <h3 className="text-sm font-semibold text-slate-900 mb-3">Ghee Formula Yield Comparison</h3>
+        <div className="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <p className="text-xs text-slate-500">Formula Input</p>
+            <p className="text-lg font-bold text-slate-900">105 kg</p>
+            <p className="text-xs text-slate-400">92.5 kg butter + 12.5 kg AF oil</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500">Theoretical Output</p>
+            <p className="text-lg font-bold text-emerald-600">73.5 kg</p>
+            <p className="text-xs text-slate-400">~70% yield</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500">Variance</p>
+            <p className="text-lg font-bold text-amber-600">±0%</p>
+            <p className="text-xs text-slate-400">On target</p>
+          </div>
         </div>
       </div>
     </div>

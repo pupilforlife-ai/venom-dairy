@@ -7,6 +7,7 @@ import Inventory from './pages/Inventory';
 import ColdChain from './pages/ColdChain';
 import WasteAndYield from './pages/WasteAndYield';
 import Handover from './pages/Handover';
+import Reconciliation from './pages/Reconciliation';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/cold-chain" element={<ColdChain />} />
           <Route path="/waste" element={<WasteAndYield />} />
           <Route path="/handover" element={<Handover />} />
+          <Route path="/reconciliation" element={<Reconciliation />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>

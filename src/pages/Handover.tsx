@@ -6,6 +6,7 @@ import {
   AlertCircle,
   Plus,
   ArrowRight,
+  GitBranch,
 } from 'lucide-react';
 import { finishedStock } from '../data/mockData';
 
@@ -19,11 +20,10 @@ export default function Handover() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Distribution Handover</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Manage finished stock handover to distribution</p>
+          <p className="text-sm text-slate-500 mt-0.5">Production → Distribution handover (app ends here)</p>
         </div>
         <button className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
           <Plus className="w-4 h-4" />
@@ -65,13 +65,13 @@ export default function Handover() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 text-left">
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Select</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide w-8">✓</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">SKU</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Product</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Cases</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Loose</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Total</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Location</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Total Pkts</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Source Batches</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Ready Since</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Action</th>
               </tr>
@@ -83,15 +83,20 @@ export default function Handover() {
                     <input type="checkbox" className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
                   </td>
                   <td className="px-4 py-3">
-                    <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-medium">
-                      {item.sku}
-                    </code>
+                    <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-medium">{item.sku}</code>
                   </td>
                   <td className="px-4 py-3 font-medium text-slate-900">{item.productName}</td>
                   <td className="px-4 py-3 text-slate-700 font-medium">{item.cases}</td>
                   <td className="px-4 py-3 text-slate-700">{item.loosePackets}</td>
                   <td className="px-4 py-3 text-slate-900 font-bold">{item.totalPackets}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{item.location}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1 text-xs text-slate-500">
+                      <GitBranch className="w-3 h-3" />
+                      {item.sourceBatchCodes.map(code => (
+                        <code key={code} className="bg-slate-50 px-1 py-0.5 rounded">{code}</code>
+                      ))}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-xs text-slate-500">{item.createdAt.split('T')[0]}</td>
                   <td className="px-4 py-3">
                     <button className="flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-xs font-medium hover:bg-emerald-100 transition-colors">
@@ -116,7 +121,7 @@ export default function Handover() {
             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-medium text-emerald-900">Handover #H-2026-042</p>
-              <p className="text-xs text-emerald-700">37 cases + 6 loose SPP packets → Distribution confirmed</p>
+              <p className="text-xs text-emerald-700">37 cases + 6 loose SPP → Distribution confirmed by recipient</p>
             </div>
             <span className="text-xs text-emerald-600">Jun 16, 14:30</span>
           </div>
@@ -124,7 +129,7 @@ export default function Handover() {
             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-medium text-emerald-900">Handover #H-2026-041</p>
-              <p className="text-xs text-emerald-700">22 cases + 3 loose Paneer D 400g → Distribution confirmed</p>
+              <p className="text-xs text-emerald-700">22 cases + 3 loose MPAN400 → Distribution confirmed</p>
             </div>
             <span className="text-xs text-emerald-600">Jun 16, 11:00</span>
           </div>
@@ -132,7 +137,7 @@ export default function Handover() {
             <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
             <div className="flex-1">
               <p className="text-sm font-medium text-red-900">Return #R-2026-005</p>
-              <p className="text-xs text-red-700">2 cases damaged in transit → Quarantined for inspection</p>
+              <p className="text-xs text-red-700">2 cases damaged in transit → Quarantined (not auto-saleable)</p>
             </div>
             <span className="text-xs text-red-600">Jun 15, 16:45</span>
           </div>

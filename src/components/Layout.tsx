@@ -20,6 +20,7 @@ const navItems = [
   { path: '/production-board', label: 'Production Board', icon: ClipboardList },
   { path: '/milk-receiving', label: 'Milk Receiving', icon: Milk },
   { path: '/inventory', label: 'Inventory & Stock', icon: Package },
+  { path: '/reconciliation', label: 'Reconciliation', icon: ClipboardList },
   { path: '/cold-chain', label: 'Cold Chain', icon: Thermometer },
   { path: '/waste', label: 'Waste & Yield', icon: AlertTriangle },
   { path: '/handover', label: 'Handover', icon: Truck },
