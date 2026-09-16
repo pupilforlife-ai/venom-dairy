@@ -49,6 +49,9 @@ export default function ProductionBoard() {
   const [showPackModal, setShowPackModal] = useState(false);
   const [showPan111Modal, setShowPan111Modal] = useState(false);
   const [showCreamModal, setShowCreamModal] = useState(false);
+  const [showTemperatureModal, setShowTemperatureModal] = useState(false);
+  const [startingTemperature, setStartingTemperature] = useState<number | null>(null);
+  const [selectedVat, setSelectedVat] = useState<'vat2' | 'vat3' | null>(null);
   
   // Timer state
   const [timers, setTimers] = useState<Record<string, number>>({});
@@ -162,12 +165,30 @@ export default function ProductionBoard() {
 
   // ---- Actions ----
   const handleVatSelection = (roundId: string, vat: 'vat2' | 'vat3') => {
-    updateProductionRound(roundId, { 
-      vat, 
+    setSelectedRound(roundId);
+    setSelectedVat(vat);
+    setShowTemperatureModal(true);
+  };
+
+  const handleRecordTemperature = () => {
+    if (!selectedRound || startingTemperature === null || !selectedVat) {
+      showToast('error', 'Please enter the starting temperature');
+      return;
+    }
+
+    const round = productionRounds.find(r => r.id === selectedRound);
+    if (!round) return;
+
+    updateProductionRound(selectedRound, { 
+      vat: selectedVat,
       status: 'in_production',
-      actualInput: productionRounds.find(r => r.id === roundId)?.plannedInput || 0
+      actualInput: round.plannedInput,
+      startingTemperature: startingTemperature
     });
-    showToast('success', `Started production in ${vat === 'vat2' ? 'Vat 2' : 'Vat 3'}`);
+    showToast('success', `Started production in ${selectedVat === 'vat2' ? 'Vat 2' : 'Vat 3'} at ${startingTemperature}°C`);
+    setShowTemperatureModal(false);
+    setStartingTemperature(null);
+    setSelectedVat(null);
   };
 
   const handleStartCoagulation = (roundId: string) => {
@@ -732,7 +753,8 @@ export default function ProductionBoard() {
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Blocks</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream (kg)</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Temp (°C)</th>
+                      <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -776,6 +798,11 @@ export default function ProductionBoard() {
                                   <div className="text-slate-500">by {round.creamRecoveredBy}</div>
                                 )}
                               </div>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {round.startingTemperature !== undefined ? (
+                              <span className="text-xs font-medium text-slate-700">{round.startingTemperature}°C</span>
                             ) : '—'}
                           </td>
                           <td className="px-4 py-3">
@@ -968,6 +995,34 @@ export default function ProductionBoard() {
           <div className="flex gap-2 pt-2">
             <button onClick={handleRecordCream} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record Cream</button>
             <button onClick={() => setShowCreamModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Temperature Modal */}
+      <Modal isOpen={showTemperatureModal} onClose={() => { setShowTemperatureModal(false); setStartingTemperature(null); setSelectedVat(null); }} title="Record Starting Temperature">
+        <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-sm text-blue-800">
+              <strong>Vat:</strong> {selectedVat === 'vat2' ? 'Vat 2' : 'Vat 3'}
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Starting Temperature (°C)</label>
+            <input 
+              type="number" 
+              value={startingTemperature || ''} 
+              onChange={(e) => setStartingTemperature(parseFloat(e.target.value) || null)} 
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" 
+              step="0.1"
+              placeholder="e.g., 4.5"
+              autoFocus
+            />
+            <p className="text-xs text-slate-500 mt-1">Enter the milk temperature when production starts</p>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button onClick={handleRecordTemperature} className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700">Start Production</button>
+            <button onClick={() => { setShowTemperatureModal(false); setStartingTemperature(null); setSelectedVat(null); }} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
       </Modal>
