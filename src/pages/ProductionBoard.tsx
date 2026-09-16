@@ -146,6 +146,33 @@ export default function ProductionBoard() {
     team: '',
   });
 
+  // Get the latest active shift (most recently started)
+  const getLatestActiveShift = () => {
+    const activeShifts = productionShifts
+      .filter(s => s.status === 'active')
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+    return activeShifts[0] || null;
+  };
+
+  // Open new round modal with latest shift pre-selected
+  const openNewRoundModal = () => {
+    const latestShift = getLatestActiveShift();
+    if (!latestShift) {
+      showToast('error', 'No active shift found. Please create a shift first.');
+      setShowNewShiftModal(true);
+      return;
+    }
+    const existingRoundsInShift = productionRounds.filter(r => r.shiftId === latestShift.id).length;
+    setNewRound({
+      shiftId: latestShift.id,
+      roundNumber: existingRoundsInShift + 1,
+      type: 'D',
+      plannedInput: 500,
+      team: '',
+    });
+    setShowNewRoundModal(true);
+  };
+
   const handleCreateRound = () => {
     if (!newRound.shiftId) {
       showToast('error', 'Please select a shift');
@@ -200,7 +227,7 @@ export default function ProductionBoard() {
           <button onClick={() => setShowNewShiftModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
             <Plus className="w-4 h-4" /> New Shift
           </button>
-          <button onClick={() => setShowNewRoundModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+          <button onClick={openNewRoundModal} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
             <Plus className="w-4 h-4" /> New Round
           </button>
         </div>
@@ -389,7 +416,11 @@ export default function ProductionBoard() {
                 </div>
               ) : (
                 <div className="p-6 text-center text-slate-400 text-sm">
-                  No rounds in this shift yet. <button onClick={() => { setNewRound({ ...newRound, shiftId: shift.id, roundNumber: 1 }); setShowNewRoundModal(true); }} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
+                  No rounds in this shift yet. <button onClick={() => {
+                    const existingRoundsInShift = productionRounds.filter(r => r.shiftId === shift.id).length;
+                    setNewRound({ shiftId: shift.id, roundNumber: existingRoundsInShift + 1, type: 'D', plannedInput: 500, team: '' });
+                    setShowNewRoundModal(true);
+                  }} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
                 </div>
               )}
             </div>
@@ -538,12 +569,27 @@ export default function ProductionBoard() {
       <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Production Round">
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
+              Shift 
+              {newRound.shiftId && productionShifts.find(s => s.id === newRound.shiftId)?.status === 'active' && (
+                <span className="ml-2 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-medium rounded uppercase">Current</span>
+              )}
+            </label>
             <select value={newRound.shiftId} onChange={(e) => handleShiftChange(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select a shift...</option>
-              {productionShifts.filter(s => s.status !== 'completed').map(s => (
-                <option key={s.id} value={s.id}>Shift {s.shiftNumber} — {s.milkLotCode} ({s.status})</option>
-              ))}
+              {productionShifts
+                .filter(s => s.status !== 'completed')
+                .sort((a, b) => {
+                  // Active shifts first, then by start time descending
+                  if (a.status === 'active' && b.status !== 'active') return -1;
+                  if (a.status !== 'active' && b.status === 'active') return 1;
+                  return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+                })
+                .map(s => (
+                  <option key={s.id} value={s.id}>
+                    Shift {s.shiftNumber} — {s.milkLotCode} ({s.status})
+                  </option>
+                ))}
             </select>
             {productionShifts.filter(s => s.status === 'active').length === 0 && (
               <p className="text-xs text-amber-600 mt-1">No active shifts. <button onClick={() => { setShowNewRoundModal(false); setShowNewShiftModal(true); }} className="underline font-medium">Create a shift first →</button></p>
