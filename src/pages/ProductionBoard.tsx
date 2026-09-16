@@ -1,17 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Filter,
   Plus,
-  ChevronDown,
   CheckCircle2,
   Circle,
   Lock,
-  ArrowRight,
-  Edit3,
   Users,
   Clock,
-  Play,
   Square,
+  Scissors,
+  Package,
+  AlertTriangle,
+  Timer,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -34,9 +34,9 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
 
 export default function ProductionBoard() {
   const { 
-    productionRounds, productionShifts,
+    productionRounds, productionShifts, intermediateLots,
     advanceRoundStatus, updateProductionRound, addProductionRound,
-    addProductionShift, updateProductionShift
+    addProductionShift, updateProductionShift, addIntermediateLot
   } = useApp();
   const { showToast } = useToast();
   
@@ -45,9 +45,84 @@ export default function ProductionBoard() {
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
-  const [editingOutput, setEditingOutput] = useState(false);
-  const [outputValue, setOutputValue] = useState('');
-  const [notesValue, setNotesValue] = useState('');
+  const [showCutModal, setShowCutModal] = useState(false);
+  const [showPackModal, setShowPackModal] = useState(false);
+  const [showPan111Modal, setShowPan111Modal] = useState(false);
+  
+  // Timer state
+  const [timers, setTimers] = useState<Record<string, number>>({});
+  
+  // Cut form state
+  const [cutForm, setCutForm] = useState({
+    cutBy: '',
+    cuttingType: '',
+    numberOfBlocks: 0,
+    blockWeights: [] as number[],
+  });
+  
+  // Pack form state
+  const [packForm, setPackForm] = useState({
+    sku: '',
+    cases: 0,
+    loose: 0,
+  });
+  
+  // PAN111 form state
+  const [pan111Form, setPan111Form] = useState({
+    weight: 0,
+    recordedBy: '',
+  });
+  
+  // New shift form
+  const [newShift, setNewShift] = useState({
+    milkLotId: '',
+    shiftNumber: 1,
+    team: '',
+    startedAt: new Date().toISOString().slice(0, 16),
+    teamNotes: '',
+  });
+  
+  // New round form
+  const [newRound, setNewRound] = useState({
+    shiftId: '',
+    roundNumber: 1,
+    type: 'D' as const,
+    plannedInput: 500,
+    team: '',
+  });
+
+  const activeMilkLot = milkLots.find((m) => m.status === 'active');
+
+  // Update timers every second
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimers(prev => {
+        const updated = { ...prev };
+        productionRounds.forEach(round => {
+          if (round.status === 'pressing' && round.pressingStartedAt) {
+            const elapsed = Math.floor((Date.now() - new Date(round.pressingStartedAt).getTime()) / 1000);
+            updated[round.id] = Math.max(0, 1800 - elapsed); // 30 minutes
+          } else if (round.status === 'cooling' && round.coolingStartedAt) {
+            const elapsed = Math.floor((Date.now() - new Date(round.coolingStartedAt).getTime()) / 1000);
+            const duration = round.coolingLocation === 'tank' ? 5400 : 7200; // 90min or 120min
+            updated[round.id] = Math.max(0, duration - elapsed);
+          } else if (round.status === 'resting' && round.restingStartedAt) {
+            const elapsed = Math.floor((Date.now() - new Date(round.restingStartedAt).getTime()) / 1000);
+            updated[round.id] = Math.max(0, 5400 - elapsed); // 90 minutes
+          }
+        });
+        return updated;
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [productionRounds]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Filter rounds
   const filteredRounds = productionRounds.filter((round) => {
@@ -65,50 +140,131 @@ export default function ProductionBoard() {
     return acc;
   }, {} as Record<string, typeof productionRounds>);
 
-  // Get active shifts (sorted by shift number)
+  // Get active shifts
   const activeShifts = productionShifts
     .filter(s => groupedByShift[s.id] || s.status !== 'completed')
     .sort((a, b) => a.shiftNumber - b.shiftNumber);
 
-  const activeMilkLot = milkLots.find((m) => m.status === 'active');
-  const selectedRoundData = productionRounds.find(r => r.id === selectedRound);
+  // Check for FIFO violations
+  const frozenLots = intermediateLots
+    .filter(lot => lot.storageLocation.includes('Freezer') && lot.status === 'available')
+    .sort((a, b) => new Date(a.producedAt).getTime() - new Date(b.producedAt).getTime());
+  
+  const hasFifoViolation = frozenLots.length > 1;
 
   // ---- Actions ----
-  const handleAdvanceStatus = (id: string) => {
-    const round = productionRounds.find(r => r.id === id);
+  const handleVatSelection = (roundId: string, vat: 'vat2' | 'vat3') => {
+    updateProductionRound(roundId, { 
+      vat, 
+      status: 'pressing',
+      pressingStartedAt: new Date().toISOString()
+    });
+    showToast('success', `Started production in ${vat === 'vat2' ? 'Vat 2' : 'Vat 3'}`);
+  };
+
+  const handleStartCooling = (roundId: string, location: 'tank' | 'chiller') => {
+    updateProductionRound(roundId, { 
+      coolingLocation: location,
+      status: 'cooling',
+      coolingStartedAt: new Date().toISOString()
+    });
+    showToast('success', `Started cooling in ${location === 'tank' ? 'Cooling Tank (90min)' : 'Chiller (120min)'}`);
+  };
+
+  const handleStartResting = (roundId: string) => {
+    updateProductionRound(roundId, { 
+      status: 'resting',
+      restingStartedAt: new Date().toISOString()
+    });
+    showToast('success', 'Started resting (90min)');
+  };
+
+  const handleReadyForCutting = (roundId: string) => {
+    updateProductionRound(roundId, { status: 'ready_cutting' });
+    showToast('success', 'Ready for cutting');
+  };
+
+  const handleCut = (roundId: string) => {
+    const round = productionRounds.find(r => r.id === roundId);
     if (!round) return;
-    const currentIndex = statusFlow.indexOf(round.status as any);
-    if (currentIndex >= statusFlow.length - 1) {
-      showToast('error', 'Round is already at final status');
-      return;
-    }
-    advanceRoundStatus(id);
-    const nextStatus = statusFlow[currentIndex + 1];
-    showToast('success', `Status changed to "${statusLabels[nextStatus]}"`);
+
+    const totalWeight = cutForm.blockWeights.reduce((sum, w) => sum + w, 0);
+    
+    updateProductionRound(roundId, {
+      status: 'cut',
+      cutBy: cutForm.cutBy,
+      cuttingType: cutForm.cuttingType,
+      numberOfBlocks: cutForm.numberOfBlocks,
+      blockWeights: cutForm.blockWeights,
+      outputWeight: totalWeight,
+    });
+
+    showToast('success', `Cut recorded: ${cutForm.numberOfBlocks} blocks, ${totalWeight.toFixed(2)} kg`);
+    setShowCutModal(false);
+    setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] });
   };
 
-  const handleRecordOutput = () => {
-    if (!selectedRound || !outputValue) return;
-    const weight = parseFloat(outputValue);
-    if (isNaN(weight) || weight < 0) {
-      showToast('error', 'Please enter a valid weight');
-      return;
-    }
-    updateProductionRound(selectedRound, { outputWeight: weight, notes: notesValue });
-    showToast('success', `Output recorded: ${weight} kg`);
-    setEditingOutput(false);
-    setOutputValue('');
-    setNotesValue('');
+  const handleClingwrap = (roundId: string) => {
+    updateProductionRound(roundId, { status: 'clingwrapped' });
+    showToast('success', 'Clingwrapped and stored in chiller');
   };
 
-  // ---- New Shift Form ----
-  const [newShift, setNewShift] = useState({
-    milkLotId: activeMilkLot?.id || '',
-    shiftNumber: 1,
-    team: '',
-    startedAt: new Date().toISOString().slice(0, 16),
-    teamNotes: '',
-  });
+  const handleFreeze = (roundId: string) => {
+    updateProductionRound(roundId, { status: 'frozen' });
+    showToast('success', 'Moved to freezer');
+  };
+
+  const handlePack = (roundId: string) => {
+    const round = productionRounds.find(r => r.id === roundId);
+    if (!round) return;
+
+    const existingPacked = round.packedSkus || [];
+    const newPackedSkus = [...existingPacked, { sku: packForm.sku, cases: packForm.cases, loose: packForm.loose }];
+
+    updateProductionRound(roundId, {
+      status: 'packed',
+      packedSkus: newPackedSkus,
+    });
+
+    showToast('success', `Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}`);
+    setShowPackModal(false);
+    setPackForm({ sku: '', cases: 0, loose: 0 });
+  };
+
+  const handleHandover = (roundId: string) => {
+    updateProductionRound(roundId, { 
+      status: 'handed_over',
+      locked: true,
+      completedAt: new Date().toISOString()
+    });
+    showToast('success', 'Handed over to distribution');
+  };
+
+  const handleRecordPan111 = () => {
+    if (!activeMilkLot) return;
+    
+    addIntermediateLot({
+      lotCode: `PAN111-${activeMilkLot.lotCode}`,
+      productId: 'pan111',
+      productName: 'PAN111 (Recovered Paneer)',
+      productClass: 'intermediate',
+      sourceBatchId: 'milk-lot',
+      sourceBatchCode: activeMilkLot.lotCode,
+      producedQuantity: pan111Form.weight,
+      currentQuantity: pan111Form.weight,
+      uom: 'kg',
+      storageLocation: 'Chiller',
+      status: 'available',
+      producedAt: new Date().toISOString(),
+      sourceMilkLotCode: activeMilkLot.lotCode,
+      sourceShift: 0,
+      sourceRound: 0,
+    });
+
+    showToast('success', `PAN111 recorded: ${pan111Form.weight} kg`);
+    setShowPan111Modal(false);
+    setPan111Form({ weight: 0, recordedBy: '' });
+  };
 
   const handleCreateShift = () => {
     if (!newShift.milkLotId) {
@@ -127,9 +283,9 @@ export default function ProductionBoard() {
       teamNotes: newShift.teamNotes || undefined,
       status: 'active',
     });
-    showToast('success', `Shift ${newShift.shiftNumber} created for lot ${milkLot.lotCode}`);
+    showToast('success', `Shift ${newShift.shiftNumber} created`);
     setShowNewShiftModal(false);
-    setNewShift({ milkLotId: activeMilkLot?.id || '', shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16), teamNotes: '' });
+    setNewShift({ milkLotId: '', shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16), teamNotes: '' });
   };
 
   const handleEndShift = (shiftId: string) => {
@@ -137,28 +293,16 @@ export default function ProductionBoard() {
     showToast('success', 'Shift ended');
   };
 
-  // ---- New Round Form ----
-  const [newRound, setNewRound] = useState({
-    shiftId: '',
-    roundNumber: 1,
-    type: 'D' as const,
-    plannedInput: 500,
-    team: '',
-  });
-
-  // Get the latest active shift (most recently started)
   const getLatestActiveShift = () => {
-    const activeShifts = productionShifts
+    return productionShifts
       .filter(s => s.status === 'active')
-      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-    return activeShifts[0] || null;
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0] || null;
   };
 
-  // Open new round modal with latest shift pre-selected
   const openNewRoundModal = () => {
     const latestShift = getLatestActiveShift();
     if (!latestShift) {
-      showToast('error', 'No active shift found. Please create a shift first.');
+      showToast('error', 'No active shift. Create a shift first.');
       setShowNewShiftModal(true);
       return;
     }
@@ -196,15 +340,102 @@ export default function ProductionBoard() {
       startTime: new Date().toISOString(),
       locked: false,
     });
-    showToast('success', `New round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}/${newRound.type}`);
+    showToast('success', `Round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}/${newRound.type}`);
     setShowNewRoundModal(false);
-    setNewRound({ shiftId: '', roundNumber: 1, type: 'D', plannedInput: 500, team: '' });
   };
 
-  // When shift changes in new round form, auto-set round number
   const handleShiftChange = (shiftId: string) => {
     const existingRoundsInShift = productionRounds.filter(r => r.shiftId === shiftId).length;
     setNewRound({ ...newRound, shiftId, roundNumber: existingRoundsInShift + 1 });
+  };
+
+  // Get action buttons for each round
+  const getActionButtons = (round: any) => {
+    const buttons = [];
+    
+    if (round.status === 'scheduled') {
+      buttons.push(
+        <div key="vat" className="flex gap-1">
+          <button onClick={() => handleVatSelection(round.id, 'vat2')} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">Vat 2</button>
+          <button onClick={() => handleVatSelection(round.id, 'vat3')} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">Vat 3</button>
+        </div>
+      );
+    } else if (round.status === 'pressing') {
+      const timer = timers[round.id] || 0;
+      buttons.push(
+        <div key="pressing" className="flex items-center gap-2">
+          <Timer className="w-4 h-4 text-purple-500" />
+          <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
+          {timer === 0 && (
+            <div className="flex gap-1">
+              <button onClick={() => handleStartCooling(round.id, 'tank')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Tank</button>
+              <button onClick={() => handleStartCooling(round.id, 'chiller')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Chiller</button>
+            </div>
+          )}
+        </div>
+      );
+    } else if (round.status === 'cooling') {
+      const timer = timers[round.id] || 0;
+      buttons.push(
+        <div key="cooling" className="flex items-center gap-2">
+          <Timer className="w-4 h-4 text-cyan-500" />
+          <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
+          {timer === 0 && (
+            <button onClick={() => handleStartResting(round.id)} className="px-2 py-1 bg-teal-500 text-white rounded text-xs hover:bg-teal-600">Start Resting</button>
+          )}
+        </div>
+      );
+    } else if (round.status === 'resting') {
+      const timer = timers[round.id] || 0;
+      buttons.push(
+        <div key="resting" className="flex items-center gap-2">
+          <Timer className="w-4 h-4 text-teal-500" />
+          <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
+          {timer === 0 && (
+            <button onClick={() => handleReadyForCutting(round.id)} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">Ready to Cut</button>
+          )}
+        </div>
+      );
+    } else if (round.status === 'ready_cutting') {
+      buttons.push(
+        <button key="cut" onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
+          <Scissors className="w-3 h-3" /> Cut
+        </button>
+      );
+    } else if (round.status === 'cut') {
+      buttons.push(
+        <div key="cut-actions" className="flex gap-1">
+          <button onClick={() => handleClingwrap(round.id)} className="px-2 py-1 bg-pink-400 text-white rounded text-xs hover:bg-pink-500">Clingwrap</button>
+          <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
+          <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
+          </button>
+        </div>
+      );
+    } else if (round.status === 'clingwrapped') {
+      buttons.push(
+        <div key="clingwrap-actions" className="flex gap-1">
+          <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
+            <Scissors className="w-3 h-3" /> Final Cut
+          </button>
+          <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
+        </div>
+      );
+    } else if (round.status === 'frozen') {
+      buttons.push(
+        <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+          <Package className="w-3 h-3" /> Pack
+        </button>
+      );
+    } else if (round.status === 'packed') {
+      buttons.push(
+        <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
+          <CheckCircle2 className="w-3 h-3" /> Hand Over
+        </button>
+      );
+    }
+
+    return buttons;
   };
 
   return (
@@ -217,10 +448,13 @@ export default function ProductionBoard() {
             <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">LIVE</span>
           </div>
           <p className="text-sm text-slate-500 mt-0.5">
-            Click any round to update • Milk Lot: <span className="font-medium text-slate-700">{activeMilkLot?.lotCode}</span>
+            Milk Lot: <span className="font-medium text-slate-700">{activeMilkLot?.lotCode}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setShowPan111Modal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors">
+            <AlertTriangle className="w-4 h-4" /> Record PAN111
+          </button>
           <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${showFilters ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}>
             <Filter className="w-4 h-4" /> Filters
           </button>
@@ -232,6 +466,19 @@ export default function ProductionBoard() {
           </button>
         </div>
       </div>
+
+      {/* FIFO Warning Banner */}
+      {hasFifoViolation && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-amber-800">FIFO Notice</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              Older frozen stock exists. Consider packing oldest batches first.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       {showFilters && (
@@ -263,7 +510,7 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Shift</label>
             <select value={filters.shift} onChange={(e) => setFilters({ ...filters, shift: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="all">All Shifts</option>
-              {productionShifts.map(s => <option key={s.id} value={s.id}>Shift {s.shiftNumber} ({s.milkLotCode})</option>)}
+              {productionShifts.map(s => <option key={s.id} value={s.id}>Shift {s.shiftNumber}</option>)}
             </select>
           </div>
         </div>
@@ -319,27 +566,13 @@ export default function ProductionBoard() {
                       <span className="flex items-center gap-1">
                         <Users className="w-3 h-3" /> {shift.team.join(', ')}
                       </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> Started: {new Date(shift.startedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                      </span>
-                      {shift.endedAt && (
-                        <span className="flex items-center gap-1">
-                          <Square className="w-3 h-3" /> Ended: {new Date(shift.endedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                        </span>
-                      )}
                     </div>
-                    {shift.teamNotes && (
-                      <p className="text-xs text-slate-400 italic mt-0.5">Note: {shift.teamNotes}</p>
-                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>
                   {shift.status === 'active' && (
-                    <button
-                      onClick={() => handleEndShift(shift.id)}
-                      className="flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-medium hover:bg-slate-200 transition-colors"
-                    >
+                    <button onClick={() => handleEndShift(shift.id)} className="flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-medium hover:bg-slate-200 transition-colors">
                       <Square className="w-3 h-3" /> End Shift
                     </button>
                   )}
@@ -352,19 +585,19 @@ export default function ProductionBoard() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100">
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-40">Batch ID</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-36">Batch ID</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Type</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Pipeline</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Status</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Input</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Status</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Output</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Balance</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Actions</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Blocks</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {rounds.map((round) => (
-                        <tr key={round.id} className="hover:bg-slate-50/50 transition-colors cursor-pointer" onClick={() => setSelectedRound(round.id)}>
+                        <tr key={round.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-4 py-3">
                             <div className="font-mono text-xs font-bold text-slate-900">
                               {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
@@ -380,33 +613,26 @@ export default function ProductionBoard() {
                           </td>
                           <td className="px-4 py-3"><StatusPipeline currentStatus={round.status} /></td>
                           <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                              round.status === 'handed_over' ? 'bg-emerald-100 text-emerald-700' :
-                              round.status === 'in_production' ? 'bg-blue-100 text-blue-700' :
-                              round.status === 'pressing' ? 'bg-purple-100 text-purple-700' :
-                              round.status === 'frozen' ? 'bg-indigo-100 text-indigo-700' :
-                              round.status === 'packed' ? 'bg-teal-100 text-teal-700' :
-                              'bg-slate-100 text-slate-600'
-                            }`}>
-                              {round.status === 'handed_over' || round.status === 'packed' ? <CheckCircle2 className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[round.status]} text-white`}>
                               {statusLabels[round.status]}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.actualInput > 0 ? `${round.actualInput}L` : '—'}</td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.outputWeight > 0 ? `${round.outputWeight} kg` : '—'}</td>
+                          <td className="px-4 py-3 text-slate-600 text-xs">{round.outputWeight > 0 ? `${round.outputWeight.toFixed(1)} kg` : '—'}</td>
+                          <td className="px-4 py-3 text-slate-600 text-xs">{round.numberOfBlocks ? `${round.numberOfBlocks} blocks` : '—'}</td>
                           <td className="px-4 py-3">
-                            {round.intermediateBalance !== undefined && round.intermediateBalance > 0 ? (
-                              <span className="text-amber-700 font-medium text-xs">{round.intermediateBalance} kg</span>
-                            ) : <span className="text-slate-300">—</span>}
+                            {round.packedSkus && round.packedSkus.length > 0 ? (
+                              <div className="text-xs">
+                                {round.packedSkus.map((p, i) => (
+                                  <div key={i}>{p.sku}: {p.cases}c + {p.loose}l</div>
+                                ))}
+                              </div>
+                            ) : '—'}
                           </td>
                           <td className="px-4 py-3">
-                            {!round.locked && round.status !== 'handed_over' && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleAdvanceStatus(round.id); }}
-                                className="flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 rounded text-xs font-medium hover:bg-emerald-100 transition-colors"
-                              >
-                                Advance <ArrowRight className="w-3 h-3" />
-                              </button>
+                            {!round.locked && (
+                              <div className="flex gap-1 flex-wrap">
+                                {getActionButtons(round)}
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -416,120 +642,117 @@ export default function ProductionBoard() {
                 </div>
               ) : (
                 <div className="p-6 text-center text-slate-400 text-sm">
-                  No rounds in this shift yet. <button onClick={() => {
-                    const existingRoundsInShift = productionRounds.filter(r => r.shiftId === shift.id).length;
-                    setNewRound({ shiftId: shift.id, roundNumber: existingRoundsInShift + 1, type: 'D', plannedInput: 500, team: '' });
-                    setShowNewRoundModal(true);
-                  }} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
+                  No rounds in this shift yet. <button onClick={openNewRoundModal} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
                 </div>
               )}
             </div>
           );
         })}
-
-        {activeShifts.length === 0 && (
-          <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <p className="text-slate-500 mb-3">No shifts found. Create your first shift to begin.</p>
-            <button onClick={() => setShowNewShiftModal(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
-              Create First Shift
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Round Detail Modal */}
-      <Modal isOpen={!!selectedRound} onClose={() => { setSelectedRound(null); setEditingOutput(false); }} title="Production Round Details" size="lg">
-        {selectedRoundData && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Batch ID</p>
-                <p className="text-sm font-mono font-bold text-slate-900 mt-1">
-                  {selectedRoundData.milkLotCode}/S{selectedRoundData.shiftNumber}/R{selectedRoundData.roundNumber}/{selectedRoundData.type}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Status</p>
-                <div className="mt-1">
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    selectedRoundData.status === 'handed_over' ? 'bg-emerald-100 text-emerald-700' :
-                    selectedRoundData.status === 'in_production' ? 'bg-blue-100 text-blue-700' :
-                    'bg-slate-100 text-slate-600'
-                  }`}>
-                    {statusLabels[selectedRoundData.status]}
-                  </span>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Shift</p>
-                <p className="text-sm text-slate-700 mt-1">Shift {selectedRoundData.shiftNumber}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Team</p>
-                <p className="text-sm text-slate-700 mt-1">{selectedRoundData.team.join(', ')}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Planned Input</p>
-                <p className="text-sm text-slate-700 mt-1">{selectedRoundData.plannedInput} L</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Actual Input</p>
-                <p className="text-sm text-slate-700 mt-1">{selectedRoundData.actualInput} L</p>
-              </div>
-            </div>
-
-            <div className="border-t border-slate-200 pt-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Output Weight</p>
-                {!selectedRoundData.locked && !editingOutput && (
-                  <button onClick={() => { setEditingOutput(true); setOutputValue(selectedRoundData.outputWeight.toString()); setNotesValue(selectedRoundData.notes || ''); }} className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1">
-                    <Edit3 className="w-3 h-3" /> Edit
-                  </button>
-                )}
-              </div>
-              {editingOutput ? (
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-slate-600">Weight (kg)</label>
-                    <input type="number" value={outputValue} onChange={(e) => setOutputValue(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" step="0.1" min="0" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-600">Notes</label>
-                    <textarea value={notesValue} onChange={(e) => setNotesValue(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={2} placeholder="Optional notes..." />
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={handleRecordOutput} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Save</button>
-                    <button onClick={() => setEditingOutput(false)} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-lg font-bold text-slate-900">{selectedRoundData.outputWeight > 0 ? `${selectedRoundData.outputWeight} kg` : 'Not recorded'}</p>
-              )}
-              {selectedRoundData.notes && !editingOutput && (
-                <p className="text-xs text-slate-500 mt-2 italic">"{selectedRoundData.notes}"</p>
-              )}
-            </div>
-
-            {!selectedRoundData.locked && selectedRoundData.status !== 'handed_over' && (
-              <div className="border-t border-slate-200 pt-4">
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Advance Status</p>
-                <button onClick={() => handleAdvanceStatus(selectedRoundData.id)} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors">
-                  Move to: {statusLabels[statusFlow[statusFlow.indexOf(selectedRoundData.status as any) + 1]]}
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-
-            {selectedRoundData.locked && (
-              <div className="border-t border-slate-200 pt-4">
-                <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
-                  <Lock className="w-4 h-4 text-slate-500" />
-                  <p className="text-xs text-slate-600">This round is locked. Owner correction required for changes.</p>
-                </div>
-              </div>
-            )}
+      {/* Cut Modal */}
+      <Modal isOpen={showCutModal} onClose={() => setShowCutModal(false)} title="Record Cutting" size="lg">
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cut By</label>
+            <input type="text" value={cutForm.cutBy} onChange={(e) => setCutForm({ ...cutForm, cutBy: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Worker name" />
           </div>
-        )}
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cutting Type</label>
+            <select value={cutForm.cuttingType} onChange={(e) => setCutForm({ ...cutForm, cuttingType: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+              <option value="">Select type</option>
+              <option value="SPP pieces">SPP pieces</option>
+              <option value="400g blocks">400g blocks</option>
+              <option value="200g format">200g format</option>
+              <option value="1kg blocks">1kg blocks</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Number of Blocks</label>
+            <input type="number" value={cutForm.numberOfBlocks} onChange={(e) => {
+              const num = parseInt(e.target.value);
+              setCutForm({ ...cutForm, numberOfBlocks: num, blockWeights: Array(num).fill(0) });
+            }} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+          </div>
+          {cutForm.blockWeights.length > 0 && (
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Block Weights (kg)</label>
+              <div className="space-y-2 mt-1">
+                {cutForm.blockWeights.map((weight, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="text-sm w-20">Block {index + 1}:</span>
+                    <input type="number" value={weight} onChange={(e) => {
+                      const newWeights = [...cutForm.blockWeights];
+                      newWeights[index] = parseFloat(e.target.value) || 0;
+                      setCutForm({ ...cutForm, blockWeights: newWeights });
+                    }} className="flex-1 px-3 py-1 border border-slate-200 rounded text-sm" step="0.1" min="0" />
+                  </div>
+                ))}
+                <div className="text-sm font-medium mt-2 p-2 bg-slate-50 rounded">
+                  Total: {cutForm.blockWeights.reduce((sum, w) => sum + w, 0).toFixed(2)} kg
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="flex gap-2 pt-2">
+            <button onClick={() => selectedRound && handleCut(selectedRound)} className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600">Save</button>
+            <button onClick={() => setShowCutModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Pack Modal */}
+      <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title="Record Packing">
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">SKU</label>
+            <select value={packForm.sku} onChange={(e) => setPackForm({ ...packForm, sku: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+              <option value="">Select SKU</option>
+              <option value="MPAN400">MPAN400 - Malai Paneer 400g</option>
+              <option value="MPAN200">MPAN200 - Malai Paneer 200g</option>
+              <option value="RPAN400">RPAN400 - Rozana Paneer 400g</option>
+              <option value="RPAN200">RPAN200 - Rozana Paneer 200g</option>
+              <option value="SPP-200">SPP-200 - Spicy Paneer Poppers</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cases</label>
+              <input type="number" value={packForm.cases} onChange={(e) => setPackForm({ ...packForm, cases: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Loose</label>
+              <input type="number" value={packForm.loose} onChange={(e) => setPackForm({ ...packForm, loose: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+            </div>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button onClick={() => selectedRound && handlePack(selectedRound)} className="flex-1 px-4 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600">Save</button>
+            <button onClick={() => setShowPackModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* PAN111 Modal */}
+      <Modal isOpen={showPan111Modal} onClose={() => setShowPan111Modal(false)} title="Record PAN111 (Once per Milk Lot)">
+        <div className="space-y-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <p className="text-xs text-amber-700">
+              <strong>Note:</strong> PAN111 is recorded once per milk lot by the supervisor after all production is complete.
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Weight (kg)</label>
+            <input type="number" value={pan111Form.weight} onChange={(e) => setPan111Form({ ...pan111Form, weight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" step="0.1" min="0" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded By (Supervisor)</label>
+            <input type="text" value={pan111Form.recordedBy} onChange={(e) => setPan111Form({ ...pan111Form, recordedBy: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Supervisor name" />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button onClick={handleRecordPan111} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record PAN111</button>
+            <button onClick={() => setShowPan111Modal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+          </div>
+        </div>
       </Modal>
 
       {/* New Shift Modal */}
@@ -538,62 +761,36 @@ export default function ProductionBoard() {
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk Lot</label>
             <select value={newShift.milkLotId} onChange={(e) => setNewShift({ ...newShift, milkLotId: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-              {milkLots.map(lot => <option key={lot.id} value={lot.id}>{lot.lotCode} ({lot.status})</option>)}
+              <option value="">Select milk lot</option>
+              {milkLots.map(lot => <option key={lot.id} value={lot.id}>{lot.lotCode}</option>)}
             </select>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift Number</label>
             <input type="number" value={newShift.shiftNumber} onChange={(e) => setNewShift({ ...newShift, shiftNumber: parseInt(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="1" />
-            <p className="text-xs text-slate-400 mt-1">Sunday night is Shift 1. Each subsequent shift increments.</p>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Start Time</label>
-            <input type="datetime-local" value={newShift.startedAt} onChange={(e) => setNewShift({ ...newShift, startedAt: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team Members (comma-separated)</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (comma-separated)</label>
             <input type="text" value={newShift.team} onChange={(e) => setNewShift({ ...newShift, team: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="e.g. Rajesh, Amit, Suresh" />
           </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Notes (optional)</label>
-            <textarea value={newShift.teamNotes} onChange={(e) => setNewShift({ ...newShift, teamNotes: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={2} placeholder="Any notes about this shift..." />
-          </div>
           <div className="flex gap-2 pt-2">
-            <button onClick={handleCreateShift} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">Create Shift</button>
-            <button onClick={() => setShowNewShiftModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors">Cancel</button>
+            <button onClick={handleCreateShift} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Create Shift</button>
+            <button onClick={() => setShowNewShiftModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
       </Modal>
 
       {/* New Round Modal */}
-      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Production Round">
+      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Round">
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
-              Shift 
-              {newRound.shiftId && productionShifts.find(s => s.id === newRound.shiftId)?.status === 'active' && (
-                <span className="ml-2 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-medium rounded uppercase">Current</span>
-              )}
-            </label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift</label>
             <select value={newRound.shiftId} onChange={(e) => handleShiftChange(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-              <option value="">Select a shift...</option>
-              {productionShifts
-                .filter(s => s.status !== 'completed')
-                .sort((a, b) => {
-                  // Active shifts first, then by start time descending
-                  if (a.status === 'active' && b.status !== 'active') return -1;
-                  if (a.status !== 'active' && b.status === 'active') return 1;
-                  return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
-                })
-                .map(s => (
-                  <option key={s.id} value={s.id}>
-                    Shift {s.shiftNumber} — {s.milkLotCode} ({s.status})
-                  </option>
-                ))}
+              <option value="">Select shift</option>
+              {productionShifts.filter(s => s.status === 'active').map(s => (
+                <option key={s.id} value={s.id}>Shift {s.shiftNumber} - {s.milkLotCode}</option>
+              ))}
             </select>
-            {productionShifts.filter(s => s.status === 'active').length === 0 && (
-              <p className="text-xs text-amber-600 mt-1">No active shifts. <button onClick={() => { setShowNewRoundModal(false); setShowNewShiftModal(true); }} className="underline font-medium">Create a shift first →</button></p>
-            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -601,13 +798,11 @@ export default function ProductionBoard() {
               <input type="number" value={newRound.roundNumber} onChange={(e) => setNewRound({ ...newRound, roundNumber: parseInt(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="1" />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Product Type</label>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Type</label>
               <select value={newRound.type} onChange={(e) => setNewRound({ ...newRound, type: e.target.value as any })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-                <option value="D">D (Malai / Full Fat)</option>
-                <option value="C/S">C/S (Rozana / Medium Fat)</option>
+                <option value="D">D (Malai)</option>
+                <option value="C/S">C/S (Rozana)</option>
                 <option value="Halloumi">Halloumi</option>
-                <option value="Butter">Butter</option>
-                <option value="Ghee">Ghee</option>
               </select>
             </div>
           </div>
@@ -615,21 +810,9 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Planned Input (L)</label>
             <input type="number" value={newRound.plannedInput} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
           </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (optional — inherits from shift if empty)</label>
-            <input type="text" value={newRound.team} onChange={(e) => setNewRound({ ...newRound, team: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Leave empty to use shift team" />
-          </div>
-          {newRound.shiftId && (
-            <div className="bg-slate-50 rounded-lg p-3">
-              <p className="text-xs text-slate-500">Batch ID will be:</p>
-              <p className="font-mono text-sm font-bold text-slate-900 mt-1">
-                {productionShifts.find(s => s.id === newRound.shiftId)?.milkLotCode}/S{productionShifts.find(s => s.id === newRound.shiftId)?.shiftNumber}/R{newRound.roundNumber}/{newRound.type}
-              </p>
-            </div>
-          )}
           <div className="flex gap-2 pt-2">
-            <button onClick={handleCreateRound} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors">Create Round</button>
-            <button onClick={() => setShowNewRoundModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors">Cancel</button>
+            <button onClick={handleCreateRound} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Create Round</button>
+            <button onClick={() => setShowNewRoundModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
       </Modal>
