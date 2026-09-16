@@ -71,6 +71,11 @@ export interface ProductionRound {
     loose: number;
   }>;
   
+  // Cream recovery (C/S rounds only)
+  creamRecovered?: number; // litres
+  creamRecoveredAt?: string;
+  creamRecoveredBy?: string;
+  
   notes?: string;
   locked: boolean;
 }
