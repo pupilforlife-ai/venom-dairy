@@ -1,6 +1,22 @@
-import { Settings as SettingsIcon, Users, Package, Thermometer, Shield, Database } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Package, Thermometer, Shield, Database, RotateCcw } from 'lucide-react';
+import { useToast } from '../components/Toast';
 
 export default function Settings() {
+  const { showToast } = useToast();
+
+  const handleResetData = () => {
+    if (confirm('Are you sure you want to reset all data to initial state? This cannot be undone.')) {
+      // Clear all localStorage keys
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('vejoy_')) {
+          localStorage.removeItem(key);
+        }
+      });
+      showToast('success', 'Data reset. Refreshing page...');
+      setTimeout(() => window.location.reload(), 1000);
+    }
+  };
+
   const sections = [
     {
       title: 'Master Data',
@@ -75,20 +91,37 @@ export default function Settings() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
           <div>
             <span className="text-slate-500">Version</span>
-            <p className="font-medium text-slate-900">0.2.0 (MVP)</p>
+            <p className="font-medium text-slate-900">0.2.0 (Interactive Prototype)</p>
           </div>
           <div>
             <span className="text-slate-500">Build</span>
             <p className="font-medium text-slate-900">2026-06-17</p>
           </div>
           <div>
-            <span className="text-slate-500">Database</span>
-            <p className="font-medium text-slate-900">Supabase</p>
+            <span className="text-slate-500">Storage</span>
+            <p className="font-medium text-slate-900">Browser localStorage</p>
           </div>
           <div>
             <span className="text-slate-500">Environment</span>
             <p className="font-medium text-slate-900">Development</p>
           </div>
+        </div>
+      </div>
+
+      {/* Reset data */}
+      <div className="bg-red-50 rounded-xl border border-red-200 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-red-900">Reset All Data</h3>
+            <p className="text-xs text-red-700 mt-1">Clear all data and return to initial state. This action cannot be undone.</p>
+          </div>
+          <button
+            onClick={handleResetData}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Reset Data
+          </button>
         </div>
       </div>
     </div>

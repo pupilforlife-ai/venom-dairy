@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AppProvider } from './store/AppContext';
+import { ToastProvider } from './components/Toast';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import ProductionBoard from './pages/ProductionBoard';
@@ -12,20 +14,24 @@ import Settings from './pages/Settings';
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/production-board" element={<ProductionBoard />} />
-          <Route path="/milk-receiving" element={<MilkReceiving />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/cold-chain" element={<ColdChain />} />
-          <Route path="/waste" element={<WasteAndYield />} />
-          <Route path="/handover" element={<Handover />} />
-          <Route path="/reconciliation" element={<Reconciliation />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
-      </Layout>
-    </BrowserRouter>
+    <AppProvider>
+      <ToastProvider>
+        <BrowserRouter>
+          <Layout>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/production-board" element={<ProductionBoard />} />
+              <Route path="/milk-receiving" element={<MilkReceiving />} />
+              <Route path="/inventory" element={<Inventory />} />
+              <Route path="/cold-chain" element={<ColdChain />} />
+              <Route path="/waste" element={<WasteAndYield />} />
+              <Route path="/handover" element={<Handover />} />
+              <Route path="/reconciliation" element={<Reconciliation />} />
+              <Route path="/settings" element={<Settings />} />
+            </Routes>
+          </Layout>
+        </BrowserRouter>
+      </ToastProvider>
+    </AppProvider>
   );
 }

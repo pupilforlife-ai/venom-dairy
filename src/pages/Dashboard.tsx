@@ -10,8 +10,6 @@ import {
   BarChart3,
   Thermometer,
   CheckCircle2,
-  Fuel,
-  Zap,
 } from 'lucide-react';
 import {
   BarChart,
@@ -25,14 +23,11 @@ import {
   Line,
   Legend,
 } from 'recharts';
+import { useApp } from '../store/AppContext';
 import {
   dashboardMetrics,
   weeklyProduction,
   yieldTrends,
-  productionRounds,
-  temperatureReadings,
-  milkLots,
-  finishedStock,
   statusLabels,
 } from '../data/mockData';
 
@@ -68,6 +63,8 @@ function MetricCard({ metric }: { metric: typeof dashboardMetrics[0] }) {
 }
 
 export default function Dashboard() {
+  const { productionRounds, temperatureReadings, milkLots, finishedStock } = useApp();
+  
   const activeRounds = productionRounds.filter((r) => r.status !== 'handed_over' && r.milkLotCode === '160626');
   const outOfRangeTemps = temperatureReadings.filter((t) => !t.inRange);
   const activeMilkLot = milkLots.find((m) => m.status === 'active');
