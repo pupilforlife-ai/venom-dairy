@@ -76,7 +76,8 @@ export default function ProductionBoard() {
   
   // Cream form state
   const [creamForm, setCreamForm] = useState({
-    litres: 0,
+    numberOfBuckets: 0,
+    bucketWeights: [] as number[],
     recordedBy: '',
   });
   
@@ -295,13 +296,15 @@ export default function ProductionBoard() {
       return;
     }
 
-    if (creamForm.litres <= 0) {
-      showToast('error', 'Please enter a valid cream quantity');
+    const totalWeight = creamForm.bucketWeights.reduce((sum, w) => sum + w, 0);
+    
+    if (totalWeight <= 0) {
+      showToast('error', 'Please enter valid bucket weights');
       return;
     }
 
     updateProductionRound(selectedRound, {
-      creamRecovered: creamForm.litres,
+      creamRecovered: totalWeight,
       creamRecoveredAt: new Date().toISOString(),
       creamRecoveredBy: creamForm.recordedBy,
     });
@@ -314,8 +317,8 @@ export default function ProductionBoard() {
       productClass: 'intermediate',
       sourceBatchId: round.id,
       sourceBatchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/C/S`,
-      producedQuantity: creamForm.litres,
-      currentQuantity: creamForm.litres,
+      producedQuantity: totalWeight,
+      currentQuantity: totalWeight,
       uom: 'kg',
       storageLocation: 'Chiller',
       status: 'available',
@@ -325,9 +328,9 @@ export default function ProductionBoard() {
       sourceRound: round.roundNumber,
     });
 
-    showToast('success', `Cream recorded: ${creamForm.litres} kg`);
+    showToast('success', `Cream recorded: ${totalWeight.toFixed(2)} kg (${creamForm.numberOfBuckets} buckets)`);
     setShowCreamModal(false);
-    setCreamForm({ litres: 0, recordedBy: '' });
+    setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' });
   };
 
   const handleCreateShift = () => {
@@ -426,20 +429,34 @@ export default function ProductionBoard() {
       );
     } else if (round.status === 'in_production') {
       buttons.push(
-        <button key="coagulation" onClick={() => handleStartCoagulation(round.id)} className="px-2 py-1 bg-violet-500 text-white rounded text-xs hover:bg-violet-600">
-          Start Coagulation
-        </button>
+        <div key="in-production-actions" className="flex gap-1 flex-wrap">
+          <button onClick={() => handleStartCoagulation(round.id)} className="px-2 py-1 bg-violet-500 text-white rounded text-xs hover:bg-violet-600">
+            Start Coagulation
+          </button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
+        </div>
       );
     } else if (round.status === 'coagulation') {
       buttons.push(
-        <button key="pressing" onClick={() => handleStartPressing(round.id)} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">
-          Start Pressing
-        </button>
+        <div key="coagulation-actions" className="flex gap-1 flex-wrap">
+          <button onClick={() => handleStartPressing(round.id)} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">
+            Start Pressing
+          </button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
+        </div>
       );
     } else if (round.status === 'pressing') {
       const timer = timers[round.id] || 0;
       buttons.push(
-        <div key="pressing" className="flex items-center gap-2">
+        <div key="pressing" className="flex items-center gap-2 flex-wrap">
           <Timer className="w-4 h-4 text-purple-500" />
           <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
           {timer === 0 && (
@@ -448,35 +465,57 @@ export default function ProductionBoard() {
               <button onClick={() => handleStartCooling(round.id, 'chiller')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Chiller</button>
             </div>
           )}
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
         </div>
       );
     } else if (round.status === 'cooling') {
       const timer = timers[round.id] || 0;
       buttons.push(
-        <div key="cooling" className="flex items-center gap-2">
+        <div key="cooling" className="flex items-center gap-2 flex-wrap">
           <Timer className="w-4 h-4 text-cyan-500" />
           <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
           {timer === 0 && (
             <button onClick={() => handleStartResting(round.id)} className="px-2 py-1 bg-teal-500 text-white rounded text-xs hover:bg-teal-600">Start Resting</button>
+          )}
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
           )}
         </div>
       );
     } else if (round.status === 'resting') {
       const timer = timers[round.id] || 0;
       buttons.push(
-        <div key="resting" className="flex items-center gap-2">
+        <div key="resting" className="flex items-center gap-2 flex-wrap">
           <Timer className="w-4 h-4 text-teal-500" />
           <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
           {timer === 0 && (
             <button onClick={() => handleReadyForCutting(round.id)} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">Ready to Cut</button>
           )}
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
         </div>
       );
     } else if (round.status === 'ready_cutting') {
       buttons.push(
-        <button key="cut" onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
-          <Scissors className="w-3 h-3" /> Cut
-        </button>
+        <div key="ready-cutting-actions" className="flex gap-1 flex-wrap">
+          <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
+            <Scissors className="w-3 h-3" /> Cut
+          </button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
+        </div>
       );
     } else if (round.status === 'cut') {
       buttons.push(
@@ -487,7 +526,7 @@ export default function ProductionBoard() {
             <Package className="w-3 h-3" /> Pack
           </button>
           {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ litres: 0, recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
             </button>
           )}
@@ -495,24 +534,43 @@ export default function ProductionBoard() {
       );
     } else if (round.status === 'clingwrapped') {
       buttons.push(
-        <div key="clingwrap-actions" className="flex gap-1">
+        <div key="clingwrap-actions" className="flex gap-1 flex-wrap">
           <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
             <Scissors className="w-3 h-3" /> Final Cut
           </button>
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
         </div>
       );
     } else if (round.status === 'frozen') {
       buttons.push(
-        <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-          <Package className="w-3 h-3" /> Pack
-        </button>
+        <div key="frozen-actions" className="flex gap-1 flex-wrap">
+          <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
+          </button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
+        </div>
       );
     } else if (round.status === 'packed') {
       buttons.push(
-        <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
-          <CheckCircle2 className="w-3 h-3" /> Hand Over
-        </button>
+        <div key="packed-actions" className="flex gap-1 flex-wrap">
+          <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
+            <CheckCircle2 className="w-3 h-3" /> Hand Over
+          </button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
+        </div>
       );
     }
 
@@ -852,21 +910,51 @@ export default function ProductionBoard() {
         <div className="space-y-4">
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
             <p className="text-xs text-amber-700">
-              <strong>Note:</strong> Cream is recovered from C/S (Rozana) rounds only. This cream will be used for butter/ghee production.
+              <strong>Note:</strong> Cream is recovered from C/S (Rozana) rounds only. Record the weight of each bucket.
             </p>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Quantity (kg)</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Number of Buckets</label>
             <input 
               type="number" 
-              value={creamForm.litres} 
-              onChange={(e) => setCreamForm({ ...creamForm, litres: parseFloat(e.target.value) || 0 })} 
+              value={creamForm.numberOfBuckets} 
+              onChange={(e) => {
+                const num = parseInt(e.target.value) || 0;
+                setCreamForm({ ...creamForm, numberOfBuckets: num, bucketWeights: Array(num).fill(0) });
+              }} 
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" 
-              step="0.1" 
               min="0" 
-              placeholder="e.g., 12.5"
+              placeholder="e.g., 3"
             />
           </div>
+          {creamForm.numberOfBuckets > 0 && (
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Bucket Weights (kg)</label>
+              <div className="space-y-2 mt-1">
+                {creamForm.bucketWeights.map((weight, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="text-sm w-24">Bucket {index + 1}:</span>
+                    <input 
+                      type="number" 
+                      value={weight} 
+                      onChange={(e) => {
+                        const newWeights = [...creamForm.bucketWeights];
+                        newWeights[index] = parseFloat(e.target.value) || 0;
+                        setCreamForm({ ...creamForm, bucketWeights: newWeights });
+                      }} 
+                      className="flex-1 px-3 py-1 border border-slate-200 rounded text-sm" 
+                      step="0.1" 
+                      min="0"
+                      placeholder="Weight in kg"
+                    />
+                  </div>
+                ))}
+                <div className="text-sm font-medium mt-2 p-2 bg-slate-50 rounded">
+                  Total: {creamForm.bucketWeights.reduce((sum, w) => sum + w, 0).toFixed(2)} kg
+                </div>
+              </div>
+            </div>
+          )}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded By</label>
             <input 
