@@ -8,6 +8,7 @@ import {
   finishedStock as initialFinished,
   temperatureReadings as initialTemps,
   wasteEvents as initialWaste,
+  utilityLogs as initialUtilities,
   MilkLot,
   ProductionShift,
   ProductionRound,
@@ -15,6 +16,7 @@ import {
   FinishedStockLot,
   TemperatureReading,
   WasteEvent,
+  UtilityLog,
   statusFlow
 } from '../data/mockData';
 
@@ -26,6 +28,7 @@ interface AppState {
   finishedStock: FinishedStockLot[];
   temperatureReadings: TemperatureReading[];
   wasteEvents: WasteEvent[];
+  utilityLogs: UtilityLog[];
 }
 
 interface AppContextType extends AppState {
@@ -56,6 +59,9 @@ interface AppContextType extends AppState {
   // Finished stock actions
   addFinishedStock: (stock: Omit<FinishedStockLot, 'id'>) => void;
   updateFinishedStock: (id: string, updates: Partial<FinishedStockLot>) => void;
+  
+  // Utility actions
+  addUtilityLog: (log: Omit<UtilityLog, 'id'>) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -68,6 +74,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [finishedStock, setFinishedStock] = useLocalStorage<FinishedStockLot[]>('vejoy_finishedStock', initialFinished);
   const [temperatureReadings, setTemperatureReadings] = useLocalStorage<TemperatureReading[]>('vejoy_temperatureReadings', initialTemps);
   const [wasteEvents, setWasteEvents] = useLocalStorage<WasteEvent[]>('vejoy_wasteEvents', initialWaste);
+  const [utilityLogs, setUtilityLogs] = useLocalStorage<UtilityLog[]>('vejoy_utilityLogs', initialUtilities);
 
   // Milk lot actions
   const addMilkLot = (lot: Omit<MilkLot, 'id'>) => {
@@ -160,6 +167,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ));
   };
 
+  // Utility actions
+  const addUtilityLog = (log: Omit<UtilityLog, 'id'>) => {
+    const newLog = { ...log, id: `u-${Date.now()}` };
+    setUtilityLogs([...utilityLogs, newLog]);
+  };
+
   const value: AppContextType = {
     milkLots,
     productionShifts,
@@ -168,6 +181,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     finishedStock,
     temperatureReadings,
     wasteEvents,
+    utilityLogs,
     addMilkLot,
     updateMilkLot,
     addProductionShift,
@@ -182,6 +196,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateIntermediateLot,
     addFinishedStock,
     updateFinishedStock,
+    addUtilityLog,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
