@@ -3,11 +3,13 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { 
   milkLots as initialMilkLots, 
   productionRounds as initialRounds,
+  productionShifts as initialShifts,
   intermediateLots as initialIntermediate,
   finishedStock as initialFinished,
   temperatureReadings as initialTemps,
   wasteEvents as initialWaste,
   MilkLot,
+  ProductionShift,
   ProductionRound,
   IntermediateLot,
   FinishedStockLot,
@@ -18,6 +20,7 @@ import {
 
 interface AppState {
   milkLots: MilkLot[];
+  productionShifts: ProductionShift[];
   productionRounds: ProductionRound[];
   intermediateLots: IntermediateLot[];
   finishedStock: FinishedStockLot[];
@@ -29,6 +32,10 @@ interface AppContextType extends AppState {
   // Milk lot actions
   addMilkLot: (lot: Omit<MilkLot, 'id'>) => void;
   updateMilkLot: (id: string, updates: Partial<MilkLot>) => void;
+  
+  // Shift actions
+  addProductionShift: (shift: Omit<ProductionShift, 'id'>) => void;
+  updateProductionShift: (id: string, updates: Partial<ProductionShift>) => void;
   
   // Production round actions
   addProductionRound: (round: Omit<ProductionRound, 'id'>) => void;
@@ -55,6 +62,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [milkLots, setMilkLots] = useLocalStorage<MilkLot[]>('vejoy_milkLots', initialMilkLots);
+  const [productionShifts, setProductionShifts] = useLocalStorage<ProductionShift[]>('vejoy_productionShifts', initialShifts);
   const [productionRounds, setProductionRounds] = useLocalStorage<ProductionRound[]>('vejoy_productionRounds', initialRounds);
   const [intermediateLots, setIntermediateLots] = useLocalStorage<IntermediateLot[]>('vejoy_intermediateLots', initialIntermediate);
   const [finishedStock, setFinishedStock] = useLocalStorage<FinishedStockLot[]>('vejoy_finishedStock', initialFinished);
@@ -69,6 +77,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateMilkLot = (id: string, updates: Partial<MilkLot>) => {
     setMilkLots(milkLots.map(lot => lot.id === id ? { ...lot, ...updates } : lot));
+  };
+
+  // Shift actions
+  const addProductionShift = (shift: Omit<ProductionShift, 'id'>) => {
+    const newShift = { ...shift, id: `shift-${Date.now()}` };
+    setProductionShifts([...productionShifts, newShift]);
+  };
+
+  const updateProductionShift = (id: string, updates: Partial<ProductionShift>) => {
+    setProductionShifts(productionShifts.map(shift => 
+      shift.id === id ? { ...shift, ...updates } : shift
+    ));
   };
 
   // Production round actions
@@ -142,6 +162,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value: AppContextType = {
     milkLots,
+    productionShifts,
     productionRounds,
     intermediateLots,
     finishedStock,
@@ -149,6 +170,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wasteEvents,
     addMilkLot,
     updateMilkLot,
+    addProductionShift,
+    updateProductionShift,
     addProductionRound,
     updateProductionRound,
     advanceRoundStatus,

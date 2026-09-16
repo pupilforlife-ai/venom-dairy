@@ -254,7 +254,7 @@ export default function Dashboard() {
                 <tr key={round.id} className="hover:bg-slate-50">
                   <td className="px-4 py-2.5">
                     <span className="font-mono text-xs font-medium text-slate-900">
-                      {round.milkLotCode}/S{round.shift}/R{round.roundNumber}
+                      {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
                     </span>
                   </td>
                   <td className="px-4 py-2.5">

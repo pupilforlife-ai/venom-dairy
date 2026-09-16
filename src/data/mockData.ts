@@ -19,11 +19,24 @@ export interface MilkLot {
   status: 'active' | 'completed' | 'rejected';
 }
 
+export interface ProductionShift {
+  id: string;
+  milkLotId: string;
+  milkLotCode: string;
+  shiftNumber: number;
+  startedAt: string;
+  endedAt?: string;
+  team: string[];
+  teamNotes?: string;
+  status: 'active' | 'completed' | 'scheduled';
+}
+
 export interface ProductionRound {
   id: string;
   milkLotId: string;
   milkLotCode: string;
-  shift: number;
+  shiftId: string;
+  shiftNumber: number;
   roundNumber: number;
   type: 'D' | 'C/S' | 'Halloumi' | 'Butter' | 'Ghee';
   // Status flow: scheduled → in_production → pressing → ready_cutting → cut → freezing → frozen → part_packed → packed → ready_handover → handed_over
@@ -115,6 +128,59 @@ export interface UtilityLog {
 }
 
 // ============================================================
+// PRODUCTION SHIFTS
+// ============================================================
+export const productionShifts: ProductionShift[] = [
+  {
+    id: 'shift-001',
+    milkLotId: 'ml-001',
+    milkLotCode: '160626',
+    shiftNumber: 1,
+    startedAt: '2026-06-16T18:00:00',
+    endedAt: '2026-06-17T02:00:00',
+    team: ['Rajesh', 'Amit', 'Suresh'],
+    status: 'completed',
+  },
+  {
+    id: 'shift-002',
+    milkLotId: 'ml-001',
+    milkLotCode: '160626',
+    shiftNumber: 2,
+    startedAt: '2026-06-17T06:00:00',
+    team: ['Vikram', 'Suresh', 'Deepak'],
+    status: 'active',
+  },
+  {
+    id: 'shift-003',
+    milkLotId: 'ml-001',
+    milkLotCode: '160626',
+    shiftNumber: 3,
+    startedAt: '2026-06-17T14:00:00',
+    team: ['Amit', 'Manoj'],
+    status: 'active',
+  },
+  {
+    id: 'shift-004',
+    milkLotId: 'ml-001',
+    milkLotCode: '160626',
+    shiftNumber: 4,
+    startedAt: '2026-06-17T22:00:00',
+    team: ['Amit', 'Vikram', 'Manoj'],
+    status: 'scheduled',
+  },
+  {
+    id: 'shift-pw-001',
+    milkLotId: 'ml-002',
+    milkLotCode: '090626',
+    shiftNumber: 1,
+    startedAt: '2026-06-09T18:00:00',
+    endedAt: '2026-06-10T02:00:00',
+    team: ['Rajesh', 'Amit', 'Vikram'],
+    status: 'completed',
+  },
+];
+
+// ============================================================
 // CURRENT WEEK'S MILK LOT (Sunday 16 June 2026)
 // ============================================================
 export const milkLots: MilkLot[] = [
@@ -153,7 +219,8 @@ export const productionRounds: ProductionRound[] = [
     id: 'pr-001',
     milkLotId: 'ml-001',
     milkLotCode: '160626',
-    shift: 1,
+    shiftId: 'shift-001',
+    shiftNumber: 1,
     roundNumber: 1,
     type: 'D',
     status: 'handed_over',
@@ -174,7 +241,8 @@ export const productionRounds: ProductionRound[] = [
     id: 'pr-002',
     milkLotId: 'ml-001',
     milkLotCode: '160626',
-    shift: 1,
+    shiftId: 'shift-001',
+    shiftNumber: 1,
     roundNumber: 2,
     type: 'C/S',
     status: 'frozen',
@@ -193,7 +261,8 @@ export const productionRounds: ProductionRound[] = [
     id: 'pr-003',
     milkLotId: 'ml-001',
     milkLotCode: '160626',
-    shift: 2,
+    shiftId: 'shift-002',
+    shiftNumber: 2,
     roundNumber: 1,
     type: 'D',
     status: 'pressing',
@@ -208,7 +277,8 @@ export const productionRounds: ProductionRound[] = [
     id: 'pr-004',
     milkLotId: 'ml-001',
     milkLotCode: '160626',
-    shift: 2,
+    shiftId: 'shift-002',
+    shiftNumber: 2,
     roundNumber: 2,
     type: 'D',
     status: 'in_production',
@@ -223,7 +293,8 @@ export const productionRounds: ProductionRound[] = [
     id: 'pr-005',
     milkLotId: 'ml-001',
     milkLotCode: '160626',
-    shift: 3,
+    shiftId: 'shift-003',
+    shiftNumber: 3,
     roundNumber: 1,
     type: 'Halloumi',
     status: 'cut',
@@ -241,7 +312,8 @@ export const productionRounds: ProductionRound[] = [
     id: 'pr-006',
     milkLotId: 'ml-001',
     milkLotCode: '160626',
-    shift: 3,
+    shiftId: 'shift-003',
+    shiftNumber: 3,
     roundNumber: 2,
     type: 'C/S',
     status: 'packed',
@@ -262,7 +334,8 @@ export const productionRounds: ProductionRound[] = [
     id: 'pr-007',
     milkLotId: 'ml-001',
     milkLotCode: '160626',
-    shift: 4,
+    shiftId: 'shift-004',
+    shiftNumber: 4,
     roundNumber: 1,
     type: 'D',
     status: 'scheduled',
@@ -273,12 +346,12 @@ export const productionRounds: ProductionRound[] = [
     startTime: '2026-06-17T22:00:00',
     locked: false,
   },
-  // Previous week completed rounds for yield comparison
   {
     id: 'pr-pw-001',
     milkLotId: 'ml-002',
     milkLotCode: '090626',
-    shift: 1,
+    shiftId: 'shift-pw-001',
+    shiftNumber: 1,
     roundNumber: 1,
     type: 'D',
     status: 'handed_over',
@@ -298,7 +371,8 @@ export const productionRounds: ProductionRound[] = [
     id: 'pr-pw-002',
     milkLotId: 'ml-002',
     milkLotCode: '090626',
-    shift: 1,
+    shiftId: 'shift-pw-001',
+    shiftNumber: 1,
     roundNumber: 2,
     type: 'C/S',
     status: 'handed_over',

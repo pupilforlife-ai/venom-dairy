@@ -177,7 +177,7 @@ export default function Reconciliation() {
                   return (
                     <tr key={round.id} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 font-mono text-xs font-bold text-slate-900">
-                        {round.milkLotCode}/S{round.shift}/R{round.roundNumber}
+                        {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
                       </td>
                       <td className="px-4 py-2.5">
                         <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-bold">{round.type}</span>
