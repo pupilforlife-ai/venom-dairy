@@ -316,7 +316,7 @@ export default function ProductionBoard() {
       sourceBatchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/C/S`,
       producedQuantity: creamForm.litres,
       currentQuantity: creamForm.litres,
-      uom: 'L',
+      uom: 'kg',
       storageLocation: 'Chiller',
       status: 'available',
       producedAt: new Date().toISOString(),
@@ -325,7 +325,7 @@ export default function ProductionBoard() {
       sourceRound: round.roundNumber,
     });
 
-    showToast('success', `Cream recorded: ${creamForm.litres} L`);
+    showToast('success', `Cream recorded: ${creamForm.litres} kg`);
     setShowCreamModal(false);
     setCreamForm({ litres: 0, recordedBy: '' });
   };
@@ -673,7 +673,7 @@ export default function ProductionBoard() {
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Output</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Blocks</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream (kg)</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
@@ -713,7 +713,7 @@ export default function ProductionBoard() {
                           <td className="px-4 py-3">
                             {round.type === 'C/S' && round.creamRecovered ? (
                               <div className="text-xs">
-                                <div className="font-medium text-amber-700">{round.creamRecovered} L</div>
+                                <div className="font-medium text-amber-700">{round.creamRecovered} kg</div>
                                 {round.creamRecoveredBy && (
                                   <div className="text-slate-500">by {round.creamRecoveredBy}</div>
                                 )}
@@ -856,7 +856,7 @@ export default function ProductionBoard() {
             </p>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Quantity (Litres)</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Quantity (kg)</label>
             <input 
               type="number" 
               value={creamForm.litres} 

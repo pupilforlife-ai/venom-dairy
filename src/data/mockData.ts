@@ -72,7 +72,7 @@ export interface ProductionRound {
   }>;
   
   // Cream recovery (C/S rounds only)
-  creamRecovered?: number; // litres
+  creamRecovered?: number; // kg
   creamRecoveredAt?: string;
   creamRecoveredBy?: string;
   
