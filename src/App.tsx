@@ -3,7 +3,7 @@ import { AppProvider } from './store/AppContext';
 import { ToastProvider } from './components/Toast';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
-import ProductionBoard from './pages/ProductionBoard';
+import UnifiedProductionBoard from './pages/UnifiedProductionBoard';
 import MilkReceiving from './pages/MilkReceiving';
 import Inventory from './pages/Inventory';
 import Cutting from './pages/Cutting';
@@ -23,7 +23,7 @@ export default function App() {
           <Layout>
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/production-board" element={<ProductionBoard />} />
+              <Route path="/production-board" element={<UnifiedProductionBoard />} />
               <Route path="/milk-receiving" element={<MilkReceiving />} />
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/cutting" element={<Cutting />} />
