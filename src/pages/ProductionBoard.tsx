@@ -495,24 +495,43 @@ export default function ProductionBoard() {
       );
     } else if (round.status === 'clingwrapped') {
       buttons.push(
-        <div key="clingwrap-actions" className="flex gap-1">
+        <div key="clingwrap-actions" className="flex gap-1 flex-wrap">
           <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
             <Scissors className="w-3 h-3" /> Final Cut
           </button>
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ litres: 0, recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
         </div>
       );
     } else if (round.status === 'frozen') {
       buttons.push(
-        <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-          <Package className="w-3 h-3" /> Pack
-        </button>
+        <div key="frozen-actions" className="flex gap-1 flex-wrap">
+          <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
+          </button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ litres: 0, recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
+        </div>
       );
     } else if (round.status === 'packed') {
       buttons.push(
-        <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
-          <CheckCircle2 className="w-3 h-3" /> Hand Over
-        </button>
+        <div key="packed-actions" className="flex gap-1 flex-wrap">
+          <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
+            <CheckCircle2 className="w-3 h-3" /> Hand Over
+          </button>
+          {round.type === 'C/S' && !round.creamRecovered && (
+            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ litres: 0, recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
+              +Cream
+            </button>
+          )}
+        </div>
       );
     }
 
