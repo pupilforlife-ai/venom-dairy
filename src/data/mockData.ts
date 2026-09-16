@@ -39,8 +39,8 @@ export interface ProductionRound {
   shiftNumber: number;
   roundNumber: number;
   type: 'D' | 'C/S' | 'Halloumi' | 'Butter' | 'Ghee';
-  // Status flow: scheduled → in_production → pressing → cooling → resting → ready_cutting → cut → [clingwrapped] → [frozen] → packed → handed_over
-  status: 'scheduled' | 'in_production' | 'pressing' | 'cooling' | 'resting' | 'ready_cutting' | 'cut' | 'clingwrapped' | 'frozen' | 'packed' | 'handed_over';
+  // Status flow: scheduled → in_production → coagulation → pressing → cooling → resting → ready_cutting → cut → [clingwrapped] → [frozen] → packed → handed_over
+  status: 'scheduled' | 'in_production' | 'coagulation' | 'pressing' | 'cooling' | 'resting' | 'ready_cutting' | 'cut' | 'clingwrapped' | 'frozen' | 'packed' | 'handed_over';
   team: string[];
   plannedInput: number; // litres
   actualInput: number; // litres
@@ -664,6 +664,7 @@ export const milkReconciliation = {
 export const statusFlow = [
   'scheduled',
   'in_production',
+  'coagulation',
   'pressing',
   'cooling',
   'resting',
@@ -678,6 +679,7 @@ export const statusFlow = [
 export const statusLabels: Record<string, string> = {
   scheduled: 'Scheduled',
   in_production: 'In Production',
+  coagulation: 'Coagulation',
   pressing: 'Pressing',
   cooling: 'Cooling',
   resting: 'Resting',
@@ -692,6 +694,7 @@ export const statusLabels: Record<string, string> = {
 export const statusColors: Record<string, string> = {
   scheduled: 'bg-slate-400',
   in_production: 'bg-blue-500',
+  coagulation: 'bg-violet-500',
   pressing: 'bg-purple-500',
   cooling: 'bg-cyan-500',
   resting: 'bg-teal-500',

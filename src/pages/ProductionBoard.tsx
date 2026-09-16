@@ -156,10 +156,23 @@ export default function ProductionBoard() {
   const handleVatSelection = (roundId: string, vat: 'vat2' | 'vat3') => {
     updateProductionRound(roundId, { 
       vat, 
+      status: 'in_production',
+      actualInput: productionRounds.find(r => r.id === roundId)?.plannedInput || 0
+    });
+    showToast('success', `Started production in ${vat === 'vat2' ? 'Vat 2' : 'Vat 3'}`);
+  };
+
+  const handleStartCoagulation = (roundId: string) => {
+    updateProductionRound(roundId, { status: 'coagulation' });
+    showToast('success', 'Started coagulation');
+  };
+
+  const handleStartPressing = (roundId: string) => {
+    updateProductionRound(roundId, { 
       status: 'pressing',
       pressingStartedAt: new Date().toISOString()
     });
-    showToast('success', `Started production in ${vat === 'vat2' ? 'Vat 2' : 'Vat 3'}`);
+    showToast('success', 'Started pressing (30 min)');
   };
 
   const handleStartCooling = (roundId: string, location: 'tank' | 'chiller') => {
@@ -359,6 +372,18 @@ export default function ProductionBoard() {
           <button onClick={() => handleVatSelection(round.id, 'vat2')} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">Vat 2</button>
           <button onClick={() => handleVatSelection(round.id, 'vat3')} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">Vat 3</button>
         </div>
+      );
+    } else if (round.status === 'in_production') {
+      buttons.push(
+        <button key="coagulation" onClick={() => handleStartCoagulation(round.id)} className="px-2 py-1 bg-violet-500 text-white rounded text-xs hover:bg-violet-600">
+          Start Coagulation
+        </button>
+      );
+    } else if (round.status === 'coagulation') {
+      buttons.push(
+        <button key="pressing" onClick={() => handleStartPressing(round.id)} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">
+          Start Pressing
+        </button>
       );
     } else if (round.status === 'pressing') {
       const timer = timers[round.id] || 0;
