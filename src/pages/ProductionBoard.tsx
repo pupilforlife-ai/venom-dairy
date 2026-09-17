@@ -844,6 +844,7 @@ export default function ProductionBoard() {
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Output</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Blocks</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-32">Cutting Status</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cut By</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Balance</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream (kg)</th>
@@ -895,6 +896,9 @@ export default function ProductionBoard() {
                             ) : round.status === 'clingwrapped' ? (
                               <span className="text-xs font-medium text-pink-600">Clingwrapped</span>
                             ) : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            {round.cutBy || '—'}
                           </td>
                           <td className="px-4 py-3">
                             {round.remainingBalance !== undefined ? (
