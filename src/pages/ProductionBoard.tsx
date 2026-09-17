@@ -283,15 +283,15 @@ export default function ProductionBoard() {
     const weightPerPacket = weightPerCase / 24; // Assuming 24 packets per case for most SKUs
     const totalWeightPacked = (packForm.cases * weightPerCase) + (packForm.loose * weightPerPacket);
 
-    // Calculate new balance
+    // Calculate new balance (can go negative for over-packing)
     const currentBalance = round.remainingBalance ?? round.outputWeight ?? 0;
-    const newBalance = Math.max(0, currentBalance - totalWeightPacked);
+    const newBalance = currentBalance - totalWeightPacked;
 
     // Add to packed SKUs array
     const existingPacked = round.packedSkus || [];
     const newPackedSkus = [...existingPacked, { sku: packForm.sku, cases: packForm.cases, loose: packForm.loose }];
 
-    // Determine new status - only mark as packed if balance is 0
+    // Determine new status - mark as packed if balance is 0 or negative
     const newStatus = newBalance <= 0 ? 'packed' : round.status;
 
     updateProductionRound(roundId, {
@@ -300,7 +300,9 @@ export default function ProductionBoard() {
       remainingBalance: newBalance,
     });
 
-    if (newBalance <= 0) {
+    if (newBalance < 0) {
+      showToast('info', `⚠️ Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Balance: ${newBalance.toFixed(2)} kg (over-packed)`);
+    } else if (newBalance === 0) {
       showToast('success', `Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Round fully packed!`);
     } else {
       showToast('success', `Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Remaining: ${newBalance.toFixed(2)} kg`);
@@ -585,16 +587,13 @@ export default function ProductionBoard() {
         </div>
       );
     } else if (round.status === 'cut') {
-      const balance = round.remainingBalance ?? round.outputWeight ?? 0;
       buttons.push(
         <div key="cut-actions" className="flex gap-1 flex-wrap">
           <button onClick={() => handleClingwrap(round.id)} className="px-2 py-1 bg-pink-400 text-white rounded text-xs hover:bg-pink-500">Clingwrap</button>
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
-          {balance > 0 && (
-            <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-              <Package className="w-3 h-3" /> Pack
-            </button>
-          )}
+          <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
+          </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -603,18 +602,15 @@ export default function ProductionBoard() {
         </div>
       );
     } else if (round.status === 'clingwrapped') {
-      const balance = round.remainingBalance ?? round.outputWeight ?? 0;
       buttons.push(
         <div key="clingwrap-actions" className="flex gap-1 flex-wrap">
           <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
             <Scissors className="w-3 h-3" /> Final Cut
           </button>
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
-          {balance > 0 && (
-            <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-              <Package className="w-3 h-3" /> Pack
-            </button>
-          )}
+          <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
+          </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -623,14 +619,11 @@ export default function ProductionBoard() {
         </div>
       );
     } else if (round.status === 'frozen') {
-      const balance = round.remainingBalance ?? round.outputWeight ?? 0;
       buttons.push(
         <div key="frozen-actions" className="flex gap-1 flex-wrap">
-          {balance > 0 && (
-            <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-              <Package className="w-3 h-3" /> Pack
-            </button>
-          )}
+          <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
+          </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -639,17 +632,14 @@ export default function ProductionBoard() {
         </div>
       );
     } else if (round.status === 'packed') {
-      const balance = round.remainingBalance ?? 0;
       buttons.push(
         <div key="packed-actions" className="flex gap-1 flex-wrap">
           <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
             <CheckCircle2 className="w-3 h-3" /> Hand Over
           </button>
-          {balance > 0 && (
-            <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-              <Package className="w-3 h-3" /> Pack More
-            </button>
-          )}
+          <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
+          </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -902,7 +892,11 @@ export default function ProductionBoard() {
                           </td>
                           <td className="px-4 py-3">
                             {round.remainingBalance !== undefined ? (
-                              <span className={`text-xs font-bold ${round.remainingBalance > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                              <span className={`text-xs font-bold ${
+                                round.remainingBalance > 0 ? 'text-amber-600' : 
+                                round.remainingBalance < 0 ? 'text-red-600' : 
+                                'text-slate-400'
+                              }`}>
                                 {round.remainingBalance.toFixed(2)} kg
                               </span>
                             ) : '—'}
@@ -1036,15 +1030,27 @@ export default function ProductionBoard() {
               <input type="number" value={packForm.loose} onChange={(e) => setPackForm({ ...packForm, loose: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
             </div>
           </div>
-          {packForm.sku && (
-            <div className="bg-slate-50 rounded-lg p-3">
-              <p className="text-xs text-slate-600">
-                <strong>Packing Preview:</strong>{' '}
-                {((packForm.cases * (skuWeightPerCase[packForm.sku] || 0)) + (packForm.loose * ((skuWeightPerCase[packForm.sku] || 0) / 24))).toFixed(2)} kg
-                will be packed
-              </p>
-            </div>
-          )}
+          {packForm.sku && selectedRound && (() => {
+            const round = productionRounds.find(r => r.id === selectedRound);
+            const balance = round?.remainingBalance ?? round?.outputWeight ?? 0;
+            const weightPerCase = skuWeightPerCase[packForm.sku] || 0;
+            const weightPerPacket = weightPerCase / 24;
+            const totalWeightPacked = (packForm.cases * weightPerCase) + (packForm.loose * weightPerPacket);
+            const newBalance = balance - totalWeightPacked;
+            
+            return (
+              <div className={`rounded-lg p-3 ${newBalance < 0 ? 'bg-red-50 border border-red-200' : 'bg-slate-50'}`}>
+                <p className="text-xs text-slate-600">
+                  <strong>Packing Preview:</strong>{' '}
+                  {totalWeightPacked.toFixed(2)} kg will be packed
+                </p>
+                <p className={`text-xs mt-1 ${newBalance < 0 ? 'text-red-700 font-medium' : 'text-slate-500'}`}>
+                  New balance: {newBalance.toFixed(2)} kg
+                  {newBalance < 0 && ' (over-packing)'}
+                </p>
+              </div>
+            );
+          })()}
           <div className="flex gap-2 pt-2">
             <button onClick={() => selectedRound && handlePack(selectedRound)} className="flex-1 px-4 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600">Save Packing</button>
             <button onClick={() => setShowPackModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
