@@ -297,9 +297,9 @@ export default function MilkReceiving() {
         </>
       )}
 
-      {/* Recent Receipts Table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200">
+      {/* Recent Receipts Table - MAIN FOCUS */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
           <h2 className="text-lg font-semibold text-slate-900">Recent receipts</h2>
           <p className="text-xs text-slate-500 mt-1">
             Accepted milk totals exclude rejected receipts. Expand a row for its production detail.
@@ -307,20 +307,20 @@ export default function MilkReceiving() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-3 text-left font-medium text-slate-600 text-xs uppercase tracking-wide">Receipt</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600 text-xs uppercase tracking-wide">Origin / Invoice</th>
-                <th className="px-4 py-3 text-right font-medium text-slate-600 text-xs uppercase tracking-wide">Received</th>
-                <th className="px-4 py-3 text-right font-medium text-slate-600 text-xs uppercase tracking-wide">Milk Used in Production</th>
-                <th className="px-4 py-3 text-right font-medium text-slate-600 text-xs uppercase tracking-wide">Milk Sold</th>
-                <th className="px-4 py-3 text-right font-medium text-slate-600 text-xs uppercase tracking-wide">Milk Left / Unallocated</th>
-                <th className="px-4 py-3 text-center font-medium text-slate-600 text-xs uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3 text-center font-medium text-slate-600 text-xs uppercase tracking-wide">Actions</th>
+              <tr className="bg-white border-b-2 border-slate-300">
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-xs uppercase tracking-wider">Receipt</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-xs uppercase tracking-wider">Origin / Invoice</th>
+                <th className="px-4 py-3 text-right font-semibold text-slate-700 text-xs uppercase tracking-wider">Received</th>
+                <th className="px-4 py-3 text-right font-semibold text-slate-700 text-xs uppercase tracking-wider">Milk Used in Production</th>
+                <th className="px-4 py-3 text-right font-semibold text-slate-700 text-xs uppercase tracking-wider">Milk Sold</th>
+                <th className="px-4 py-3 text-right font-semibold text-slate-700 text-xs uppercase tracking-wider">Milk Left / Unallocated</th>
+                <th className="px-4 py-3 text-center font-semibold text-slate-700 text-xs uppercase tracking-wider">Status</th>
+                <th className="px-4 py-3 text-center font-semibold text-slate-700 text-xs uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-200">
               {milkLots.slice(0, 5).map((lot) => {
                 const isExpanded = expandedLots.has(lot.id);
                 const milkLeft = lot.litresRemaining;
@@ -328,129 +328,132 @@ export default function MilkReceiving() {
                 return (
                   <React.Fragment key={lot.id}>
                     {/* Main Row */}
-                    <tr className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-4">
+                    <tr className="hover:bg-blue-50 transition-colors cursor-pointer" onClick={() => toggleExpand(lot.id)}>
+                      <td className="px-4 py-4 border-l-4 border-transparent hover:border-blue-500">
                         <div className="flex items-start gap-2">
-                          <button 
-                            onClick={() => toggleExpand(lot.id)}
-                            className="mt-1 text-slate-400 hover:text-slate-600 transition-colors"
-                          >
+                          <div className="mt-1 text-slate-400">
                             {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                          </button>
+                          </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-mono font-bold text-slate-900">{lot.lotCode}</span>
+                              <span className="font-mono font-bold text-slate-900 text-base">{lot.lotCode}</span>
                               {lot.isLatest && (
-                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase rounded">
+                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase rounded-sm">
                                   Latest Milk
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-slate-500 mt-0.5">
+                            <div className="text-xs text-slate-500 mt-1">
                               {formatDate(lot.receiptDate, lot.receiptTime)} - Milk
                             </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-4">
-                        <div className="text-slate-900">{lot.supplier}</div>
+                        <div className="font-medium text-slate-900">{lot.supplier}</div>
                         {lot.invoiceNo && (
-                          <div className="text-xs text-slate-500 mt-0.5 font-mono">{lot.invoiceNo}</div>
+                          <div className="text-xs text-slate-500 mt-1 font-mono">{lot.invoiceNo}</div>
                         )}
                       </td>
-                      <td className="px-4 py-4 text-right font-medium text-slate-900">
-                        {lot.litresReceived.toLocaleString()} L
-                      </td>
-                      <td className="px-4 py-4 text-right text-slate-700">
-                        {lot.litresConsumed.toLocaleString()} L
-                      </td>
-                      <td className="px-4 py-4 text-right text-slate-700">
-                        {(lot.litresSold || 0).toLocaleString()} L
+                      <td className="px-4 py-4 text-right">
+                        <span className="font-semibold text-slate-900">{lot.litresReceived.toLocaleString()} L</span>
                       </td>
                       <td className="px-4 py-4 text-right">
-                        <span className={`font-bold ${milkLeft > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                        <span className="text-slate-700">{lot.litresConsumed.toLocaleString()} L</span>
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <span className="text-slate-700">{(lot.litresSold || 0).toLocaleString()} L</span>
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <span className={`font-bold text-base ${milkLeft > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
                           {milkLeft.toLocaleString()} L
                         </span>
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                          lot.status === 'active' ? 'bg-emerald-50 text-emerald-700' :
-                          lot.status === 'completed' ? 'bg-slate-100 text-slate-600' :
-                          'bg-red-50 text-red-700'
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+                          lot.status === 'active' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                          lot.status === 'completed' ? 'bg-slate-100 text-slate-700 border border-slate-200' :
+                          'bg-red-100 text-red-800 border border-red-200'
                         }`}>
                           {lot.status === 'active' ? 'Accepted' : lot.status === 'completed' ? 'Completed' : 'Rejected'}
                         </span>
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1">
-                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">Hide</button>
-                          <button className="p-1 text-slate-600 hover:bg-slate-100 rounded transition-colors">
-                            <Edit className="w-3.5 h-3.5" />
+                          <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                            - Hide
                           </button>
-                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">+ Milk sale</button>
-                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">Close</button>
+                          <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                            Edit
+                          </button>
+                          <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                            + Milk sale
+                          </button>
+                          <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                            Close
+                          </button>
                         </div>
                       </td>
                     </tr>
 
                     {/* Expanded Detail View */}
                     {isExpanded && lot.reconciliation && (
-                      <tr>
-                        <td colSpan={8} className="px-6 py-6 bg-slate-50">
+                      <tr className="bg-slate-50">
+                        <td colSpan={8} className="px-6 py-6">
                           <div className="space-y-6">
-                            {/* Production Reconciliation */}
+                            {/* Production Reconciliation - Two Side-by-Side Cards */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                               {/* Left Box: Production Reconciliation Metrics */}
-                              <div className="bg-white rounded-lg border border-slate-200 p-5">
-                                <h3 className="text-sm font-semibold text-slate-900 mb-4">
+                              <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
+                                <h3 className="text-sm font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200">
                                   Production reconciliation · {lot.lotCode}
                                 </h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wide">Paneer Recorded</p>
-                                    <p className="text-lg font-bold text-slate-900 mt-1">
+                                <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                                  <div className="border-l-4 border-blue-500 pl-3">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Paneer Recorded</p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
                                       {lot.reconciliation.paneerRecorded.toLocaleString()} kg
                                     </p>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wide">Yield (Milk/kg Paneer)</p>
-                                    <p className="text-lg font-bold text-slate-900 mt-1">
+                                  <div className="border-l-4 border-blue-500 pl-3">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Yield (Milk/kg Paneer)</p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
                                       {lot.reconciliation.yieldLPerKg.toFixed(2)} L/kg
                                     </p>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wide">Paneer Yield per 100 L</p>
-                                    <p className="text-lg font-bold text-slate-900 mt-1">
+                                  <div className="border-l-4 border-blue-500 pl-3">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Paneer Yield per 100 L</p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
                                       {lot.reconciliation.paneerYieldPer100L.toFixed(2)} kg/100 L
                                     </p>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wide">D Rounds</p>
-                                    <p className="text-lg font-bold text-slate-900 mt-1">
+                                  <div className="border-l-4 border-blue-500 pl-3">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">D Rounds</p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
                                       {lot.reconciliation.dRounds}
                                     </p>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wide">C/S Rounds</p>
-                                    <p className="text-lg font-bold text-slate-900 mt-1">
+                                  <div className="border-l-4 border-blue-500 pl-3">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">C/S Rounds</p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
                                       {lot.reconciliation.csRounds}
                                     </p>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wide">Cream</p>
-                                    <p className="text-lg font-bold text-slate-900 mt-1">
+                                  <div className="border-l-4 border-blue-500 pl-3">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Cream</p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
                                       {lot.reconciliation.cream.toFixed(2)} kg
                                     </p>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wide">PAN111</p>
-                                    <p className="text-lg font-bold text-slate-900 mt-1">
+                                  <div className="border-l-4 border-blue-500 pl-3">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">PAN111</p>
+                                    <p className="text-xl font-bold text-slate-900 mt-1">
                                       {lot.reconciliation.pan111.toFixed(2)} kg
                                     </p>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wide">Paneer for SPP</p>
-                                    <p className="text-lg font-bold text-slate-400 mt-1">
+                                  <div className="border-l-4 border-slate-300 pl-3">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Paneer for SPP</p>
+                                    <p className="text-xl font-bold text-slate-400 mt-1">
                                       {lot.reconciliation.paneerForSpp.toFixed(2)} kg
                                     </p>
                                   </div>
@@ -458,50 +461,52 @@ export default function MilkReceiving() {
                               </div>
 
                               {/* Right Box: Packed SKUs */}
-                              <div className="bg-white rounded-lg border border-slate-200 p-5">
-                                <h3 className="text-sm font-semibold text-slate-900 mb-4">
+                              <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
+                                <h3 className="text-sm font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200">
                                   SKU Packed on Board
                                 </h3>
-                                <div className="space-y-2">
+                                <div className="space-y-0">
                                   {lot.packedSkus && lot.packedSkus.length > 0 ? (
                                     lot.packedSkus.map((sku, idx) => (
-                                      <div key={idx} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
-                                        <span className="font-mono text-sm font-medium text-slate-900">{sku.sku}</span>
-                                        <span className="text-sm font-bold text-slate-900">{sku.cases} cases</span>
+                                      <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50 px-2 -mx-2 rounded transition-colors">
+                                        <span className="font-mono text-sm font-semibold text-slate-900">{sku.sku}</span>
+                                        <span className="text-sm font-bold text-slate-900 bg-slate-100 px-3 py-1 rounded">{sku.cases}</span>
                                       </div>
                                     ))
                                   ) : (
-                                    <p className="text-sm text-slate-400 text-center py-4">No SKUs packed yet</p>
+                                    <p className="text-sm text-slate-400 text-center py-8">No SKUs packed yet</p>
                                   )}
                                 </div>
                               </div>
                             </div>
 
                             {/* Footer Caption */}
-                            <p className="text-xs text-slate-500 italic text-center">
-                              SKU figures are board-declared. Physical corrections remain in Packing verification because they may combine multiple milk receipts.
-                            </p>
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                              <p className="text-xs text-blue-800 text-center">
+                                <strong>Note:</strong> SKU figures are board-declared. Physical corrections remain in Packing verification because they may combine multiple milk receipts.
+                              </p>
+                            </div>
 
                             {/* Milk Sales Sub-Table */}
                             {lot.milkSales && lot.milkSales.length > 0 && (
-                              <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                                <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
-                                  <h4 className="text-sm font-semibold text-slate-900">Milk Sales</h4>
+                              <div className="bg-white rounded-lg border-2 border-slate-200 overflow-hidden shadow-sm">
+                                <div className="px-4 py-3 border-b-2 border-slate-300 bg-slate-50">
+                                  <h4 className="text-sm font-bold text-slate-900">Milk Sales</h4>
                                 </div>
                                 <table className="w-full text-sm">
                                   <thead>
-                                    <tr className="bg-slate-50 border-b border-slate-200">
-                                      <th className="px-4 py-2 text-left font-medium text-slate-600 text-xs uppercase tracking-wide">Milk Sale Date</th>
-                                      <th className="px-4 py-2 text-left font-medium text-slate-600 text-xs uppercase tracking-wide">Customer</th>
-                                      <th className="px-4 py-2 text-right font-medium text-slate-600 text-xs uppercase tracking-wide">Quantity</th>
+                                    <tr className="bg-white border-b border-slate-200">
+                                      <th className="px-4 py-2 text-left font-semibold text-slate-700 text-xs uppercase tracking-wider">Milk Sale Date</th>
+                                      <th className="px-4 py-2 text-left font-semibold text-slate-700 text-xs uppercase tracking-wider">Customer</th>
+                                      <th className="px-4 py-2 text-right font-semibold text-slate-700 text-xs uppercase tracking-wider">Quantity</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
                                     {lot.milkSales.map((sale) => (
                                       <tr key={sale.id} className="hover:bg-slate-50">
-                                        <td className="px-4 py-2 text-slate-700">{formatDate(sale.saleDate)}</td>
-                                        <td className="px-4 py-2 text-slate-900 font-medium">{sale.customer}</td>
-                                        <td className="px-4 py-2 text-right text-slate-700">{sale.quantity.toLocaleString()} L</td>
+                                        <td className="px-4 py-3 text-slate-700">{formatDate(sale.saleDate)}</td>
+                                        <td className="px-4 py-3 text-slate-900 font-medium">{sale.customer}</td>
+                                        <td className="px-4 py-3 text-right text-slate-700 font-semibold">{sale.quantity.toLocaleString()} L</td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -519,21 +524,21 @@ export default function MilkReceiving() {
 
             {/* Footer Summary Row */}
             <tfoot>
-              <tr className="bg-slate-50 border-t-2 border-slate-300">
-                <td className="px-4 py-4 font-semibold text-slate-900" colSpan={2}>
+              <tr className="bg-slate-100 border-t-4 border-slate-400">
+                <td className="px-4 py-4 font-bold text-slate-900 text-base" colSpan={2}>
                   Accepted milk totals
                 </td>
-                <td className="px-4 py-4 text-right font-bold text-slate-900">
-                  {totals.received.toLocaleString()} L
-                </td>
-                <td className="px-4 py-4 text-right font-bold text-slate-700">
-                  {totals.consumed.toLocaleString()} L
-                </td>
-                <td className="px-4 py-4 text-right font-bold text-slate-700">
-                  {totals.sold.toLocaleString()} L
+                <td className="px-4 py-4 text-right">
+                  <span className="font-bold text-slate-900 text-base">{totals.received.toLocaleString()} L</span>
                 </td>
                 <td className="px-4 py-4 text-right">
-                  <span className={`font-bold ${totals.remaining > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  <span className="font-bold text-slate-700 text-base">{totals.consumed.toLocaleString()} L</span>
+                </td>
+                <td className="px-4 py-4 text-right">
+                  <span className="font-bold text-slate-700 text-base">{totals.sold.toLocaleString()} L</span>
+                </td>
+                <td className="px-4 py-4 text-right">
+                  <span className={`font-bold text-lg ${totals.remaining > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
                     {totals.remaining.toLocaleString()} L
                   </span>
                 </td>
