@@ -783,6 +783,7 @@ export default function ProductionBoard() {
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Status</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Output</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Blocks</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-32">Cutting Status</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream (kg)</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Temp (°C)</th>
@@ -820,6 +821,13 @@ export default function ProductionBoard() {
                           </td>
                           <td className="px-4 py-3 text-slate-600 text-xs">{round.outputWeight > 0 ? `${round.outputWeight.toFixed(1)} kg` : '—'}</td>
                           <td className="px-4 py-3 text-slate-600 text-xs">{round.numberOfBlocks ? `${round.numberOfBlocks} blocks` : '—'}</td>
+                          <td className="px-4 py-3">
+                            {round.cuttingType ? (
+                              <span className="text-xs font-medium text-slate-700">{round.cuttingType}</span>
+                            ) : round.status === 'clingwrapped' ? (
+                              <span className="text-xs font-medium text-pink-600">Clingwrapped</span>
+                            ) : '—'}
+                          </td>
                           <td className="px-4 py-3">
                             {round.packedSkus && round.packedSkus.length > 0 ? (
                               <div className="text-xs">
@@ -877,10 +885,10 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cutting Type</label>
             <select value={cutForm.cuttingType} onChange={(e) => setCutForm({ ...cutForm, cuttingType: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select type</option>
+              <option value="400g cubes">400g cubes</option>
+              <option value="200g cubes">200g cubes</option>
+              <option value="Restaurant blocks">Restaurant blocks</option>
               <option value="SPP pieces">SPP pieces</option>
-              <option value="400g blocks">400g blocks</option>
-              <option value="200g format">200g format</option>
-              <option value="1kg blocks">1kg blocks</option>
             </select>
           </div>
           <div>
