@@ -72,6 +72,9 @@ export interface ProductionRound {
     loose: number;
   }>;
   
+  // Remaining balance after cutting (kg available for packing)
+  remainingBalance?: number;
+  
   // Cream recovery (C/S rounds only)
   creamRecovered?: number; // kg
   creamRecoveredAt?: string;

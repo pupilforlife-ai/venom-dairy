@@ -157,10 +157,10 @@ export default function ProductionBoard() {
     return acc;
   }, {} as Record<string, typeof productionRounds>);
 
-  // Get active shifts
+  // Get active shifts (latest first)
   const activeShifts = productionShifts
     .filter(s => groupedByShift[s.id] || s.status !== 'completed')
-    .sort((a, b) => a.shiftNumber - b.shiftNumber);
+    .sort((a, b) => b.shiftNumber - a.shiftNumber);
 
   // Check for FIFO violations
   const frozenLots = intermediateLots
@@ -245,6 +245,7 @@ export default function ProductionBoard() {
       numberOfBlocks: cutForm.numberOfBlocks,
       blockWeights: cutForm.blockWeights,
       outputWeight: totalWeight,
+      remainingBalance: totalWeight,
     });
 
     showToast('success', `Cut recorded: ${cutForm.numberOfBlocks} blocks, ${totalWeight.toFixed(2)} kg`);
@@ -262,19 +263,51 @@ export default function ProductionBoard() {
     showToast('success', 'Moved to freezer');
   };
 
+  // SKU weight configurations (kg per case)
+  const skuWeightPerCase: Record<string, number> = {
+    'MPAN100': 15,    // 1kg × 15 packets/case
+    'MPAN400': 9.6,   // 400g × 24 packets/case
+    'MPAN200': 4.8,   // 200g × 24 packets/case
+    'RPAN100': 15,    // 1kg × 15 packets/case
+    'RPAN400': 9.6,   // 400g × 24 packets/case
+    'RPAN200': 4.8,   // 200g × 24 packets/case
+    'SPP-200': 1.32,  // 8 pieces × ~165g per 8 pieces × 12 packets/case
+  };
+
   const handlePack = (roundId: string) => {
     const round = productionRounds.find(r => r.id === roundId);
     if (!round) return;
 
+    // Calculate weight packed
+    const weightPerCase = skuWeightPerCase[packForm.sku] || 0;
+    const weightPerPacket = weightPerCase / 24; // Assuming 24 packets per case for most SKUs
+    const totalWeightPacked = (packForm.cases * weightPerCase) + (packForm.loose * weightPerPacket);
+
+    // Calculate new balance (can go negative for over-packing)
+    const currentBalance = round.remainingBalance ?? round.outputWeight ?? 0;
+    const newBalance = currentBalance - totalWeightPacked;
+
+    // Add to packed SKUs array
     const existingPacked = round.packedSkus || [];
     const newPackedSkus = [...existingPacked, { sku: packForm.sku, cases: packForm.cases, loose: packForm.loose }];
 
+    // Determine new status - mark as packed if balance is 0 or negative
+    const newStatus = newBalance <= 0 ? 'packed' : round.status;
+
     updateProductionRound(roundId, {
-      status: 'packed',
+      status: newStatus,
       packedSkus: newPackedSkus,
+      remainingBalance: newBalance,
     });
 
-    showToast('success', `Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}`);
+    if (newBalance < 0) {
+      showToast('info', `⚠️ Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Balance: ${newBalance.toFixed(2)} kg (over-packed)`);
+    } else if (newBalance === 0) {
+      showToast('success', `Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Round fully packed!`);
+    } else {
+      showToast('success', `Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Remaining: ${newBalance.toFixed(2)} kg`);
+    }
+    
     setShowPackModal(false);
     setPackForm({ sku: '', cases: 0, loose: 0 });
   };
@@ -487,10 +520,13 @@ export default function ProductionBoard() {
           <Timer className="w-4 h-4 text-purple-500" />
           <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
           {timer === 0 && (
-            <div className="flex gap-1">
-              <button onClick={() => handleStartCooling(round.id, 'tank')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Tank</button>
-              <button onClick={() => handleStartCooling(round.id, 'chiller')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Chiller</button>
-            </div>
+            <>
+              <span className="text-xs font-bold text-emerald-600 animate-pulse">✓ Ready for Cooling</span>
+              <div className="flex gap-1">
+                <button onClick={() => handleStartCooling(round.id, 'tank')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Tank</button>
+                <button onClick={() => handleStartCooling(round.id, 'chiller')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Chiller</button>
+              </div>
+            </>
           )}
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
@@ -506,7 +542,10 @@ export default function ProductionBoard() {
           <Timer className="w-4 h-4 text-cyan-500" />
           <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
           {timer === 0 && (
-            <button onClick={() => handleStartResting(round.id)} className="px-2 py-1 bg-teal-500 text-white rounded text-xs hover:bg-teal-600">Start Resting</button>
+            <>
+              <span className="text-xs font-bold text-emerald-600 animate-pulse">✓ Ready to Take Out for Resting</span>
+              <button onClick={() => handleStartResting(round.id)} className="px-2 py-1 bg-teal-500 text-white rounded text-xs hover:bg-teal-600">Start Resting</button>
+            </>
           )}
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
@@ -522,7 +561,10 @@ export default function ProductionBoard() {
           <Timer className="w-4 h-4 text-teal-500" />
           <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
           {timer === 0 && (
-            <button onClick={() => handleReadyForCutting(round.id)} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">Ready to Cut</button>
+            <>
+              <span className="text-xs font-bold text-emerald-600 animate-pulse">✓ Ready for Cutting</span>
+              <button onClick={() => handleReadyForCutting(round.id)} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">Start Cutting</button>
+            </>
           )}
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
@@ -566,6 +608,9 @@ export default function ProductionBoard() {
             <Scissors className="w-3 h-3" /> Final Cut
           </button>
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
+          <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
+          </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -591,6 +636,9 @@ export default function ProductionBoard() {
         <div key="packed-actions" className="flex gap-1 flex-wrap">
           <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
             <CheckCircle2 className="w-3 h-3" /> Hand Over
+          </button>
+          <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
+            <Package className="w-3 h-3" /> Pack
           </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
@@ -786,6 +834,8 @@ export default function ProductionBoard() {
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Output</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Blocks</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-32">Cutting Status</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cut By</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Balance</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream (kg)</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
@@ -835,6 +885,20 @@ export default function ProductionBoard() {
                               <span className="text-xs font-medium text-slate-700">{round.cuttingType}</span>
                             ) : round.status === 'clingwrapped' ? (
                               <span className="text-xs font-medium text-pink-600">Clingwrapped</span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            {round.cutBy || '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {round.remainingBalance !== undefined ? (
+                              <span className={`text-xs font-bold ${
+                                round.remainingBalance > 0 ? 'text-amber-600' : 
+                                round.remainingBalance < 0 ? 'text-red-600' : 
+                                'text-slate-400'
+                              }`}>
+                                {round.remainingBalance.toFixed(2)} kg
+                              </span>
                             ) : '—'}
                           </td>
                           <td className="px-4 py-3">
@@ -932,15 +996,28 @@ export default function ProductionBoard() {
       {/* Pack Modal */}
       <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title="Record Packing">
         <div className="space-y-4">
+          {selectedRound && (() => {
+            const round = productionRounds.find(r => r.id === selectedRound);
+            const balance = round?.remainingBalance ?? round?.outputWeight ?? 0;
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs text-amber-800">
+                  <strong>Available Balance:</strong> {balance.toFixed(2)} kg
+                </p>
+              </div>
+            );
+          })()}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">SKU</label>
             <select value={packForm.sku} onChange={(e) => setPackForm({ ...packForm, sku: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select SKU</option>
-              <option value="MPAN400">MPAN400 - Malai Paneer 400g</option>
-              <option value="MPAN200">MPAN200 - Malai Paneer 200g</option>
-              <option value="RPAN400">RPAN400 - Rozana Paneer 400g</option>
-              <option value="RPAN200">RPAN200 - Rozana Paneer 200g</option>
-              <option value="SPP-200">SPP-200 - Spicy Paneer Poppers</option>
+              <option value="MPAN100">MPAN100 - Malai Paneer 1kg (15 kg/case)</option>
+              <option value="MPAN400">MPAN400 - Malai Paneer 400g (9.6 kg/case)</option>
+              <option value="MPAN200">MPAN200 - Malai Paneer 200g (4.8 kg/case)</option>
+              <option value="RPAN100">RPAN100 - Rozana Paneer 1kg (15 kg/case)</option>
+              <option value="RPAN400">RPAN400 - Rozana Paneer 400g (9.6 kg/case)</option>
+              <option value="RPAN200">RPAN200 - Rozana Paneer 200g (4.8 kg/case)</option>
+              <option value="SPP-200">SPP-200 - Spicy Paneer Poppers (1.32 kg/case)</option>
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -949,12 +1026,33 @@ export default function ProductionBoard() {
               <input type="number" value={packForm.cases} onChange={(e) => setPackForm({ ...packForm, cases: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Loose</label>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Loose Packets</label>
               <input type="number" value={packForm.loose} onChange={(e) => setPackForm({ ...packForm, loose: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
             </div>
           </div>
+          {packForm.sku && selectedRound && (() => {
+            const round = productionRounds.find(r => r.id === selectedRound);
+            const balance = round?.remainingBalance ?? round?.outputWeight ?? 0;
+            const weightPerCase = skuWeightPerCase[packForm.sku] || 0;
+            const weightPerPacket = weightPerCase / 24;
+            const totalWeightPacked = (packForm.cases * weightPerCase) + (packForm.loose * weightPerPacket);
+            const newBalance = balance - totalWeightPacked;
+            
+            return (
+              <div className={`rounded-lg p-3 ${newBalance < 0 ? 'bg-red-50 border border-red-200' : 'bg-slate-50'}`}>
+                <p className="text-xs text-slate-600">
+                  <strong>Packing Preview:</strong>{' '}
+                  {totalWeightPacked.toFixed(2)} kg will be packed
+                </p>
+                <p className={`text-xs mt-1 ${newBalance < 0 ? 'text-red-700 font-medium' : 'text-slate-500'}`}>
+                  New balance: {newBalance.toFixed(2)} kg
+                  {newBalance < 0 && ' (over-packing)'}
+                </p>
+              </div>
+            );
+          })()}
           <div className="flex gap-2 pt-2">
-            <button onClick={() => selectedRound && handlePack(selectedRound)} className="flex-1 px-4 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600">Save</button>
+            <button onClick={() => selectedRound && handlePack(selectedRound)} className="flex-1 px-4 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600">Save Packing</button>
             <button onClick={() => setShowPackModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
