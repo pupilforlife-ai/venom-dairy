@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import {
   Plus,
   ChevronDown,
   ChevronRight,
   Edit,
-  X,
-  FileText,
+  Milk,
+  ArrowDownToLine,
+  Beaker,
+  XCircle,
+  TrendingDown,
+  Database,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -14,9 +18,12 @@ import { Modal } from '../components/Modal';
 export default function MilkReceiving() {
   const { milkLots, addMilkLot } = useApp();
   const { showToast } = useToast();
+  const [selectedLot, setSelectedLot] = useState(milkLots[0]?.id || '');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set());
   const [showNewLotModal, setShowNewLotModal] = useState(false);
   
+  const activeLot = milkLots.find((l) => l.id === selectedLot);
+
   // New lot form
   const [newLot, setNewLot] = useState({
     lotCode: '',
@@ -64,13 +71,10 @@ export default function MilkReceiving() {
     showToast('success', `Milk lot ${newLot.lotCode} created`);
     setShowNewLotModal(false);
     setNewLot({ 
-      lotCode: '', 
-      supplier: 'Green Valley Dairy', 
-      litresReceived: 25000, 
+      lotCode: '', supplier: 'Green Valley Dairy', litresReceived: 25000, 
       receiptDate: new Date().toISOString().split('T')[0],
       receiptTime: new Date().toTimeString().slice(0, 5),
-      invoiceNo: '',
-      deliveryNoteNo: '',
+      invoiceNo: '', deliveryNoteNo: '',
     });
   };
 
@@ -84,6 +88,16 @@ export default function MilkReceiving() {
     setExpandedLots(newExpanded);
   };
 
+  // Vessel allocations for selected lot
+  const allocations = activeLot ? [
+    { destination: 'Silo (10,000L)', litres: Math.min(8500, activeLot.litresRemaining) },
+    { destination: 'BMC #1 (3,000L)', litres: Math.min(3000, Math.max(0, activeLot.litresRemaining - 8500)) },
+    { destination: 'BMC #2 (3,000L)', litres: Math.min(3000, Math.max(0, activeLot.litresRemaining - 11500)) },
+    { destination: 'Holding Tank (2,500L)', litres: Math.min(2500, Math.max(0, activeLot.litresRemaining - 14500)) },
+    { destination: 'Direct to Production', litres: Math.min(2000, Math.max(0, activeLot.litresRemaining - 17000)) },
+    { destination: 'IBC Storage', litres: Math.max(0, activeLot.litresRemaining - 19000) },
+  ].filter(a => a.litres > 0) : [];
+
   // Calculate totals
   const totals = milkLots.reduce((acc, lot) => {
     acc.received += lot.litresReceived;
@@ -96,17 +110,13 @@ export default function MilkReceiving() {
   // Format date
   const formatDate = (dateStr: string, timeStr?: string) => {
     const date = new Date(dateStr);
-    const formatted = date.toLocaleDateString('en-GB', { 
-      day: '2-digit', 
-      month: 'short', 
-      year: 'numeric' 
-    });
+    const formatted = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     return timeStr ? `${formatted}, ${timeStr}` : formatted;
   };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Page Header */}
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Milk and cream lots</h1>
@@ -121,9 +131,174 @@ export default function MilkReceiving() {
         </button>
       </div>
 
-      {/* Main Container */}
+      {/* Lot Selector Cards - Last 5 lots */}
+      <div>
+        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Select a lot to view details</h3>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {milkLots.slice(0, 5).map((lot) => (
+            <button
+              key={lot.id}
+              onClick={() => setSelectedLot(lot.id)}
+              className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium whitespace-nowrap transition-all ${
+                selectedLot === lot.id 
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-md' 
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+              }`}
+            >
+              {lot.status === 'active' && <span className="w-2 h-2 rounded-full bg-emerald-400" />}
+              {lot.status === 'completed' && <span className="w-2 h-2 rounded-full bg-slate-400" />}
+              {lot.status === 'rejected' && <span className="w-2 h-2 rounded-full bg-red-400" />}
+              <span>Lot {lot.lotCode}</span>
+              {lot.isLatest && selectedLot !== lot.id && (
+                <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase rounded">Latest</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Selected Lot Summary */}
+      {activeLot && (
+        <>
+          {/* Lot Summary Table */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+              <Milk className="w-4 h-4 text-slate-500" />
+              <h3 className="text-sm font-semibold text-slate-900">Lot Summary — {activeLot.lotCode}</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-slate-100">
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700 w-48">Receipt</td>
+                    <td className="px-4 py-3 text-slate-900">
+                      <span className="font-mono font-bold">Lot {activeLot.lotCode}</span>
+                      <span className="text-slate-500 ml-3">
+                        {formatDate(activeLot.receiptDate, activeLot.receiptTime)}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700">Origin / Invoice</td>
+                    <td className="px-4 py-3 text-slate-900">
+                      <div>{activeLot.supplier}</div>
+                      {(activeLot.invoiceNo || activeLot.deliveryNoteNo) && (
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          {activeLot.invoiceNo && <span>Invoice: <span className="font-mono">{activeLot.invoiceNo}</span></span>}
+                          {activeLot.invoiceNo && activeLot.deliveryNoteNo && <span className="mx-2">•</span>}
+                          {activeLot.deliveryNoteNo && <span>Delivery Note: <span className="font-mono">{activeLot.deliveryNoteNo}</span></span>}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700">Quantity Received</td>
+                    <td className="px-4 py-3 text-slate-900 font-bold">{activeLot.litresReceived.toLocaleString()} L</td>
+                  </tr>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700">Milk Used in Production</td>
+                    <td className="px-4 py-3 text-blue-600 font-bold">{activeLot.litresConsumed.toLocaleString()} L</td>
+                  </tr>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700">Milk Sold</td>
+                    <td className="px-4 py-3 text-emerald-600 font-bold">{(activeLot.litresSold || 0).toLocaleString()} L</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Metric Tiles */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center gap-2 text-slate-500 mb-1">
+                <ArrowDownToLine className="w-4 h-4" />
+                <span className="text-xs font-medium uppercase tracking-wide">Received</span>
+              </div>
+              <p className="text-2xl font-bold text-slate-900">{activeLot.litresReceived.toLocaleString()}</p>
+              <p className="text-xs text-slate-400">litres</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center gap-2 text-slate-500 mb-1">
+                <Beaker className="w-4 h-4" />
+                <span className="text-xs font-medium uppercase tracking-wide">Consumed</span>
+              </div>
+              <p className="text-2xl font-bold text-blue-600">{activeLot.litresConsumed.toLocaleString()}</p>
+              <p className="text-xs text-slate-400">litres</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center gap-2 text-slate-500 mb-1">
+                <Milk className="w-4 h-4" />
+                <span className="text-xs font-medium uppercase tracking-wide">Remaining</span>
+              </div>
+              <p className="text-2xl font-bold text-emerald-600">{activeLot.litresRemaining.toLocaleString()}</p>
+              <p className="text-xs text-slate-400">litres</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center gap-2 text-slate-500 mb-1">
+                <XCircle className="w-4 h-4" />
+                <span className="text-xs font-medium uppercase tracking-wide">Rejected</span>
+              </div>
+              <p className="text-2xl font-bold text-red-600">{activeLot.litresRejected}</p>
+              <p className="text-xs text-slate-400">litres</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center gap-2 text-slate-500 mb-1">
+                <TrendingDown className="w-4 h-4" />
+                <span className="text-xs font-medium uppercase tracking-wide">Spilled</span>
+              </div>
+              <p className="text-2xl font-bold text-amber-600">{activeLot.litresSpilled}</p>
+              <p className="text-xs text-slate-400">litres</p>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-slate-900">Lot Consumption Progress</h3>
+              <span className="text-xs text-slate-500">
+                {((activeLot.litresConsumed / activeLot.litresReceived) * 100).toFixed(0)}% utilized
+              </span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-4 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-all"
+                style={{ width: `${(activeLot.litresConsumed / activeLot.litresReceived) * 100}%` }}
+              />
+            </div>
+            <div className="flex justify-between mt-2 text-xs text-slate-500">
+              <span>Received: {formatDate(activeLot.receiptDate, activeLot.receiptTime)}</span>
+              <span>Supplier: {activeLot.supplier}</span>
+              <span>Status: <span className={`font-medium ${activeLot.status === 'active' ? 'text-emerald-600' : 'text-slate-500'}`}>{activeLot.status}</span></span>
+            </div>
+          </div>
+
+          {/* Vessel allocation */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+              <Database className="w-4 h-4 text-slate-500" />
+              <h3 className="text-sm font-semibold text-slate-900">Vessel / Location Allocation</h3>
+            </div>
+            <div className="p-4 space-y-3">
+              {allocations.length > 0 ? allocations.map((alloc) => (
+                <div key={alloc.destination} className="flex items-center gap-3">
+                  <span className="text-sm text-slate-700 w-44 shrink-0">{alloc.destination}</span>
+                  <div className="flex-1 bg-slate-100 rounded-full h-3 relative overflow-hidden">
+                    <div className="bg-blue-500 h-3 rounded-full" style={{ width: `${(alloc.litres / activeLot.litresReceived) * 100}%` }} />
+                  </div>
+                  <span className="text-sm font-medium text-slate-900 w-20 text-right">{alloc.litres.toLocaleString()}L</span>
+                  <span className="text-xs text-slate-400 w-10 text-right">{((alloc.litres / activeLot.litresReceived) * 100).toFixed(0)}%</span>
+                </div>
+              )) : (
+                <p className="text-sm text-slate-400 text-center py-4">No remaining milk to allocate</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Recent Receipts Table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        {/* Section Header */}
         <div className="px-6 py-4 border-b border-slate-200">
           <h2 className="text-lg font-semibold text-slate-900">Recent receipts</h2>
           <p className="text-xs text-slate-500 mt-1">
@@ -131,7 +306,6 @@ export default function MilkReceiving() {
           </p>
         </div>
 
-        {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -152,9 +326,9 @@ export default function MilkReceiving() {
                 const milkLeft = lot.litresRemaining;
                 
                 return (
-                  <>
+                  <React.Fragment key={lot.id}>
                     {/* Main Row */}
-                    <tr key={lot.id} className="hover:bg-slate-50 transition-colors">
+                    <tr className="hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-4">
                         <div className="flex items-start gap-2">
                           <button 
@@ -209,25 +383,19 @@ export default function MilkReceiving() {
                       </td>
                       <td className="px-4 py-4">
                         <div className="flex items-center justify-center gap-1">
-                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">
-                            Hide
-                          </button>
+                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">Hide</button>
                           <button className="p-1 text-slate-600 hover:bg-slate-100 rounded transition-colors">
                             <Edit className="w-3.5 h-3.5" />
                           </button>
-                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">
-                            + Milk sale
-                          </button>
-                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">
-                            Close
-                          </button>
+                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">+ Milk sale</button>
+                          <button className="px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded transition-colors">Close</button>
                         </div>
                       </td>
                     </tr>
 
                     {/* Expanded Detail View */}
                     {isExpanded && lot.reconciliation && (
-                      <tr key={`${lot.id}-detail`}>
+                      <tr>
                         <td colSpan={8} className="px-6 py-6 bg-slate-50">
                           <div className="space-y-6">
                             {/* Production Reconciliation */}
@@ -344,7 +512,7 @@ export default function MilkReceiving() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>
