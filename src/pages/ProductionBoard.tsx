@@ -12,6 +12,9 @@ import {
   Package,
   AlertTriangle,
   Timer,
+  ChevronDown,
+  ChevronUp,
+  History,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -52,6 +55,9 @@ export default function ProductionBoard() {
   const [showTemperatureModal, setShowTemperatureModal] = useState(false);
   const [startingTemperature, setStartingTemperature] = useState<number | null>(null);
   const [selectedVat, setSelectedVat] = useState<'vat2' | 'vat3' | null>(null);
+  const [collapsedShifts, setCollapsedShifts] = useState<Set<string>>(new Set());
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyRoundId, setHistoryRoundId] = useState<string | null>(null);
   
   // Timer state
   const [timers, setTimers] = useState<Record<string, number>>({});
@@ -695,6 +701,8 @@ export default function ProductionBoard() {
           const rounds = groupedByShift[shift.id] || [];
           if (rounds.length === 0 && filters.shift === 'all' && filters.status === 'all') return null;
           
+          const isCollapsed = collapsedShifts.has(shift.id);
+          
           return (
             <div key={shift.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               {/* Shift header */}
@@ -703,7 +711,7 @@ export default function ProductionBoard() {
                 shift.status === 'completed' ? 'bg-slate-50 border-slate-200' :
                 'bg-amber-50 border-amber-200'
               }`}>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-1">
                   <span className={`w-8 h-8 rounded-full text-white text-sm font-bold flex items-center justify-center ${
                     shift.status === 'active' ? 'bg-indigo-600' :
                     shift.status === 'completed' ? 'bg-slate-500' :
@@ -711,20 +719,29 @@ export default function ProductionBoard() {
                   }`}>
                     {shift.shiftNumber}
                   </span>
-                  <div>
-                    <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold text-slate-900">Shift {shift.shiftNumber}</span>
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium uppercase ${
                         shift.status === 'active' ? 'bg-indigo-100 text-indigo-700' :
                         shift.status === 'completed' ? 'bg-slate-200 text-slate-600' :
                         'bg-amber-100 text-amber-700'
                       }`}>
-                        {shift.status}
+                        {shift.status === 'active' ? 'Open' : shift.status === 'completed' ? 'Closed' : 'Scheduled'}
                       </span>
+                      <span className="text-xs text-slate-600 font-medium">Batch: {shift.milkLotCode}</span>
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                    <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5 flex-wrap">
                       <span className="flex items-center gap-1">
                         <Users className="w-3 h-3" /> {shift.team.join(', ')}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> {new Date(shift.startedAt).toLocaleString('en-GB', { 
+                          day: '2-digit', 
+                          month: 'short',
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
                       </span>
                     </div>
                   </div>
@@ -736,11 +753,26 @@ export default function ProductionBoard() {
                       <Square className="w-3 h-3" /> End Shift
                     </button>
                   )}
+                  <button 
+                    onClick={() => {
+                      const newCollapsed = new Set(collapsedShifts);
+                      if (isCollapsed) {
+                        newCollapsed.delete(shift.id);
+                      } else {
+                        newCollapsed.add(shift.id);
+                      }
+                      setCollapsedShifts(newCollapsed);
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-medium hover:bg-slate-200 transition-colors"
+                  >
+                    {isCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                    {isCollapsed ? 'Expand' : 'Collapse'}
+                  </button>
                 </div>
               </div>
 
               {/* Rounds table */}
-              {rounds.length > 0 ? (
+              {!isCollapsed && rounds.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -761,9 +793,16 @@ export default function ProductionBoard() {
                       {rounds.map((round) => (
                         <tr key={round.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-4 py-3">
-                            <div className="font-mono text-xs font-bold text-slate-900">
-                              {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
-                            </div>
+                            <button
+                              onClick={() => {
+                                setHistoryRoundId(round.id);
+                                setShowHistoryModal(true);
+                              }}
+                              className="font-mono text-xs font-bold text-slate-900 hover:text-indigo-600 transition-colors cursor-pointer"
+                              title="Click to view round history"
+                            >
+                              S{round.shiftNumber}/R{round.roundNumber}
+                            </button>
                             {round.locked && (
                               <span className="inline-flex items-center gap-0.5 text-[10px] text-slate-400">
                                 <Lock className="w-2.5 h-2.5" /> Locked
@@ -1025,6 +1064,136 @@ export default function ProductionBoard() {
             <button onClick={() => { setShowTemperatureModal(false); setStartingTemperature(null); setSelectedVat(null); }} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
+      </Modal>
+
+      {/* Round History Modal */}
+      <Modal isOpen={showHistoryModal} onClose={() => { setShowHistoryModal(false); setHistoryRoundId(null); }} title="Round History">
+        {historyRoundId && (() => {
+          const round = productionRounds.find(r => r.id === historyRoundId);
+          if (!round) return <div className="text-slate-500">Round not found</div>;
+          
+          const history: { stage: string; time: string; details: string }[] = [];
+          
+          // Build history based on round data
+          history.push({
+            stage: 'Scheduled',
+            time: new Date(round.startTime).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+            details: `Round created for ${round.plannedInput}L`
+          });
+          
+          if (round.vat) {
+            history.push({
+              stage: 'In Production',
+              time: round.startingTemperature ? 'Recorded' : '',
+              details: `${round.vat === 'vat2' ? 'Vat 2' : 'Vat 3'} • Starting temp: ${round.startingTemperature || 'N/A'}°C`
+            });
+          }
+          
+          if (round.pressingStartedAt) {
+            history.push({
+              stage: 'Pressing',
+              time: new Date(round.pressingStartedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+              details: '30 min timer'
+            });
+          }
+          
+          if (round.coolingStartedAt) {
+            history.push({
+              stage: 'Cooling',
+              time: new Date(round.coolingStartedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+              details: round.coolingLocation === 'tank' ? 'Cooling Tank (90 min)' : 'Chiller (120 min)'
+            });
+          }
+          
+          if (round.restingStartedAt) {
+            history.push({
+              stage: 'Resting',
+              time: new Date(round.restingStartedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+              details: '90 min timer'
+            });
+          }
+          
+          if (round.status === 'ready_cutting' || ['cut', 'clingwrapped', 'frozen', 'packed', 'handed_over'].includes(round.status)) {
+            history.push({
+              stage: 'Ready for Cutting',
+              time: '',
+              details: 'Paneer ready to cut'
+            });
+          }
+          
+          if (round.cutBy) {
+            history.push({
+              stage: 'Cut',
+              time: '',
+              details: `By ${round.cutBy} • ${round.cuttingType || 'N/A'} • ${round.numberOfBlocks || 0} blocks • ${round.outputWeight || 0} kg`
+            });
+          }
+          
+          if (round.status === 'clingwrapped') {
+            history.push({
+              stage: 'Clingwrapped',
+              time: '',
+              details: 'Stored in chiller'
+            });
+          }
+          
+          if (round.status === 'frozen' || ['packed', 'handed_over'].includes(round.status)) {
+            history.push({
+              stage: 'Frozen',
+              time: '',
+              details: 'Moved to freezer'
+            });
+          }
+          
+          if (round.packedSkus && round.packedSkus.length > 0) {
+            round.packedSkus.forEach((pack, idx) => {
+              history.push({
+                stage: `Packing ${idx + 1}`,
+                time: '',
+                details: `${pack.sku} • ${pack.cases} cases + ${pack.loose} loose`
+              });
+            });
+          }
+          
+          if (round.creamRecovered) {
+            history.push({
+              stage: 'Cream Recovered',
+              time: round.creamRecoveredAt ? new Date(round.creamRecoveredAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
+              details: `${round.creamRecovered} kg ${round.creamRecoveredBy ? `by ${round.creamRecoveredBy}` : ''}`
+            });
+          }
+          
+          if (round.status === 'handed_over') {
+            history.push({
+              stage: 'Handed Over',
+              time: round.completedAt ? new Date(round.completedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
+              details: 'Distribution pickup'
+            });
+          }
+          
+          return (
+            <div className="space-y-3">
+              <div className="bg-slate-50 rounded-lg p-3 mb-4">
+                <p className="text-sm font-medium text-slate-900">S{round.shiftNumber}/R{round.roundNumber} • {round.type}</p>
+                <p className="text-xs text-slate-500 mt-1">Team: {round.team.join(', ')}</p>
+              </div>
+              <div className="space-y-2">
+                {history.map((item, idx) => (
+                  <div key={idx} className="flex gap-3 pb-3 border-b border-slate-100 last:border-0">
+                    <div className="flex-shrink-0 w-2 h-2 rounded-full bg-indigo-500 mt-1.5"></div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-slate-900">{item.stage}</p>
+                        {item.time && <p className="text-xs text-slate-500">{item.time}</p>}
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5">{item.details}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* New Shift Modal */}
