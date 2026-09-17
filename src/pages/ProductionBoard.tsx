@@ -778,6 +778,8 @@ export default function ProductionBoard() {
                     <thead>
                       <tr className="border-b border-slate-100">
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-36">Batch ID</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Temp (°C)</th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Milk (L)</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Type</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Pipeline</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Status</th>
@@ -786,7 +788,6 @@ export default function ProductionBoard() {
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-32">Cutting Status</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream (kg)</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Temp (°C)</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
@@ -809,6 +810,14 @@ export default function ProductionBoard() {
                                 <Lock className="w-2.5 h-2.5" /> Locked
                               </span>
                             )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {round.startingTemperature !== undefined ? (
+                              <span className="text-xs font-medium text-slate-700">{round.startingTemperature}°C</span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 text-xs">
+                            {round.actualInput > 0 ? round.actualInput : round.plannedInput}
                           </td>
                           <td className="px-4 py-3">
                             <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-bold">{round.type}</span>
@@ -845,11 +854,6 @@ export default function ProductionBoard() {
                                   <div className="text-slate-500">by {round.creamRecoveredBy}</div>
                                 )}
                               </div>
-                            ) : '—'}
-                          </td>
-                          <td className="px-4 py-3">
-                            {round.startingTemperature !== undefined ? (
-                              <span className="text-xs font-medium text-slate-700">{round.startingTemperature}°C</span>
                             ) : '—'}
                           </td>
                           <td className="px-4 py-3">
