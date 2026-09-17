@@ -28,6 +28,9 @@ export default function MilkReceiving() {
     supplier: 'Green Valley Dairy',
     litresReceived: 25000,
     receiptDate: new Date().toISOString().split('T')[0],
+    receiptTime: new Date().toTimeString().slice(0, 5),
+    invoiceNo: '',
+    deliveryNoteNo: '',
   });
 
   const handleCreateLot = () => {
@@ -38,17 +41,29 @@ export default function MilkReceiving() {
     addMilkLot({
       lotCode: newLot.lotCode,
       receiptDate: newLot.receiptDate,
+      receiptTime: newLot.receiptTime,
       supplier: newLot.supplier,
+      invoiceNo: newLot.invoiceNo || undefined,
+      deliveryNoteNo: newLot.deliveryNoteNo || undefined,
       litresReceived: newLot.litresReceived,
       litresConsumed: 0,
       litresRemaining: newLot.litresReceived,
       litresRejected: 0,
       litresSpilled: 0,
+      litresSold: 0,
       status: 'active',
     });
     showToast('success', `Milk lot ${newLot.lotCode} created`);
     setShowNewLotModal(false);
-    setNewLot({ lotCode: '', supplier: 'Green Valley Dairy', litresReceived: 25000, receiptDate: new Date().toISOString().split('T')[0] });
+    setNewLot({ 
+      lotCode: '', 
+      supplier: 'Green Valley Dairy', 
+      litresReceived: 25000, 
+      receiptDate: new Date().toISOString().split('T')[0],
+      receiptTime: new Date().toTimeString().slice(0, 5),
+      invoiceNo: '',
+      deliveryNoteNo: '',
+    });
   };
 
   // Vessel allocations
@@ -77,9 +92,9 @@ export default function MilkReceiving() {
         </button>
       </div>
 
-      {/* Lot selector */}
+      {/* Lot selector - show only last 5 lots */}
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {milkLots.map((lot) => (
+        {milkLots.slice(0, 5).map((lot) => (
           <button
             key={lot.id}
             onClick={() => setSelectedLot(lot.id)}
@@ -137,6 +152,54 @@ export default function MilkReceiving() {
               </div>
               <p className="text-2xl font-bold text-amber-600">{activeLot.litresSpilled}</p>
               <p className="text-xs text-slate-400">litres</p>
+            </div>
+          </div>
+
+          {/* Lot Summary Table */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200">
+              <h3 className="text-sm font-semibold text-slate-900">Lot Summary</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-slate-100">
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700 w-48">Receipt</td>
+                    <td className="px-4 py-3 text-slate-900">
+                      <span className="font-mono font-bold">Lot {activeLot.lotCode}</span>
+                      <span className="text-slate-500 ml-3">
+                        {activeLot.receiptDate} {activeLot.receiptTime && `at ${activeLot.receiptTime}`}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700">Origin / Invoice</td>
+                    <td className="px-4 py-3 text-slate-900">
+                      <div>{activeLot.supplier}</div>
+                      {activeLot.invoiceNo && (
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          Invoice: <span className="font-mono">{activeLot.invoiceNo}</span>
+                          {activeLot.deliveryNoteNo && (
+                            <span className="ml-3">Delivery Note: <span className="font-mono">{activeLot.deliveryNoteNo}</span></span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700">Quantity Received</td>
+                    <td className="px-4 py-3 text-slate-900 font-bold">{activeLot.litresReceived.toLocaleString()} L</td>
+                  </tr>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700">Milk Used in Production</td>
+                    <td className="px-4 py-3 text-blue-600 font-bold">{activeLot.litresConsumed.toLocaleString()} L</td>
+                  </tr>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-700">Milk Sold</td>
+                    <td className="px-4 py-3 text-emerald-600 font-bold">{(activeLot.litresSold || 0).toLocaleString()} L</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -242,14 +305,25 @@ export default function MilkReceiving() {
               placeholder="e.g. 230626"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt Date</label>
-            <input
-              type="date"
-              value={newLot.receiptDate}
-              onChange={(e) => setNewLot({ ...newLot, receiptDate: e.target.value })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt Date</label>
+              <input
+                type="date"
+                value={newLot.receiptDate}
+                onChange={(e) => setNewLot({ ...newLot, receiptDate: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt Time</label>
+              <input
+                type="time"
+                value={newLot.receiptTime}
+                onChange={(e) => setNewLot({ ...newLot, receiptTime: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              />
+            </div>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Supplier</label>
@@ -259,6 +333,28 @@ export default function MilkReceiving() {
               onChange={(e) => setNewLot({ ...newLot, supplier: e.target.value })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
             />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Invoice No (optional)</label>
+              <input
+                type="text"
+                value={newLot.invoiceNo}
+                onChange={(e) => setNewLot({ ...newLot, invoiceNo: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                placeholder="e.g. INV-2026-0423"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Delivery Note No (optional)</label>
+              <input
+                type="text"
+                value={newLot.deliveryNoteNo}
+                onChange={(e) => setNewLot({ ...newLot, deliveryNoteNo: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                placeholder="e.g. DN-2026-0891"
+              />
+            </div>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Litres Received</label>
