@@ -6,17 +6,49 @@
 // Example: 160626 / S1 / R2 / C/S  (internal: 160626-S01-R02-CS)
 // ============================================================
 
+export interface MilkSale {
+  id: string;
+  milkLotId: string;
+  saleDate: string;
+  customer: string;
+  quantity: number;
+}
+
+export interface ProductionReconciliation {
+  paneerRecorded: number; // kg
+  yieldLPerKg: number; // L/kg
+  paneerYieldPer100L: number; // kg/100L
+  dRounds: number;
+  csRounds: number;
+  cream: number; // kg
+  pan111: number; // kg
+  paneerForSpp: number; // kg
+}
+
+export interface PackedSku {
+  sku: string;
+  cases: number;
+}
+
 export interface MilkLot {
   id: string;
   lotCode: string; // e.g. "160626" (date-based)
   receiptDate: string;
+  receiptTime?: string;
   supplier: string;
+  invoiceNo?: string;
+  deliveryNoteNo?: string;
   litresReceived: number;
   litresConsumed: number;
   litresRemaining: number;
   litresRejected: number;
   litresSpilled: number;
+  litresSold?: number;
   status: 'active' | 'completed' | 'rejected';
+  isLatest?: boolean;
+  reconciliation?: ProductionReconciliation;
+  packedSkus?: PackedSku[];
+  milkSales?: MilkSale[];
 }
 
 export interface ProductionShift {
@@ -214,25 +246,243 @@ export const milkLots: MilkLot[] = [
     id: 'ml-001',
     lotCode: '160626',
     receiptDate: '2026-06-16',
+    receiptTime: '18:30',
     supplier: 'Green Valley Dairy',
+    invoiceNo: 'INV-2026-0423',
+    deliveryNoteNo: 'DN-2026-0891',
     litresReceived: 25000,
     litresConsumed: 18500,
     litresRemaining: 5800,
     litresRejected: 0,
     litresSpilled: 120,
+    litresSold: 0,
     status: 'active',
+    isLatest: true,
+    reconciliation: {
+      paneerRecorded: 2358.5,
+      yieldLPerKg: 7.85,
+      paneerYieldPer100L: 12.74,
+      dRounds: 24,
+      csRounds: 13,
+      cream: 352.8,
+      pan111: 20.5,
+      paneerForSpp: 98.6,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 18 },
+      { sku: 'MPAN400', cases: 24 },
+      { sku: 'RPAN010', cases: 9 },
+      { sku: 'RPAN100', cases: 12 },
+      { sku: 'YD200', cases: 72 },
+    ],
+    milkSales: [],
   },
   {
     id: 'ml-002',
     lotCode: '090626',
     receiptDate: '2026-06-09',
+    receiptTime: '18:45',
     supplier: 'Green Valley Dairy',
+    invoiceNo: 'INV-2026-0398',
+    deliveryNoteNo: 'DN-2026-0847',
     litresReceived: 24000,
     litresConsumed: 23600,
     litresRemaining: 0,
     litresRejected: 200,
     litresSpilled: 200,
+    litresSold: 0,
     status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3433.83,
+      yieldLPerKg: 7.86,
+      paneerYieldPer100L: 12.72,
+      dRounds: 35,
+      csRounds: 19,
+      cream: 515.74,
+      pan111: 30.13,
+      paneerForSpp: 145.88,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 26 },
+      { sku: 'MPAN400', cases: 36 },
+      { sku: 'RPAN010', cases: 13 },
+      { sku: 'RPAN100', cases: 18 },
+      { sku: 'YD200', cases: 105 },
+    ],
+    milkSales: [
+      { id: 'ms-001', milkLotId: 'ml-002', saleDate: '2026-06-17', customer: 'Hubertous', quantity: 800 },
+      { id: 'ms-002', milkLotId: 'ml-002', saleDate: '2026-06-17', customer: 'Sonal', quantity: 300 },
+    ],
+  },
+  {
+    id: 'ml-003',
+    lotCode: '020626',
+    receiptDate: '2026-06-02',
+    receiptTime: '19:00',
+    supplier: 'TipTop Dairy',
+    invoiceNo: 'TT-2026-1156',
+    deliveryNoteNo: 'TT-DN-0445',
+    litresReceived: 26000,
+    litresConsumed: 25800,
+    litresRemaining: 0,
+    litresRejected: 150,
+    litresSpilled: 50,
+    litresSold: 0,
+    status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3289.2,
+      yieldLPerKg: 7.84,
+      paneerYieldPer100L: 12.73,
+      dRounds: 33,
+      csRounds: 18,
+      cream: 493.38,
+      pan111: 28.8,
+      paneerForSpp: 139.2,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 24 },
+      { sku: 'MPAN400', cases: 34 },
+      { sku: 'RPAN010', cases: 12 },
+      { sku: 'RPAN100', cases: 17 },
+      { sku: 'YD200', cases: 98 },
+    ],
+    milkSales: [],
+  },
+  {
+    id: 'ml-004',
+    lotCode: '260526',
+    receiptDate: '2026-05-26',
+    receiptTime: '18:15',
+    supplier: 'Green Valley Dairy',
+    invoiceNo: 'INV-2026-0372',
+    deliveryNoteNo: 'DN-2026-0803',
+    litresReceived: 23500,
+    litresConsumed: 23200,
+    litresRemaining: 0,
+    litresRejected: 100,
+    litresSpilled: 200,
+    litresSold: 0,
+    status: 'completed',
+    reconciliation: {
+      paneerRecorded: 2962.4,
+      yieldLPerKg: 7.87,
+      paneerYieldPer100L: 12.71,
+      dRounds: 30,
+      csRounds: 16,
+      cream: 444.36,
+      pan111: 25.9,
+      paneerForSpp: 125.1,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 22 },
+      { sku: 'MPAN400', cases: 30 },
+      { sku: 'RPAN010', cases: 11 },
+      { sku: 'RPAN100', cases: 15 },
+      { sku: 'YD200', cases: 88 },
+    ],
+    milkSales: [],
+  },
+  {
+    id: 'ml-005',
+    lotCode: '190526',
+    receiptDate: '2026-05-19',
+    receiptTime: '18:30',
+    supplier: 'TipTop Dairy',
+    invoiceNo: 'TT-2026-1098',
+    deliveryNoteNo: 'TT-DN-0412',
+    litresReceived: 25500,
+    litresConsumed: 25100,
+    litresRemaining: 0,
+    litresRejected: 250,
+    litresSpilled: 150,
+    litresSold: 0,
+    status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3203.1,
+      yieldLPerKg: 7.83,
+      paneerYieldPer100L: 12.76,
+      dRounds: 32,
+      csRounds: 17,
+      cream: 480.47,
+      pan111: 28.0,
+      paneerForSpp: 135.0,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 23 },
+      { sku: 'MPAN400', cases: 32 },
+      { sku: 'RPAN010', cases: 12 },
+      { sku: 'RPAN100', cases: 16 },
+      { sku: 'YD200', cases: 95 },
+    ],
+    milkSales: [],
+  },
+  {
+    id: 'ml-006',
+    lotCode: '120526',
+    receiptDate: '2026-05-12',
+    receiptTime: '19:15',
+    supplier: 'Green Valley Dairy',
+    invoiceNo: 'INV-2026-0345',
+    deliveryNoteNo: 'DN-2026-0761',
+    litresReceived: 24800,
+    litresConsumed: 24500,
+    litresRemaining: 0,
+    litresRejected: 180,
+    litresSpilled: 120,
+    litresSold: 0,
+    status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3108.6,
+      yieldLPerKg: 7.89,
+      paneerYieldPer100L: 12.68,
+      dRounds: 31,
+      csRounds: 17,
+      cream: 466.29,
+      pan111: 27.2,
+      paneerForSpp: 131.2,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 23 },
+      { sku: 'MPAN400', cases: 31 },
+      { sku: 'RPAN010', cases: 11 },
+      { sku: 'RPAN100', cases: 16 },
+      { sku: 'YD200', cases: 92 },
+    ],
+    milkSales: [],
+  },
+  {
+    id: 'ml-007',
+    lotCode: '050526',
+    receiptDate: '2026-05-05',
+    receiptTime: '18:45',
+    supplier: 'TipTop Dairy',
+    invoiceNo: 'TT-2026-1042',
+    deliveryNoteNo: 'TT-DN-0378',
+    litresReceived: 26200,
+    litresConsumed: 25900,
+    litresRemaining: 0,
+    litresRejected: 200,
+    litresSpilled: 100,
+    litresSold: 0,
+    status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3282.7,
+      yieldLPerKg: 7.89,
+      paneerYieldPer100L: 12.67,
+      dRounds: 33,
+      csRounds: 18,
+      cream: 492.41,
+      pan111: 28.7,
+      paneerForSpp: 138.5,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 24 },
+      { sku: 'MPAN400', cases: 34 },
+      { sku: 'RPAN010', cases: 12 },
+      { sku: 'RPAN100', cases: 17 },
+      { sku: 'YD200', cases: 99 },
+    ],
+    milkSales: [],
   },
 ];
 
