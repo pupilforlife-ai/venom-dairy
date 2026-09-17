@@ -50,6 +50,7 @@ export interface ProductionRound {
   
   // Production details
   vat?: 'vat2' | 'vat3';
+  startingTemperature?: number; // °C - recorded when moving to in_production
   pressingStartedAt?: string;
   coolingStartedAt?: string;
   coolingLocation?: 'tank' | 'chiller';
@@ -253,6 +254,7 @@ export const productionRounds: ProductionRound[] = [
     startTime: '2026-06-16T18:00:00',
     completedAt: '2026-06-16T22:00:00',
     vat: 'vat2',
+    startingTemperature: 4.2,
     pressingStartedAt: '2026-06-16T19:30:00',
     coolingStartedAt: '2026-06-16T20:00:00',
     coolingLocation: 'tank',
@@ -281,6 +283,7 @@ export const productionRounds: ProductionRound[] = [
     startTime: '2026-06-16T20:30:00',
     completedAt: '2026-06-17T00:30:00',
     vat: 'vat3',
+    startingTemperature: 4.5,
     pressingStartedAt: '2026-06-16T22:00:00',
     coolingStartedAt: '2026-06-16T22:30:00',
     coolingLocation: 'chiller',
@@ -360,6 +363,7 @@ export const productionRounds: ProductionRound[] = [
     startTime: '2026-06-17T16:30:00',
     completedAt: '2026-06-17T20:00:00',
     vat: 'vat2',
+    startingTemperature: 4.0,
     pressingStartedAt: '2026-06-17T18:00:00',
     coolingStartedAt: '2026-06-17T18:30:00',
     coolingLocation: 'tank',
