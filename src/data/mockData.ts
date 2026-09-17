@@ -6,6 +6,30 @@
 // Example: 160626 / S1 / R2 / C/S  (internal: 160626-S01-R02-CS)
 // ============================================================
 
+export interface MilkSale {
+  id: string;
+  milkLotId: string;
+  saleDate: string;
+  customer: string;
+  quantity: number;
+}
+
+export interface ProductionReconciliation {
+  paneerRecorded: number; // kg
+  yieldLPerKg: number; // L/kg
+  paneerYieldPer100L: number; // kg/100L
+  dRounds: number;
+  csRounds: number;
+  cream: number; // kg
+  pan111: number; // kg
+  paneerForSpp: number; // kg
+}
+
+export interface PackedSku {
+  sku: string;
+  cases: number;
+}
+
 export interface MilkLot {
   id: string;
   lotCode: string; // e.g. "160626" (date-based)
@@ -21,6 +45,10 @@ export interface MilkLot {
   litresSpilled: number;
   litresSold?: number;
   status: 'active' | 'completed' | 'rejected';
+  isLatest?: boolean;
+  reconciliation?: ProductionReconciliation;
+  packedSkus?: PackedSku[];
+  milkSales?: MilkSale[];
 }
 
 export interface ProductionShift {
@@ -229,6 +257,25 @@ export const milkLots: MilkLot[] = [
     litresSpilled: 120,
     litresSold: 0,
     status: 'active',
+    isLatest: true,
+    reconciliation: {
+      paneerRecorded: 2358.5,
+      yieldLPerKg: 7.85,
+      paneerYieldPer100L: 12.74,
+      dRounds: 24,
+      csRounds: 13,
+      cream: 352.8,
+      pan111: 20.5,
+      paneerForSpp: 98.6,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 18 },
+      { sku: 'MPAN400', cases: 24 },
+      { sku: 'RPAN010', cases: 9 },
+      { sku: 'RPAN100', cases: 12 },
+      { sku: 'YD200', cases: 72 },
+    ],
+    milkSales: [],
   },
   {
     id: 'ml-002',
@@ -245,6 +292,27 @@ export const milkLots: MilkLot[] = [
     litresSpilled: 200,
     litresSold: 0,
     status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3433.83,
+      yieldLPerKg: 7.86,
+      paneerYieldPer100L: 12.72,
+      dRounds: 35,
+      csRounds: 19,
+      cream: 515.74,
+      pan111: 30.13,
+      paneerForSpp: 145.88,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 26 },
+      { sku: 'MPAN400', cases: 36 },
+      { sku: 'RPAN010', cases: 13 },
+      { sku: 'RPAN100', cases: 18 },
+      { sku: 'YD200', cases: 105 },
+    ],
+    milkSales: [
+      { id: 'ms-001', milkLotId: 'ml-002', saleDate: '2026-06-17', customer: 'Hubertous', quantity: 800 },
+      { id: 'ms-002', milkLotId: 'ml-002', saleDate: '2026-06-17', customer: 'Sonal', quantity: 300 },
+    ],
   },
   {
     id: 'ml-003',
@@ -261,6 +329,24 @@ export const milkLots: MilkLot[] = [
     litresSpilled: 50,
     litresSold: 0,
     status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3289.2,
+      yieldLPerKg: 7.84,
+      paneerYieldPer100L: 12.73,
+      dRounds: 33,
+      csRounds: 18,
+      cream: 493.38,
+      pan111: 28.8,
+      paneerForSpp: 139.2,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 24 },
+      { sku: 'MPAN400', cases: 34 },
+      { sku: 'RPAN010', cases: 12 },
+      { sku: 'RPAN100', cases: 17 },
+      { sku: 'YD200', cases: 98 },
+    ],
+    milkSales: [],
   },
   {
     id: 'ml-004',
@@ -277,6 +363,24 @@ export const milkLots: MilkLot[] = [
     litresSpilled: 200,
     litresSold: 0,
     status: 'completed',
+    reconciliation: {
+      paneerRecorded: 2962.4,
+      yieldLPerKg: 7.87,
+      paneerYieldPer100L: 12.71,
+      dRounds: 30,
+      csRounds: 16,
+      cream: 444.36,
+      pan111: 25.9,
+      paneerForSpp: 125.1,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 22 },
+      { sku: 'MPAN400', cases: 30 },
+      { sku: 'RPAN010', cases: 11 },
+      { sku: 'RPAN100', cases: 15 },
+      { sku: 'YD200', cases: 88 },
+    ],
+    milkSales: [],
   },
   {
     id: 'ml-005',
@@ -293,6 +397,24 @@ export const milkLots: MilkLot[] = [
     litresSpilled: 150,
     litresSold: 0,
     status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3203.1,
+      yieldLPerKg: 7.83,
+      paneerYieldPer100L: 12.76,
+      dRounds: 32,
+      csRounds: 17,
+      cream: 480.47,
+      pan111: 28.0,
+      paneerForSpp: 135.0,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 23 },
+      { sku: 'MPAN400', cases: 32 },
+      { sku: 'RPAN010', cases: 12 },
+      { sku: 'RPAN100', cases: 16 },
+      { sku: 'YD200', cases: 95 },
+    ],
+    milkSales: [],
   },
   {
     id: 'ml-006',
@@ -309,6 +431,24 @@ export const milkLots: MilkLot[] = [
     litresSpilled: 120,
     litresSold: 0,
     status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3108.6,
+      yieldLPerKg: 7.89,
+      paneerYieldPer100L: 12.68,
+      dRounds: 31,
+      csRounds: 17,
+      cream: 466.29,
+      pan111: 27.2,
+      paneerForSpp: 131.2,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 23 },
+      { sku: 'MPAN400', cases: 31 },
+      { sku: 'RPAN010', cases: 11 },
+      { sku: 'RPAN100', cases: 16 },
+      { sku: 'YD200', cases: 92 },
+    ],
+    milkSales: [],
   },
   {
     id: 'ml-007',
@@ -325,6 +465,24 @@ export const milkLots: MilkLot[] = [
     litresSpilled: 100,
     litresSold: 0,
     status: 'completed',
+    reconciliation: {
+      paneerRecorded: 3282.7,
+      yieldLPerKg: 7.89,
+      paneerYieldPer100L: 12.67,
+      dRounds: 33,
+      csRounds: 18,
+      cream: 492.41,
+      pan111: 28.7,
+      paneerForSpp: 138.5,
+    },
+    packedSkus: [
+      { sku: 'MPAN100', cases: 24 },
+      { sku: 'MPAN400', cases: 34 },
+      { sku: 'RPAN010', cases: 12 },
+      { sku: 'RPAN100', cases: 17 },
+      { sku: 'YD200', cases: 99 },
+    ],
+    milkSales: [],
   },
 ];
 
