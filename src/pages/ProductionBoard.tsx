@@ -592,7 +592,7 @@ export default function ProductionBoard() {
           <button onClick={() => handleClingwrap(round.id)} className="px-2 py-1 bg-pink-400 text-white rounded text-xs hover:bg-pink-500">Clingwrap</button>
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
           <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-            <Package className="w-3 h-3" /> Pack
+            <Package className="w-3 h-3" /> {round.packedSkus && round.packedSkus.length > 0 ? '+Add Packing' : 'Pack'}
           </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
@@ -609,7 +609,7 @@ export default function ProductionBoard() {
           </button>
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
           <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-            <Package className="w-3 h-3" /> Pack
+            <Package className="w-3 h-3" /> {round.packedSkus && round.packedSkus.length > 0 ? '+Add Packing' : 'Pack'}
           </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
@@ -622,7 +622,7 @@ export default function ProductionBoard() {
       buttons.push(
         <div key="frozen-actions" className="flex gap-1 flex-wrap">
           <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-            <Package className="w-3 h-3" /> Pack
+            <Package className="w-3 h-3" /> {round.packedSkus && round.packedSkus.length > 0 ? '+Add Packing' : 'Pack'}
           </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
@@ -638,7 +638,7 @@ export default function ProductionBoard() {
             <CheckCircle2 className="w-3 h-3" /> Hand Over
           </button>
           <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-            <Package className="w-3 h-3" /> Pack
+            <Package className="w-3 h-3" /> +Add Packing
           </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
@@ -994,17 +994,32 @@ export default function ProductionBoard() {
       </Modal>
 
       {/* Pack Modal */}
-      <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title="Record Packing">
+      <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title={selectedRound && productionRounds.find(r => r.id === selectedRound)?.packedSkus?.length ? "+Add Packing" : "Record Packing"}>
         <div className="space-y-4">
           {selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
             const balance = round?.remainingBalance ?? round?.outputWeight ?? 0;
+            const existingPacking = round?.packedSkus || [];
             return (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <p className="text-xs text-amber-800">
-                  <strong>Available Balance:</strong> {balance.toFixed(2)} kg
-                </p>
-              </div>
+              <>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-xs text-amber-800">
+                    <strong>Available Balance:</strong> {balance.toFixed(2)} kg
+                  </p>
+                </div>
+                {existingPacking.length > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-xs text-blue-800 font-medium mb-2">Previous Packing Sessions:</p>
+                    <div className="space-y-1">
+                      {existingPacking.map((pack, idx) => (
+                        <div key={idx} className="text-xs text-blue-700">
+                          Session {idx + 1}: {pack.sku} - {pack.cases} cases + {pack.loose} loose
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             );
           })()}
           <div>
