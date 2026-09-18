@@ -43,6 +43,7 @@ export default function ProductionBoard() {
   } = useApp();
   const { showToast } = useToast();
   
+  const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
   const [filters, setFilters] = useState({ milkLot: 'all', status: 'all', type: 'all', shift: 'all' });
   const [showFilters, setShowFilters] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
@@ -666,21 +667,88 @@ export default function ProductionBoard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowPan111Modal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors">
-            <AlertTriangle className="w-4 h-4" /> Record PAN111
+          {activeTab === 'paneer' && (
+            <button onClick={() => setShowPan111Modal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors">
+              <AlertTriangle className="w-4 h-4" /> Record PAN111
+            </button>
+          )}
+          {activeTab === 'paneer' && (
+            <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${showFilters ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}>
+              <Filter className="w-4 h-4" /> Filters
+            </button>
+          )}
+          {activeTab === 'paneer' && (
+            <button onClick={() => setShowNewShiftModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+              <Plus className="w-4 h-4" /> New Shift
+            </button>
+          )}
+          {activeTab === 'paneer' && (
+            <button onClick={openNewRoundModal} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+              <Plus className="w-4 h-4" /> New Round
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Master Product Tabs */}
+      <div className="bg-white rounded-xl border border-slate-200 p-2">
+        <div className="flex gap-1">
+          <button
+            onClick={() => setActiveTab('paneer')}
+            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'paneer'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            🧀 Paneer
           </button>
-          <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${showFilters ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}>
-            <Filter className="w-4 h-4" /> Filters
+          <button
+            onClick={() => setActiveTab('halloumi')}
+            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'halloumi'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            🥙 Halloumi
           </button>
-          <button onClick={() => setShowNewShiftModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
-            <Plus className="w-4 h-4" /> New Shift
+          <button
+            onClick={() => setActiveTab('butter')}
+            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'butter'
+                ? 'bg-amber-600 text-white shadow-sm'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            🧈 Butter
           </button>
-          <button onClick={openNewRoundModal} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
-            <Plus className="w-4 h-4" /> New Round
+          <button
+            onClick={() => setActiveTab('ghee')}
+            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'ghee'
+                ? 'bg-orange-600 text-white shadow-sm'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            🫙 Ghee
+          </button>
+          <button
+            onClick={() => setActiveTab('crumbing')}
+            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'crumbing'
+                ? 'bg-pink-600 text-white shadow-sm'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            🍗 Crumbing
           </button>
         </div>
       </div>
 
+      {/* Paneer Tab Content */}
+      {activeTab === 'paneer' && (
+        <>
       {/* FIFO Warning Banner */}
       {hasFifoViolation && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
@@ -941,7 +1009,79 @@ export default function ProductionBoard() {
           );
         })}
       </div>
+        </>
+      )}
 
+      {/* Halloumi Tab Content */}
+      {activeTab === 'halloumi' && (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+          <div className="text-6xl mb-4">🥙</div>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">Halloumi Production</h3>
+          <p className="text-slate-600 mb-4">Halloumi workflow coming soon...</p>
+          <p className="text-sm text-slate-500">This tab will include:</p>
+          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
+            <li>• Similar workflow to paneer</li>
+            <li>• Default 240L milk input</li>
+            <li>• Staged recipe display for workers</li>
+            <li>• Discard button (owner/supervisor only)</li>
+          </ul>
+        </div>
+      )}
+
+      {/* Butter Tab Content */}
+      {activeTab === 'butter' && (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+          <div className="text-6xl mb-4">🧈</div>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">Butter Production</h3>
+          <p className="text-slate-600 mb-4">Butter workflow coming soon...</p>
+          <p className="text-sm text-slate-500">This tab will include:</p>
+          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
+            <li>• Cream source selection (internal/external)</li>
+            <li>• Shift + Round structure</li>
+            <li>• PUBBB/PSBBB pools</li>
+            <li>• Blending subsection</li>
+            <li>• Multiple packing sessions</li>
+          </ul>
+        </div>
+      )}
+
+      {/* Ghee Tab Content */}
+      {activeTab === 'ghee' && (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+          <div className="text-6xl mb-4">🫙</div>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">Ghee Production</h3>
+          <p className="text-slate-600 mb-4">Ghee workflow coming soon...</p>
+          <p className="text-sm text-slate-500">This tab will include:</p>
+          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
+            <li>• Shift + Round structure</li>
+            <li>• Auto AF oil calculation</li>
+            <li>• Dual SKU packing (400g + 1.5kg)</li>
+            <li>• Auto-subtract from butter balance</li>
+            <li>• Close production button</li>
+          </ul>
+        </div>
+      )}
+
+      {/* Crumbing Tab Content */}
+      {activeTab === 'crumbing' && (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+          <div className="text-6xl mb-4">🍗</div>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">Crumbing (SPP / JP / HCP)</h3>
+          <p className="text-slate-600 mb-4">Crumbing workflow coming soon...</p>
+          <p className="text-sm text-slate-500">This tab will include:</p>
+          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
+            <li>• SPP (Spicy Paneer Poppers)</li>
+            <li>• JP (Jalapeño Poppers)</li>
+            <li>• HCP (Halloumi Poppers)</li>
+            <li>• Tray tracking (crumbed, fried, packed)</li>
+            <li>• Batch codes with date-type-sequence</li>
+          </ul>
+        </div>
+      )}
+
+      {/* Modals - only show for paneer tab */}
+      {activeTab === 'paneer' && (
+      <>
       {/* Cut Modal */}
       <Modal isOpen={showCutModal} onClose={() => setShowCutModal(false)} title="Record Cutting" size="lg">
         <div className="space-y-4">
@@ -1382,6 +1522,8 @@ export default function ProductionBoard() {
           </div>
         </div>
       </Modal>
+      </>
+      )}
     </div>
   );
 }
