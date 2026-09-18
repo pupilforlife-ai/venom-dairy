@@ -1,24 +1,114 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { Plus, Filter, AlertTriangle, Clock, Scissors, Package, CheckCircle2 } from 'lucide-react';
-import { milkLots, statusLabels, statusColors } from '../data/mockData';
+import { Plus, Clock, Package, Scissors, CheckCircle2, Thermometer, Beaker } from 'lucide-react';
+import { milkLots } from '../data/mockData';
 
 // Halloumi-specific status flow
 const halloumiStatusFlow = [
   'scheduled',
-  'in_production',
-  'coagulation',
-  'pressing',
-  'cooling',
-  'resting',
-  'ready_cutting',
-  'cut',
+  'cacl2_added',
+  'heating_34c',
+  'rennet_added',
+  'curd_setting',
+  'curd_cutting',
+  'presses',
+  'whey_heating',
+  'boiling',
+  'salted',
+  'chiller_storage',
+  'weighed',
   'vacuum_packed',
   'sent_to_hcp',
   'handed_over',
 ] as const;
+
+type HalloumiStatus = typeof halloumiStatusFlow[number];
+
+const halloumiStatusLabels: Record<string, string> = {
+  scheduled: 'Scheduled',
+  cacl2_added: 'CaCl2 Added',
+  heating_34c: 'Heating to 34°C',
+  rennet_added: 'Rennet Added',
+  curd_setting: 'Curd Setting',
+  curd_cutting: 'Curd Cutting + Heating',
+  presses: 'Presses',
+  whey_heating: 'Whey Heating to 90°C',
+  boiling: 'Halloumi Boiling',
+  salted: 'Salted',
+  chiller_storage: 'Chiller Storage',
+  weighed: 'Weighed',
+  vacuum_packed: 'Vacuum Packed',
+  sent_to_hcp: 'Sent to HCP',
+  handed_over: 'Handed Over',
+};
+
+const halloumiStatusColors: Record<string, string> = {
+  scheduled: 'bg-slate-400',
+  cacl2_added: 'bg-blue-400',
+  heating_34c: 'bg-blue-500',
+  rennet_added: 'bg-indigo-400',
+  curd_setting: 'bg-indigo-500',
+  curd_cutting: 'bg-purple-500',
+  presses: 'bg-purple-600',
+  whey_heating: 'bg-orange-500',
+  boiling: 'bg-orange-600',
+  salted: 'bg-teal-500',
+  chiller_storage: 'bg-cyan-500',
+  weighed: 'bg-emerald-400',
+  vacuum_packed: 'bg-emerald-600',
+  sent_to_hcp: 'bg-pink-500',
+  handed_over: 'bg-emerald-700',
+};
+
+// Recipe details for each stage
+const stageRecipes: Record<string, { title: string; details: string[] }> = {
+  cacl2_added: {
+    title: 'Add CaCl2 Solution',
+    details: ['192g CaCl2 in 3.8L water', 'Add to milk and stir gently'],
+  },
+  heating_34c: {
+    title: 'Heat to 34°C',
+    details: ['Heat milk slowly to 34°C', 'Monitor temperature carefully'],
+  },
+  rennet_added: {
+    title: 'Add Rennet',
+    details: ['15ml rennet in 500ml water', 'Add to milk and stir gently'],
+  },
+  curd_setting: {
+    title: 'Curd Setting',
+    details: ['Let curd set for 30 minutes', 'Do not disturb during this time'],
+  },
+  curd_cutting: {
+    title: 'Curd Cutting + Heating to 42°C',
+    details: ['Cut curd into pieces', 'Heat slowly to 42°C over 40 minutes', 'Gently lift curd while heating'],
+  },
+  presses: {
+    title: 'Presses',
+    details: ['Remove curd into presses', 'Press until firm'],
+  },
+  whey_heating: {
+    title: 'Whey Heating to 90°C',
+    details: ['Whey remains in vessel', 'Heat whey to 90°C'],
+  },
+  boiling: {
+    title: 'Halloumi Boiling',
+    details: ['Cut pressed halloumi to smaller pieces', 'Cook in hot whey until floating', 'Monitor until pieces float'],
+  },
+  salted: {
+    title: 'Salted',
+    details: ['Remove from whey', 'Cool and salt'],
+  },
+  chiller_storage: {
+    title: 'Chiller Storage',
+    details: ['Store in chiller', 'Hold for 4-6 hours'],
+  },
+  weighed: {
+    title: 'Record Weight',
+    details: ['Weigh final product', 'Record output weight'],
+  },
+};
 
 export default function HalloumiTab() {
   const { productionRounds, productionShifts, updateProductionRound, addProductionRound, addProductionShift } = useApp();
@@ -26,8 +116,12 @@ export default function HalloumiTab() {
 
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
-  const [showRecipeModal, setShowRecipeModal] = useState(false);
+  const [showWeightModal, setShowWeightModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
+  const [weightInput, setWeightInput] = useState(0);
+
+  // Timer state
+  const [timers, setTimers] = useState<Record<string, number>>({});
 
   // Filter halloumi rounds only
   const halloumiRounds = productionRounds.filter(r => r.type === 'Halloumi');
@@ -44,6 +138,33 @@ export default function HalloumiTab() {
 
   const activeMilkLot = milkLots.find(m => m.status === 'active');
 
+  // Update timers every second
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimers(prev => {
+        const updated = { ...prev };
+        halloumiRounds.forEach(round => {
+          if (round.status === 'curd_setting' && round.curdSettingStartedAt) {
+            const elapsed = Math.floor((Date.now() - new Date(round.curdSettingStartedAt).getTime()) / 1000);
+            updated[round.id] = Math.max(0, 1800 - elapsed); // 30 minutes
+          } else if (round.status === 'curd_cutting' && round.curdCuttingStartedAt) {
+            const elapsed = Math.floor((Date.now() - new Date(round.curdCuttingStartedAt).getTime()) / 1000);
+            updated[round.id] = Math.max(0, 2400 - elapsed); // 40 minutes
+          }
+        });
+        return updated;
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [halloumiRounds]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // New shift form
   const [newShift, setNewShift] = useState({
     milkLotId: activeMilkLot?.id || '',
@@ -56,7 +177,6 @@ export default function HalloumiTab() {
   const [newRound, setNewRound] = useState({
     shiftId: '',
     roundNumber: 1,
-    plannedInput: 240, // Default 240L for halloumi
     team: '',
   });
 
@@ -98,46 +218,43 @@ export default function HalloumiTab() {
       type: 'Halloumi',
       status: 'scheduled',
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
-      plannedInput: newRound.plannedInput,
-      actualInput: 0,
+      plannedInput: 240, // Fixed 240L for halloumi
+      actualInput: 240,
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
     });
     showToast('success', `Halloumi round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
     setShowNewRoundModal(false);
-    setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 240, team: '' });
+    setNewRound({ shiftId: '', roundNumber: 1, team: '' });
   };
 
-  const handleStatusChange = (roundId: string, newStatus: string) => {
+  const handleStatusChange = (roundId: string, newStatus: HalloumiStatus) => {
     const updates: any = { status: newStatus };
     
-    if (newStatus === 'pressing') {
-      updates.pressingStartedAt = new Date().toISOString();
-    } else if (newStatus === 'cooling') {
-      updates.coolingStartedAt = new Date().toISOString();
-    } else if (newStatus === 'resting') {
-      updates.restingStartedAt = new Date().toISOString();
+    if (newStatus === 'curd_setting') {
+      updates.curdSettingStartedAt = new Date().toISOString();
+    } else if (newStatus === 'curd_cutting') {
+      updates.curdCuttingStartedAt = new Date().toISOString();
     }
 
     updateProductionRound(roundId, updates);
-    showToast('success', `Status updated to ${statusLabels[newStatus]}`);
+    showToast('success', `Status: ${halloumiStatusLabels[newStatus]}`);
   };
 
-  const handleDiscard = (roundId: string) => {
-    const reason = prompt('Enter discard reason:');
-    if (!reason) return;
+  const handleRecordWeight = () => {
+    if (!selectedRound || weightInput <= 0) {
+      showToast('error', 'Please enter a valid weight');
+      return;
+    }
 
-    const responsible = prompt('Who is responsible?');
-    if (!responsible) return;
-
-    updateProductionRound(roundId, {
-      status: 'handed_over',
-      locked: true,
-      notes: `DISCARDED: ${reason} (Responsible: ${responsible})`,
-      completedAt: new Date().toISOString(),
+    updateProductionRound(selectedRound, {
+      outputWeight: weightInput,
+      status: 'weighed',
     });
-    showToast('success', 'Round discarded and locked');
+    showToast('success', `Weight recorded: ${weightInput} kg`);
+    setShowWeightModal(false);
+    setWeightInput(0);
   };
 
   const getActionButtons = (round: any) => {
@@ -146,88 +263,139 @@ export default function HalloumiTab() {
     if (round.status === 'scheduled') {
       buttons.push(
         <button
-          key="start"
-          onClick={() => handleStatusChange(round.id, 'in_production')}
+          key="cacl2"
+          onClick={() => handleStatusChange(round.id, 'cacl2_added')}
           className="px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600"
         >
-          Start Production
+          <Beaker className="w-3 h-3 inline mr-1" />
+          Add CaCl2
         </button>
       );
-    } else if (round.status === 'in_production') {
+    } else if (round.status === 'cacl2_added') {
       buttons.push(
         <button
-          key="coagulation"
-          onClick={() => handleStatusChange(round.id, 'coagulation')}
-          className="px-3 py-1.5 bg-violet-500 text-white rounded text-xs font-medium hover:bg-violet-600"
+          key="heat"
+          onClick={() => handleStatusChange(round.id, 'heating_34c')}
+          className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
         >
-          Start Coagulation
+          <Thermometer className="w-3 h-3 inline mr-1" />
+          Heat to 34°C
         </button>
       );
-    } else if (round.status === 'coagulation') {
+    } else if (round.status === 'heating_34c') {
       buttons.push(
         <button
-          key="pressing"
-          onClick={() => handleStatusChange(round.id, 'pressing')}
-          className="px-3 py-1.5 bg-purple-500 text-white rounded text-xs font-medium hover:bg-purple-600"
+          key="rennet"
+          onClick={() => handleStatusChange(round.id, 'rennet_added')}
+          className="px-3 py-1.5 bg-indigo-500 text-white rounded text-xs font-medium hover:bg-indigo-600"
         >
-          Start Pressing (30 min)
+          <Beaker className="w-3 h-3 inline mr-1" />
+          Add Rennet
         </button>
       );
-    } else if (round.status === 'pressing') {
+    } else if (round.status === 'rennet_added') {
       buttons.push(
-        <div key="pressing-timer" className="flex items-center gap-2">
+        <button
+          key="curd_set"
+          onClick={() => handleStatusChange(round.id, 'curd_setting')}
+          className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700"
+        >
+          Start Curd Setting (30 min)
+        </button>
+      );
+    } else if (round.status === 'curd_setting') {
+      const timer = timers[round.id] || 0;
+      buttons.push(
+        <div key="curd_timer" className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-indigo-500" />
+          <span className="text-xs font-mono font-bold text-indigo-700">{formatTime(timer)}</span>
+          {timer === 0 && (
+            <button
+              onClick={() => handleStatusChange(round.id, 'curd_cutting')}
+              className="px-3 py-1.5 bg-purple-500 text-white rounded text-xs font-medium hover:bg-purple-600"
+            >
+              <Scissors className="w-3 h-3 inline mr-1" />
+              Cut Curd (40 min)
+            </button>
+          )}
+        </div>
+      );
+    } else if (round.status === 'curd_cutting') {
+      const timer = timers[round.id] || 0;
+      buttons.push(
+        <div key="cut_timer" className="flex items-center gap-2">
           <Clock className="w-4 h-4 text-purple-500" />
-          <span className="text-xs font-mono text-purple-700">30:00</span>
-          <button
-            onClick={() => handleStatusChange(round.id, 'cooling')}
-            className="px-3 py-1.5 bg-cyan-500 text-white rounded text-xs font-medium hover:bg-cyan-600"
-          >
-            Start Cooling
-          </button>
+          <span className="text-xs font-mono font-bold text-purple-700">{formatTime(timer)}</span>
+          {timer === 0 && (
+            <button
+              onClick={() => handleStatusChange(round.id, 'presses')}
+              className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700"
+            >
+              To Presses
+            </button>
+          )}
         </div>
       );
-    } else if (round.status === 'cooling') {
-      buttons.push(
-        <div key="cooling-timer" className="flex items-center gap-2">
-          <Clock className="w-4 h-4 text-cyan-500" />
-          <span className="text-xs font-mono text-cyan-700">90:00</span>
-          <button
-            onClick={() => handleStatusChange(round.id, 'resting')}
-            className="px-3 py-1.5 bg-teal-500 text-white rounded text-xs font-medium hover:bg-teal-600"
-          >
-            Start Resting (90 min)
-          </button>
-        </div>
-      );
-    } else if (round.status === 'resting') {
-      buttons.push(
-        <div key="resting-timer" className="flex items-center gap-2">
-          <Clock className="w-4 h-4 text-teal-500" />
-          <span className="text-xs font-mono text-teal-700">90:00</span>
-          <button
-            onClick={() => handleStatusChange(round.id, 'ready_cutting')}
-            className="px-3 py-1.5 bg-amber-500 text-white rounded text-xs font-medium hover:bg-amber-600"
-          >
-            Ready to Cut
-          </button>
-        </div>
-      );
-    } else if (round.status === 'ready_cutting') {
+    } else if (round.status === 'presses') {
       buttons.push(
         <button
-          key="cut"
-          onClick={() => handleStatusChange(round.id, 'cut')}
-          className="flex items-center gap-1 px-3 py-1.5 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600"
+          key="whey"
+          onClick={() => handleStatusChange(round.id, 'whey_heating')}
+          className="px-3 py-1.5 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600"
         >
-          <Scissors className="w-3 h-3" /> Cut
+          <Thermometer className="w-3 h-3 inline mr-1" />
+          Heat Whey to 90°C
         </button>
       );
-    } else if (round.status === 'cut') {
+    } else if (round.status === 'whey_heating') {
       buttons.push(
-        <div key="cut-actions" className="flex gap-2">
+        <button
+          key="boil"
+          onClick={() => handleStatusChange(round.id, 'boiling')}
+          className="px-3 py-1.5 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-700"
+        >
+          Start Boiling
+        </button>
+      );
+    } else if (round.status === 'boiling') {
+      buttons.push(
+        <button
+          key="salt"
+          onClick={() => handleStatusChange(round.id, 'salted')}
+          className="px-3 py-1.5 bg-teal-500 text-white rounded text-xs font-medium hover:bg-teal-600"
+        >
+          Salt
+        </button>
+      );
+    } else if (round.status === 'salted') {
+      buttons.push(
+        <button
+          key="chiller"
+          onClick={() => handleStatusChange(round.id, 'chiller_storage')}
+          className="px-3 py-1.5 bg-cyan-500 text-white rounded text-xs font-medium hover:bg-cyan-600"
+        >
+          Store in Chiller
+        </button>
+      );
+    } else if (round.status === 'chiller_storage') {
+      buttons.push(
+        <button
+          key="weigh"
+          onClick={() => {
+            setSelectedRound(round.id);
+            setShowWeightModal(true);
+          }}
+          className="px-3 py-1.5 bg-emerald-400 text-white rounded text-xs font-medium hover:bg-emerald-500"
+        >
+          Record Weight
+        </button>
+      );
+    } else if (round.status === 'weighed') {
+      buttons.push(
+        <div key="final" className="flex gap-2">
           <button
             onClick={() => handleStatusChange(round.id, 'vacuum_packed')}
-            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-white rounded text-xs font-medium hover:bg-emerald-600"
+            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-medium hover:bg-emerald-700"
           >
             <Package className="w-3 h-3" /> Vacuum Pack
           </button>
@@ -235,7 +403,7 @@ export default function HalloumiTab() {
             onClick={() => handleStatusChange(round.id, 'sent_to_hcp')}
             className="flex items-center gap-1 px-3 py-1.5 bg-pink-500 text-white rounded text-xs font-medium hover:bg-pink-600"
           >
-            Send to HCP
+            <Scissors className="w-3 h-3" /> Send to HCP
           </button>
         </div>
       );
@@ -251,20 +419,11 @@ export default function HalloumiTab() {
       );
     }
 
-    // Discard button (for owner/supervisor - we'll add role check later)
-    if (round.status !== 'handed_over') {
-      buttons.push(
-        <button
-          key="discard"
-          onClick={() => handleDiscard(round.id)}
-          className="px-3 py-1.5 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600"
-        >
-          Discard
-        </button>
-      );
-    }
-
     return buttons;
+  };
+
+  const getStageRecipe = (status: string) => {
+    return stageRecipes[status];
   };
 
   return (
@@ -274,16 +433,10 @@ export default function HalloumiTab() {
         <div>
           <h3 className="text-lg font-bold text-slate-900">Halloumi Production</h3>
           <p className="text-sm text-slate-500">
-            Milk Lot: <span className="font-medium text-slate-700">{activeMilkLot?.lotCode}</span> • Default input: 240L
+            Milk Lot: <span className="font-medium text-slate-700">{activeMilkLot?.lotCode}</span> • Input: 240L
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowRecipeModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-purple-600 text-white hover:bg-purple-700"
-          >
-            View Recipe
-          </button>
           <button
             onClick={() => setShowNewShiftModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700"
@@ -330,33 +483,52 @@ export default function HalloumiTab() {
                     <tr className="border-b border-slate-100">
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-36">Batch ID</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Status</th>
-                      <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Input</th>
+                      <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Recipe / Instructions</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Output</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {rounds.map((round) => (
-                      <tr key={round.id} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-3">
-                          <div className="font-mono text-xs font-bold text-slate-900">
-                            {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white ${statusColors[round.status]}`}>
-                            {statusLabels[round.status]}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600 text-xs">{round.actualInput > 0 ? `${round.actualInput}L` : '—'}</td>
-                        <td className="px-4 py-3 text-slate-600 text-xs">{round.outputWeight > 0 ? `${round.outputWeight} kg` : '—'}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex gap-1 flex-wrap">
-                            {getActionButtons(round)}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {rounds.map((round) => {
+                      const recipe = getStageRecipe(round.status);
+                      return (
+                        <tr key={round.id} className="hover:bg-slate-50/50">
+                          <td className="px-4 py-3">
+                            <div className="font-mono text-xs font-bold text-slate-900">
+                              {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
+                            </div>
+                            <div className="text-xs text-slate-500">240L input</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white ${halloumiStatusColors[round.status]}`}>
+                              {halloumiStatusLabels[round.status]}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {recipe ? (
+                              <div className="bg-blue-50 border border-blue-200 rounded p-2">
+                                <p className="text-xs font-medium text-blue-900">{recipe.title}</p>
+                                <ul className="text-xs text-blue-700 mt-1 space-y-0.5">
+                                  {recipe.details.map((detail, i) => (
+                                    <li key={i}>• {detail}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 text-xs">
+                            {round.outputWeight > 0 ? `${round.outputWeight} kg` : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-1 flex-wrap">
+                              {getActionButtons(round)}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -427,11 +599,20 @@ export default function HalloumiTab() {
       {/* New Round Modal */}
       <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Halloumi Round">
         <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-xs text-blue-800">
+              <strong>Note:</strong> Halloumi rounds use 240L milk (fixed). Recipe details will be shown at each stage.
+            </p>
+          </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift</label>
             <select
               value={newRound.shiftId}
-              onChange={(e) => setNewRound({ ...newRound, shiftId: e.target.value })}
+              onChange={(e) => {
+                const shiftId = e.target.value;
+                const existingRounds = halloumiRounds.filter(r => r.shiftId === shiftId).length;
+                setNewRound({ ...newRound, shiftId, roundNumber: existingRounds + 1 });
+              }}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
               <option value="">Select shift</option>
@@ -451,16 +632,6 @@ export default function HalloumiTab() {
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Planned Input (L) - Default 240L</label>
-            <input
-              type="number"
-              value={newRound.plannedInput}
-              onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              min="0"
-            />
-          </div>
-          <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (optional)</label>
             <input
               type="text"
@@ -470,6 +641,15 @@ export default function HalloumiTab() {
               placeholder="Leave empty to use shift team"
             />
           </div>
+          {newRound.shiftId && (
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-500">Batch ID will be:</p>
+              <p className="font-mono text-sm font-bold text-slate-900 mt-1">
+                {productionShifts.find(s => s.id === newRound.shiftId)?.milkLotCode}/S{productionShifts.find(s => s.id === newRound.shiftId)?.shiftNumber}/R{newRound.roundNumber}/Halloumi
+              </p>
+              <p className="text-xs text-slate-500 mt-1">Input: 240L milk</p>
+            </div>
+          )}
           <div className="flex gap-2 pt-2">
             <button
               onClick={handleCreateRound}
@@ -487,55 +667,39 @@ export default function HalloumiTab() {
         </div>
       </Modal>
 
-      {/* Recipe Modal */}
-      <Modal isOpen={showRecipeModal} onClose={() => setShowRecipeModal(false)} title="Halloumi Recipe" size="lg">
+      {/* Weight Recording Modal */}
+      <Modal isOpen={showWeightModal} onClose={() => setShowWeightModal(false)} title="Record Final Weight">
         <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <p className="text-sm font-medium text-blue-900 mb-2">Standard Halloumi Recipe (240L milk)</p>
-            <div className="space-y-2 text-sm text-blue-800">
-              <div className="flex justify-between">
-                <span>Raw milk:</span>
-                <span className="font-medium">240 L</span>
-              </div>
-              <div className="flex justify-between">
-                <span>CaCl2 solution:</span>
-                <span className="font-medium">240 mL</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Rennet:</span>
-                <span className="font-medium">60 mL</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Salt:</span>
-                <span className="font-medium">2.4 kg</span>
-              </div>
-            </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Final Product Weight (kg)</label>
+            <input
+              type="number"
+              value={weightInput}
+              onChange={(e) => setWeightInput(parseFloat(e.target.value) || 0)}
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              step="0.1"
+              min="0"
+              placeholder="e.g., 26.5"
+            />
           </div>
-
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-            <p className="text-sm font-medium text-amber-900 mb-2">Process Steps</p>
-            <ol className="space-y-2 text-sm text-amber-800 list-decimal list-inside">
-              <li>Heat milk to 34°C</li>
-              <li>Add CaCl2 solution, stir gently</li>
-              <li>Add rennet, stir gently</li>
-              <li>Let coagulate for 30-45 minutes</li>
-              <li>Cut curd into 2cm cubes</li>
-              <li>Heat to 40°C over 30 minutes, stirring gently</li>
-              <li>Let curd settle, drain whey</li>
-              <li>Press curd for 2-3 hours</li>
-              <li>Cut into blocks</li>
-              <li>Cook blocks in hot whey (90°C) for 30 minutes</li>
-              <li>Cool in cold water</li>
-              <li>Salt in brine for 2-4 hours</li>
-            </ol>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+            <p className="text-xs text-emerald-800">
+              <strong>Expected yield:</strong> 24-28 kg from 240L milk
+            </p>
           </div>
-
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-            <p className="text-sm font-medium text-emerald-900 mb-2">Expected Yield</p>
-            <div className="text-sm text-emerald-800">
-              <p>Approximately <span className="font-bold">24-28 kg</span> of halloumi from 240L milk</p>
-              <p className="text-xs mt-1">Yield varies based on milk composition and process control</p>
-            </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={handleRecordWeight}
+              className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700"
+            >
+              Record Weight
+            </button>
+            <button
+              onClick={() => setShowWeightModal(false)}
+              className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       </Modal>

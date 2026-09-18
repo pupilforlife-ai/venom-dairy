@@ -95,54 +95,104 @@ Ready for Cutting → Cut → [Clingwrapped] → [Frozen] → Packed → Handed 
 
 ### Complete Status Pipeline
 ```
-Scheduled → In Production → Coagulation → Pressing (30min) → 
-Cooling (90min) → Resting (90min) → Ready for Cutting → Cut → 
+Scheduled → Add CaCl2 → Heat to 34°C → Add Rennet → 
+Curd Setting (30min) → Curd Cutting + Heating to 42°C (40min) → 
+Presses → Whey Heating to 90°C → Halloumi Boiling → 
+Salted → Chiller Storage (4-6hr) → Weighed → 
 [Vacuum Pack OR Send to HCP] → Handed Over
 ```
 
-### Key Differences from Paneer
+### Halloumi-Specific Process (Distinct from Paneer)
 
 #### Default Input
-- **240L milk** (not 500L like paneer)
-- Changeable per round
+- **240L milk** (fixed for halloumi rounds)
+- Automatically set when round is created
 
-#### Recipe Display
-- **Staged recipe** shown to workers step-by-step
-- Full recipe visible to owners/supervisors
-- Recipe includes:
-  - CaCl2 solution: 240 mL (for 240L milk)
-  - Rennet: 60 mL
-  - Salt: 2.4 kg
-  - Process: 12 steps from heating to brining
+#### Stage-by-Stage Recipe Display
+Each stage shows specific recipe details inline:
 
-#### Expected Yield
-- **24-28 kg** halloumi from 240L milk
-- Varies based on milk composition and process control
+1. **Add CaCl2 Solution**
+   - 192g CaCl2 in 3.8L water
+   - Add to milk and stir gently
 
-#### After Cutting
-- Two options:
-  1. **Vacuum Pack** — for direct sale
-  2. **Send to HCP** — for Halloumi Cheese Poppers (crumbing tab)
+2. **Heat to 34°C**
+   - Heat milk slowly to 34°C
+   - Monitor temperature carefully
 
-#### Discard Button
-- **Owner/Supervisor only** (role check not yet implemented)
-- Must record:
-  - Reason for discard
-  - Person responsible
-- Round is locked after discard
+3. **Add Rennet**
+   - 15ml rennet in 500ml water
+   - Add to milk and stir gently
+
+4. **Curd Setting** ⏱️
+   - **30-minute timer**
+   - Let curd set, do not disturb
+
+5. **Curd Cutting + Heating to 42°C** ⏱️
+   - **40-minute timer**
+   - Cut curd into pieces
+   - Heat slowly to 42°C over 40 minutes
+   - Gently lift curd while heating
+
+6. **Presses**
+   - Remove curd into presses
+   - Press until firm
+
+7. **Whey Heating to 90°C**
+   - Whey remains in vessel
+   - Heat whey to 90°C
+
+8. **Halloumi Boiling**
+   - Cut pressed halloumi to smaller pieces
+   - Cook in hot whey until floating
+   - Monitor until pieces float
+
+9. **Salted**
+   - Remove from whey
+   - Cool and salt
+
+10. **Chiller Storage**
+    - Store in chiller
+    - Hold for 4-6 hours
+
+11. **Weighed**
+    - Weigh final product
+    - Record output weight
+    - Expected yield: 24-28 kg from 240L milk
+
+12. **Final Decision**
+    - **Vacuum Pack** — for direct sale
+    - **Send to HCP** — for Halloumi Cheese Poppers (crumbing tab)
+
+### Key Differences from Paneer
+
+| Feature | Paneer | Halloumi |
+|---------|--------|----------|
+| Default input | 500L | 240L (fixed) |
+| Vat selection | Vat 2 or Vat 3 | Not applicable |
+| CaCl2/Rennet | Not used | Used (specific quantities) |
+| Timers | Pressing 30min, Cooling 90/120min, Resting 90min | Curd Setting 30min, Curd Cutting 40min |
+| Cooling choice | Tank or Chiller | Not applicable |
+| Unique step | — | Cooking in hot whey until floating |
+| After processing | Clingwrap/Freeze/Pack | Vacuum Pack or Send to HCP |
+| Cream recovery | Yes (C/S rounds only) | No |
+| PAN111 | Yes (once per milk lot) | No |
+| Recipe display | Not inline | Inline at each stage |
 
 ### Timer Durations
-- **Pressing:** 30 minutes
-- **Cooling:** 90 minutes (fixed, no tank/chiller choice like paneer)
-- **Resting:** 90 minutes
+- **Curd Setting:** 30 minutes
+- **Curd Cutting + Heating:** 40 minutes (while reaching 42°C)
+- **Chiller Storage:** 4-6 hours (manual, no timer)
 
 ### Implementation Status
-- ✅ Halloumi tab created
-- ✅ Shift and round management
-- ✅ Status pipeline with timers
-- ✅ Recipe modal with full process steps
-- ✅ Discard button (without role check yet)
+- ✅ Halloumi tab created with correct workflow
+- ✅ Shift and round management (240L default)
+- ✅ Correct status pipeline (15 stages)
+- ✅ Inline recipe display at each stage
+- ✅ Timers for curd setting (30min) and curd cutting (40min)
+- ✅ Temperature targets shown (34°C, 42°C, 90°C)
+- ✅ Weight recording modal with expected yield
 - ✅ Vacuum pack / Send to HCP options
+- ✅ Data model updated to support halloumi-specific timestamps
 
 ---
 
