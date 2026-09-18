@@ -20,6 +20,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { milkLots, statusFlow, statusLabels, statusColors } from '../data/mockData';
+import HalloumiTab from './HalloumiTab';
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
   const currentIndex = statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
@@ -1014,18 +1015,7 @@ export default function ProductionBoard() {
 
       {/* Halloumi Tab Content */}
       {activeTab === 'halloumi' && (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <div className="text-6xl mb-4">🥙</div>
-          <h3 className="text-xl font-bold text-slate-900 mb-2">Halloumi Production</h3>
-          <p className="text-slate-600 mb-4">Halloumi workflow coming soon...</p>
-          <p className="text-sm text-slate-500">This tab will include:</p>
-          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
-            <li>• Similar workflow to paneer</li>
-            <li>• Default 240L milk input</li>
-            <li>• Staged recipe display for workers</li>
-            <li>• Discard button (owner/supervisor only)</li>
-          </ul>
-        </div>
+        <HalloumiTab />
       )}
 
       {/* Butter Tab Content */}

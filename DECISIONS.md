@@ -2,7 +2,7 @@
 
 **Document:** `DECISIONS.md`  
 **Purpose:** Captures all factory-specific decisions, corrections, and context from development sessions. Ensures continuity when switching between development environments (e.g., from web-based assistant to Codex).  
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-06-17 (Halloumi Tab Added)
 
 ---
 
@@ -88,6 +88,61 @@ Ready for Cutting → Cut → [Clingwrapped] → [Frozen] → Packed → Handed 
   - 20 kg cases (50 packets)
   - Can also be sold in 10 kg or 5 kg iterations
 - Recorded as **packets and weight** (not cases/loose like regular paneer)
+
+---
+
+## 1B. Halloumi Production Workflow
+
+### Complete Status Pipeline
+```
+Scheduled → In Production → Coagulation → Pressing (30min) → 
+Cooling (90min) → Resting (90min) → Ready for Cutting → Cut → 
+[Vacuum Pack OR Send to HCP] → Handed Over
+```
+
+### Key Differences from Paneer
+
+#### Default Input
+- **240L milk** (not 500L like paneer)
+- Changeable per round
+
+#### Recipe Display
+- **Staged recipe** shown to workers step-by-step
+- Full recipe visible to owners/supervisors
+- Recipe includes:
+  - CaCl2 solution: 240 mL (for 240L milk)
+  - Rennet: 60 mL
+  - Salt: 2.4 kg
+  - Process: 12 steps from heating to brining
+
+#### Expected Yield
+- **24-28 kg** halloumi from 240L milk
+- Varies based on milk composition and process control
+
+#### After Cutting
+- Two options:
+  1. **Vacuum Pack** — for direct sale
+  2. **Send to HCP** — for Halloumi Cheese Poppers (crumbing tab)
+
+#### Discard Button
+- **Owner/Supervisor only** (role check not yet implemented)
+- Must record:
+  - Reason for discard
+  - Person responsible
+- Round is locked after discard
+
+### Timer Durations
+- **Pressing:** 30 minutes
+- **Cooling:** 90 minutes (fixed, no tank/chiller choice like paneer)
+- **Resting:** 90 minutes
+
+### Implementation Status
+- ✅ Halloumi tab created
+- ✅ Shift and round management
+- ✅ Status pipeline with timers
+- ✅ Recipe modal with full process steps
+- ✅ Discard button (without role check yet)
+- ✅ Vacuum pack / Send to HCP options
 
 ---
 
@@ -331,7 +386,7 @@ Example: 160626/S1/R2/C/S
 - [ ] What happens if a round is abandoned/cancelled mid-production?
 - [ ] How to handle rework (if any)?
 - [ ] Should timers be persisted to database (for multi-user scenarios)?
-- [ ] What's the exact process for halloumi? (needs detailed walkthrough)
+- [x] What's the exact process for halloumi? (IMPLEMENTED - see section 1B)
 - [ ] What's the exact process for butter/ghee? (needs detailed walkthrough)
 
 ---
@@ -349,7 +404,8 @@ src/
 ├── hooks/
 │   └── useLocalStorage.ts  # localStorage persistence hook
 ├── pages/
-│   ├── ProductionBoard.tsx # Main production board (unified workflow)
+│   ├── ProductionBoard.tsx # Main production board with 5 tabs
+│   ├── HalloumiTab.tsx     # Halloumi production tab (separate component)
 │   ├── MilkReceiving.tsx   # Milk lot management
 │   ├── Inventory.tsx       # Intermediate and finished stock
 │   ├── ColdChain.tsx       # Temperature monitoring
