@@ -23,6 +23,7 @@ import { milkLots, statusFlow, statusLabels, statusColors } from '../data/mockDa
 import HalloumiTab from './HalloumiTab';
 import ButterTab from './ButterTab';
 import GheeTab from './GheeTab';
+import CrumbingTab from './CrumbingTab';
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
   const currentIndex = statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
@@ -1055,19 +1056,7 @@ export default function ProductionBoard() {
 
       {/* Crumbing Tab Content */}
       {activeTab === 'crumbing' && (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <div className="text-6xl mb-4">🍗</div>
-          <h3 className="text-xl font-bold text-slate-900 mb-2">Crumbing (SPP / JP / HCP)</h3>
-          <p className="text-slate-600 mb-4">Crumbing workflow coming soon...</p>
-          <p className="text-sm text-slate-500">This tab will include:</p>
-          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
-            <li>• SPP (Spicy Paneer Poppers)</li>
-            <li>• JP (Jalapeño Poppers)</li>
-            <li>• HCP (Halloumi Poppers)</li>
-            <li>• Tray tracking (crumbed, fried, packed)</li>
-            <li>• Batch codes with date-type-sequence</li>
-          </ul>
-        </div>
+        <CrumbingTab />
       )}
 
       {/* Modals - only show for paneer tab */}
