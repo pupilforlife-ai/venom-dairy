@@ -207,6 +207,21 @@ Each stage shows specific recipe details inline:
 - **Blending** = Butter + Replacer → PUBBB/PSBBB (mixing process)
 - These are **separate stages** with different purposes
 
+### Cream Pooling (Internal Cream)
+- **All cream recovered from C/S rounds within the same milk lot is pooled together**
+- When cream is recorded from a C/S round, it automatically adds to that milk lot's cream pool
+- Cream pool tracks:
+  - Total cream recovered (from all C/S rounds in that milk lot)
+  - Cream used in butter production
+  - Available balance (total - used)
+  - List of rounds that contributed cream
+- When creating a butter round with internal cream:
+  - Select the milk lot (not individual rounds)
+  - System shows available cream balance from the pool
+  - Validates that enough cream is available
+  - Deducts cream from pool when butter round is created
+- Example: Milk lot 160626 has 3 C/S rounds, each recovering 15 kg cream = 45 kg total in pool
+
 ### Internal Cream Workflow
 ```
 CREAM (from C/S rounds)

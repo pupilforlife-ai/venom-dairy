@@ -46,7 +46,7 @@ const butterStatusColors: Record<ButterStatus, string> = {
 };
 
 export default function ButterTab() {
-  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift } = useApp();
+  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift, updateMilkLot } = useApp();
   const { showToast } = useToast();
 
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
@@ -102,9 +102,9 @@ export default function ButterTab() {
     return acc;
   }, {} as Record<string, typeof butterRounds>);
 
-  // Get available cream sources
-  const internalCreamLots = productionRounds.filter(r => 
-    r.type === 'C/S' && r.creamRecovered && r.creamRecovered > 0
+  // Get available cream pools (internal cream from milk lots)
+  const internalCreamPools = milkLots.filter(lot => 
+    lot.creamPool && lot.creamPool.availableBalance > 0
   );
 
   const externalCreamLots = milkLots.flatMap(lot => 
@@ -141,6 +141,32 @@ export default function ButterTab() {
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
     if (!shift) return;
 
+    // For internal cream, deduct from the cream pool
+    if (newRound.creamSource === 'internal') {
+      const milkLot = milkLots.find(m => m.id === newRound.creamLotId);
+      if (milkLot && milkLot.creamPool) {
+        if (newRound.inputQuantity > milkLot.creamPool.availableBalance) {
+          showToast('error', `Not enough cream in pool. Available: ${milkLot.creamPool.availableBalance} kg`);
+          return;
+        }
+        
+        const previousBalance = milkLot.creamPool.availableBalance;
+        
+        // Update the cream pool
+        updateMilkLot(milkLot.id, {
+          creamPool: {
+            ...milkLot.creamPool,
+            usedInButter: milkLot.creamPool.usedInButter + newRound.inputQuantity,
+            availableBalance: milkLot.creamPool.availableBalance - newRound.inputQuantity,
+          },
+        });
+        
+        console.log(`Cream pool updated: ${previousBalance} kg → ${previousBalance - newRound.inputQuantity} kg (used ${newRound.inputQuantity} kg)`);
+      } else {
+        console.warn('Milk lot or cream pool not found:', { milkLotId: newRound.creamLotId, milkLot });
+      }
+    }
+
     addProductionRound({
       milkLotId: shift.milkLotId,
       milkLotCode: shift.milkLotCode,
@@ -158,7 +184,11 @@ export default function ButterTab() {
       creamSource: newRound.creamSource,
       creamLotId: newRound.creamLotId,
     });
-    showToast('success', `Butter round created: 03-${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
+    
+    const creamMessage = newRound.creamSource === 'internal' 
+      ? ` (cream pool: -${newRound.inputQuantity} kg)` 
+      : '';
+    showToast('success', `Butter round created: 03-${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}${creamMessage}`);
     setShowNewRoundModal(false);
     setNewRound({ shiftId: '', roundNumber: 1, creamSource: 'internal', creamLotId: '', inputQuantity: 0, team: '' });
   };
@@ -441,6 +471,39 @@ export default function ButterTab() {
         </div>
       </div>
 
+      {/* Cream Pool Summary */}
+      {internalCreamPools.length > 0 && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4">
+          <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+            <span>🥛</span> Internal Cream Pools
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {internalCreamPools.map(lot => (
+              <div key={lot.id} className="bg-white rounded-lg p-3 border border-blue-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-bold text-slate-900">{lot.lotCode}</span>
+                  <span className="text-xs text-blue-600">{lot.creamPool?.roundsContributed.length || 0} rounds</span>
+                </div>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Total:</span>
+                    <span className="font-medium text-slate-900">{lot.creamPool?.totalCream.toFixed(2) || 0} kg</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Used:</span>
+                    <span className="font-medium text-orange-600">{lot.creamPool?.usedInButter.toFixed(2) || 0} kg</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-200 pt-1">
+                    <span className="text-slate-700 font-medium">Available:</span>
+                    <span className="font-bold text-emerald-600">{lot.creamPool?.availableBalance.toFixed(2) || 0} kg</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Production Board */}
       <div className="space-y-4">
         {Object.entries(groupedByShift).map(([shiftId, rounds]) => {
@@ -631,17 +694,19 @@ export default function ButterTab() {
             </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Lot</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
+              {newRound.creamSource === 'internal' ? 'Milk Lot (Cream Pool)' : 'Cream Lot'}
+            </label>
             <select
               value={newRound.creamLotId}
               onChange={(e) => setNewRound({ ...newRound, creamLotId: e.target.value })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
-              <option value="">Select cream lot</option>
+              <option value="">Select {newRound.creamSource === 'internal' ? 'milk lot' : 'cream lot'}</option>
               {newRound.creamSource === 'internal' ? (
-                internalCreamLots.map(r => (
-                  <option key={r.id} value={r.id}>
-                    {r.milkLotCode}/S{r.shiftNumber}/R{r.roundNumber} - {r.creamRecovered} kg
+                internalCreamPools.map(lot => (
+                  <option key={lot.id} value={lot.id}>
+                    {lot.lotCode} - {lot.creamPool?.availableBalance} kg available (from {lot.creamPool?.roundsContributed.length || 0} rounds)
                   </option>
                 ))
               ) : (
@@ -653,6 +718,36 @@ export default function ButterTab() {
               )}
             </select>
           </div>
+          
+          {/* Show cream pool details when a milk lot is selected */}
+          {newRound.creamSource === 'internal' && newRound.creamLotId && (() => {
+            const selectedLot = milkLots.find(l => l.id === newRound.creamLotId);
+            if (!selectedLot?.creamPool) return null;
+            
+            return (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-xs font-medium text-blue-900 mb-2">Cream Pool Details for {selectedLot.lotCode}:</p>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <span className="text-blue-700">Total Cream:</span>
+                    <p className="font-bold text-blue-900">{selectedLot.creamPool.totalCream.toFixed(2)} kg</p>
+                  </div>
+                  <div>
+                    <span className="text-blue-700">Used in Butter:</span>
+                    <p className="font-bold text-blue-900">{selectedLot.creamPool.usedInButter.toFixed(2)} kg</p>
+                  </div>
+                  <div>
+                    <span className="text-blue-700">Available:</span>
+                    <p className="font-bold text-emerald-600">{selectedLot.creamPool.availableBalance.toFixed(2)} kg</p>
+                  </div>
+                </div>
+                <p className="text-xs text-blue-600 mt-2">
+                  Contributed by {selectedLot.creamPool.roundsContributed.length} C/S round(s)
+                </p>
+              </div>
+            );
+          })()}
+          
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Input Quantity (kg)</label>
             <input

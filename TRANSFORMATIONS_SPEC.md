@@ -133,9 +133,12 @@ Each stage shows specific recipe details inline:
 
 ### Cream Source (First Step)
 
-#### Internal Cream
-- Select from C/S rounds with recovered cream
-- Shows: Milk lot code, cream quantity (kg), date recovered
+#### Internal Cream (Pooled)
+- **All cream from the same milk lot is pooled together**
+- Select from milk lots with cream pools (aggregated from all C/S rounds)
+- Shows: Milk lot code, available cream balance (kg), number of rounds contributed
+- Example: "160626 - 45.2 kg available (from 3 rounds)"
+- When creating a butter round, cream is deducted from the pool
 - After churning: **3 options** - Send to Ghee / Pack as PUBB / Send to Blending
 
 #### External Cream

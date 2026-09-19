@@ -42,6 +42,15 @@ export interface CreamLot {
   remaining: number; // kg
 }
 
+export interface CreamPool {
+  milkLotId: string;
+  milkLotCode: string;
+  totalCream: number; // kg - total cream recovered from all C/S rounds
+  usedInButter: number; // kg - cream used in butter production
+  availableBalance: number; // kg - remaining cream available
+  roundsContributed: string[]; // round IDs that contributed cream
+}
+
 export interface MilkLot {
   id: string;
   lotCode: string; // e.g. "160626" (date-based)
@@ -62,6 +71,7 @@ export interface MilkLot {
   packedSkus?: PackedSku[];
   milkSales?: MilkSale[];
   creamLots?: CreamLot[];
+  creamPool?: CreamPool; // Pooled cream from all C/S rounds in this milk lot
 }
 
 export interface ProductionShift {
@@ -139,6 +149,11 @@ export interface ProductionRound {
   replacerQuantity?: number; // kg
   pool?: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05';
   usedInGhee?: number; // kg
+  
+  // Ghee-specific fields
+  butterInput?: number; // kg
+  afOilInput?: number; // kg
+  expectedYield?: number; // kg
   
   notes?: string;
   locked: boolean;

@@ -22,6 +22,7 @@ import { Modal } from '../components/Modal';
 import { milkLots, statusFlow, statusLabels, statusColors } from '../data/mockData';
 import HalloumiTab from './HalloumiTab';
 import ButterTab from './ButterTab';
+import GheeTab from './GheeTab';
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
   const currentIndex = statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
@@ -39,9 +40,10 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
 
 export default function ProductionBoard() {
   const { 
-    productionRounds, productionShifts, intermediateLots,
+    productionRounds, productionShifts, intermediateLots, milkLots,
     advanceRoundStatus, updateProductionRound, addProductionRound,
-    addProductionShift, updateProductionShift, addIntermediateLot
+    addProductionShift, updateProductionShift, addIntermediateLot,
+    updateMilkLot
   } = useApp();
   const { showToast } = useToast();
   
@@ -372,6 +374,28 @@ export default function ProductionBoard() {
       creamRecoveredBy: creamForm.recordedBy,
     });
 
+    // Update the milk lot's cream pool
+    const milkLot = milkLots.find(m => m.id === round.milkLotId);
+    if (milkLot) {
+      const existingPool = milkLot.creamPool || {
+        milkLotId: milkLot.id,
+        milkLotCode: milkLot.lotCode,
+        totalCream: 0,
+        usedInButter: 0,
+        availableBalance: 0,
+        roundsContributed: [],
+      };
+      
+      updateMilkLot(milkLot.id, {
+        creamPool: {
+          ...existingPool,
+          totalCream: existingPool.totalCream + totalWeight,
+          availableBalance: existingPool.availableBalance + totalWeight,
+          roundsContributed: [...existingPool.roundsContributed, round.id],
+        },
+      });
+    }
+
     // Also create an intermediate lot for the cream
     addIntermediateLot({
       lotCode: `CREAM-${round.milkLotCode}-S${round.shiftNumber}-R${round.roundNumber}`,
@@ -391,7 +415,7 @@ export default function ProductionBoard() {
       sourceRound: round.roundNumber,
     });
 
-    showToast('success', `Cream recorded: ${totalWeight.toFixed(2)} kg (${creamForm.numberOfBuckets} buckets)`);
+    showToast('success', `Cream recorded: ${totalWeight.toFixed(2)} kg (${creamForm.numberOfBuckets} buckets) - Added to milk lot pool`);
     setShowCreamModal(false);
     setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' });
   };
@@ -1026,19 +1050,7 @@ export default function ProductionBoard() {
 
       {/* Ghee Tab Content */}
       {activeTab === 'ghee' && (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <div className="text-6xl mb-4">🫙</div>
-          <h3 className="text-xl font-bold text-slate-900 mb-2">Ghee Production</h3>
-          <p className="text-slate-600 mb-4">Ghee workflow coming soon...</p>
-          <p className="text-sm text-slate-500">This tab will include:</p>
-          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
-            <li>• Shift + Round structure</li>
-            <li>• Auto AF oil calculation</li>
-            <li>• Dual SKU packing (400g + 1.5kg)</li>
-            <li>• Auto-subtract from butter balance</li>
-            <li>• Close production button</li>
-          </ul>
-        </div>
+        <GheeTab />
       )}
 
       {/* Crumbing Tab Content */}
