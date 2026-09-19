@@ -77,9 +77,8 @@ export default function GheeTab() {
 
   // Filter ghee rounds
   const gheeRounds = productionRounds.filter(r => r.type === 'Ghee');
-  const gheeShifts = productionShifts.filter(s => 
-    gheeRounds.some(r => r.shiftId === s.id)
-  );
+  // Show ALL active shifts, not just those with ghee rounds
+  const gheeShifts = productionShifts.filter(s => s.status === 'active');
 
   // Group by shift
   const groupedByShift = gheeRounds.reduce((acc, round) => {
