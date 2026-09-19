@@ -46,7 +46,7 @@ const butterStatusColors: Record<ButterStatus, string> = {
 };
 
 export default function ButterTab() {
-  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift } = useApp();
+  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift, updateMilkLot } = useApp();
   const { showToast } = useToast();
 
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
@@ -102,9 +102,9 @@ export default function ButterTab() {
     return acc;
   }, {} as Record<string, typeof butterRounds>);
 
-  // Get available cream sources
-  const internalCreamLots = productionRounds.filter(r => 
-    r.type === 'C/S' && r.creamRecovered && r.creamRecovered > 0
+  // Get available cream pools (internal cream from milk lots)
+  const internalCreamPools = milkLots.filter(lot => 
+    lot.creamPool && lot.creamPool.availableBalance > 0
   );
 
   const externalCreamLots = milkLots.flatMap(lot => 
@@ -140,6 +140,26 @@ export default function ButterTab() {
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
     if (!shift) return;
+
+    // For internal cream, deduct from the cream pool
+    if (newRound.creamSource === 'internal') {
+      const milkLot = milkLots.find(m => m.id === newRound.creamLotId);
+      if (milkLot && milkLot.creamPool) {
+        if (newRound.inputQuantity > milkLot.creamPool.availableBalance) {
+          showToast('error', `Not enough cream in pool. Available: ${milkLot.creamPool.availableBalance} kg`);
+          return;
+        }
+        
+        // Update the cream pool
+        updateMilkLot(milkLot.id, {
+          creamPool: {
+            ...milkLot.creamPool,
+            usedInButter: milkLot.creamPool.usedInButter + newRound.inputQuantity,
+            availableBalance: milkLot.creamPool.availableBalance - newRound.inputQuantity,
+          },
+        });
+      }
+    }
 
     addProductionRound({
       milkLotId: shift.milkLotId,
@@ -631,17 +651,19 @@ export default function ButterTab() {
             </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Lot</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
+              {newRound.creamSource === 'internal' ? 'Milk Lot (Cream Pool)' : 'Cream Lot'}
+            </label>
             <select
               value={newRound.creamLotId}
               onChange={(e) => setNewRound({ ...newRound, creamLotId: e.target.value })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
-              <option value="">Select cream lot</option>
+              <option value="">Select {newRound.creamSource === 'internal' ? 'milk lot' : 'cream lot'}</option>
               {newRound.creamSource === 'internal' ? (
-                internalCreamLots.map(r => (
-                  <option key={r.id} value={r.id}>
-                    {r.milkLotCode}/S{r.shiftNumber}/R{r.roundNumber} - {r.creamRecovered} kg
+                internalCreamPools.map(lot => (
+                  <option key={lot.id} value={lot.id}>
+                    {lot.lotCode} - {lot.creamPool?.availableBalance} kg available (from {lot.creamPool?.roundsContributed.length || 0} rounds)
                   </option>
                 ))
               ) : (

@@ -39,9 +39,10 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
 
 export default function ProductionBoard() {
   const { 
-    productionRounds, productionShifts, intermediateLots,
+    productionRounds, productionShifts, intermediateLots, milkLots,
     advanceRoundStatus, updateProductionRound, addProductionRound,
-    addProductionShift, updateProductionShift, addIntermediateLot
+    addProductionShift, updateProductionShift, addIntermediateLot,
+    updateMilkLot
   } = useApp();
   const { showToast } = useToast();
   
@@ -372,6 +373,28 @@ export default function ProductionBoard() {
       creamRecoveredBy: creamForm.recordedBy,
     });
 
+    // Update the milk lot's cream pool
+    const milkLot = milkLots.find(m => m.id === round.milkLotId);
+    if (milkLot) {
+      const existingPool = milkLot.creamPool || {
+        milkLotId: milkLot.id,
+        milkLotCode: milkLot.lotCode,
+        totalCream: 0,
+        usedInButter: 0,
+        availableBalance: 0,
+        roundsContributed: [],
+      };
+      
+      updateMilkLot(milkLot.id, {
+        creamPool: {
+          ...existingPool,
+          totalCream: existingPool.totalCream + totalWeight,
+          availableBalance: existingPool.availableBalance + totalWeight,
+          roundsContributed: [...existingPool.roundsContributed, round.id],
+        },
+      });
+    }
+
     // Also create an intermediate lot for the cream
     addIntermediateLot({
       lotCode: `CREAM-${round.milkLotCode}-S${round.shiftNumber}-R${round.roundNumber}`,
@@ -391,7 +414,7 @@ export default function ProductionBoard() {
       sourceRound: round.roundNumber,
     });
 
-    showToast('success', `Cream recorded: ${totalWeight.toFixed(2)} kg (${creamForm.numberOfBuckets} buckets)`);
+    showToast('success', `Cream recorded: ${totalWeight.toFixed(2)} kg (${creamForm.numberOfBuckets} buckets) - Added to milk lot pool`);
     setShowCreamModal(false);
     setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' });
   };
