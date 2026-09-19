@@ -21,29 +21,30 @@ Added 5 tabs to the Production Board:
 #### Status Pipeline (Halloumi-Specific)
 ```
 Scheduled → Add CaCl2 → Heat to 34°C → Add Rennet → 
-Curd Setting (30min) → Curd Cutting + Heating to 42°C (40min) → 
+Curd Setting (30min) → Curd Cut → Heating to 42°C (40min) → 
 Presses → Whey Heating to 90°C → Halloumi Boiling → 
 Salted → Chiller Storage (4-6hr) → Weighed → 
 [Vacuum Pack OR Send to HCP] → Handed Over
 ```
 
-#### Workflow Stages (15 Total)
+#### Workflow Stages (16 Total)
 1. **Scheduled** → Click "Add CaCl2"
 2. **CaCl2 Added** → Shows recipe: 192g CaCl2 in 3.8L water → Click "Heat to 34°C"
 3. **Heating to 34°C** → Click "Add Rennet"
 4. **Rennet Added** → Shows recipe: 15ml rennet in 500ml water → Click "Start Curd Setting (30 min)"
-5. **Curd Setting** ⏱️ → Timer shows 30:00 → Click "Cut Curd (40 min)"
-6. **Curd Cutting + Heating to 42°C** ⏱️ → Timer shows 40:00 → Click "To Presses"
-7. **Presses** → Click "Heat Whey to 90°C"
-8. **Whey Heating to 90°C** → Click "Start Boiling"
-9. **Halloumi Boiling** → Cook until floating → Click "Salt"
-10. **Salted** → Click "Store in Chiller"
-11. **Chiller Storage** → Hold 4-6 hours → Click "Record Weight"
-12. **Weighed** → Weight modal opens → Enter final weight → Click "Record Weight"
-13. **Weighed (after recording)** → Two options:
+5. **Curd Setting** ⏱️ → Timer shows 30:00 → Click "Cut Curd"
+6. **Curd Cut** → Quick action → Click "Start Heating to 42°C (40 min)"
+7. **Heating to 42°C** ⏱️ → Timer shows 40:00 → Click "To Presses"
+8. **Presses** → Click "Heat Whey to 90°C"
+9. **Whey Heating to 90°C** → Click "Start Boiling"
+10. **Halloumi Boiling** → Cook until floating → Click "Salt"
+11. **Salted** → Click "Store in Chiller"
+12. **Chiller Storage** → Hold 4-6 hours → Click "Record Weight"
+13. **Weighed** → Weight modal opens → Enter final weight → Click "Record Weight"
+14. **Weighed (after recording)** → Two options:
     - **Vacuum Pack** → For direct sale
     - **Send to HCP** → For Halloumi Cheese Poppers
-14. **Vacuum Packed / Sent to HCP** → Click "Hand Over"
+15. **Vacuum Packed / Sent to HCP** → Click "Hand Over"
 
 #### Inline Recipe Display
 Each stage shows specific recipe details in a blue info box:
@@ -51,7 +52,8 @@ Each stage shows specific recipe details in a blue info box:
 - **Heating to 34°C**: "Heat milk slowly to 34°C, Monitor temperature carefully"
 - **Rennet Added**: "15ml rennet in 500ml water, Add to milk and stir gently"
 - **Curd Setting**: "Let curd set for 30 minutes, Do not disturb during this time"
-- **Curd Cutting**: "Cut curd into pieces, Heat slowly to 42°C over 40 minutes, Gently lift curd while heating"
+- **Curd Cut**: "Cut curd into pieces, Ready for heating"
+- **Heating to 42°C**: "Heat slowly to 42°C over 40 minutes, Gently lift curd while heating, This separates whey from curd"
 - **Presses**: "Remove curd into presses, Press until firm"
 - **Whey Heating**: "Whey remains in vessel, Heat whey to 90°C"
 - **Boiling**: "Cut pressed halloumi to smaller pieces, Cook in hot whey until floating, Monitor until pieces float"
@@ -92,8 +94,8 @@ Each stage shows specific recipe details in a blue info box:
 | Default milk input | 500L | 240L (fixed) |
 | Vat selection | Vat 2 or Vat 3 | Not applicable |
 | CaCl2/Rennet | Not used | Used (specific quantities shown inline) |
-| Status stages | 12 stages | 15 stages |
-| Timers | Pressing 30min, Cooling 90/120min, Resting 90min | Curd Setting 30min, Curd Cutting 40min |
+| Status stages | 12 stages | 16 stages |
+| Timers | Pressing 30min, Cooling 90/120min, Resting 90min | Curd Setting 30min, Heating to 42°C 40min |
 | Cooling choice | Tank or Chiller | Not applicable |
 | Unique step | — | Cooking in hot whey until floating |
 | Temperature targets | — | 34°C, 42°C, 90°C shown at each stage |
@@ -112,7 +114,7 @@ Each stage shows specific recipe details in a blue info box:
 5. **Click "New Round"** → Create a round (240L fixed)
 6. **Click "Add CaCl2"** → See inline recipe details
 7. **Move through workflow** → Watch recipe details change at each stage
-8. **Test timers** → Watch 30min curd setting and 40min curd cutting countdowns
+8. **Test timers** → Watch 30min curd setting and 40min heating to 42°C countdowns
 9. **Test weight recording** → Click "Record Weight" after chiller storage
 10. **Test final decision** → Choose Vacuum Pack or Send to HCP
 
@@ -143,9 +145,9 @@ Each stage shows specific recipe details in a blue info box:
 ### Data Model Updates
 - Changed `ProductionRound.status` from union type to `string` for flexibility
 - Added `curdSettingStartedAt?: string` for halloumi curd setting timer
-- Added `curdCuttingStartedAt?: string` for halloumi curd cutting timer
+- Added `curdCuttingStartedAt?: string` for halloumi heating to 42°C timer
 - Type field: `'Halloumi'`
-- Status field: 15 halloumi-specific stages
+- Status field: 16 halloumi-specific stages
 
 ### State Management
 - Uses existing `useApp()` context
@@ -161,4 +163,4 @@ Each stage shows specific recipe details in a blue info box:
 
 ---
 
-**Status:** Halloumi tab is complete with correct workflow and ready for testing. Next: Butter tab.
+**Status:** Halloumi tab is complete with correct workflow (16 stages) and ready for testing. The 40-minute timer is correctly placed on the "Heating to 42°C" stage (after curd cutting), not on the curd cutting itself. Next: Butter tab.

@@ -12,7 +12,8 @@ const halloumiStatusFlow = [
   'heating_34c',
   'rennet_added',
   'curd_setting',
-  'curd_cutting',
+  'curd_cut',
+  'heating_42c',
   'presses',
   'whey_heating',
   'boiling',
@@ -32,7 +33,8 @@ const halloumiStatusLabels: Record<string, string> = {
   heating_34c: 'Heating to 34°C',
   rennet_added: 'Rennet Added',
   curd_setting: 'Curd Setting',
-  curd_cutting: 'Curd Cutting + Heating',
+  curd_cut: 'Curd Cut',
+  heating_42c: 'Heating to 42°C',
   presses: 'Presses',
   whey_heating: 'Whey Heating to 90°C',
   boiling: 'Halloumi Boiling',
@@ -50,8 +52,9 @@ const halloumiStatusColors: Record<string, string> = {
   heating_34c: 'bg-blue-500',
   rennet_added: 'bg-indigo-400',
   curd_setting: 'bg-indigo-500',
-  curd_cutting: 'bg-purple-500',
-  presses: 'bg-purple-600',
+  curd_cut: 'bg-purple-400',
+  heating_42c: 'bg-purple-600',
+  presses: 'bg-purple-700',
   whey_heating: 'bg-orange-500',
   boiling: 'bg-orange-600',
   salted: 'bg-teal-500',
@@ -80,9 +83,13 @@ const stageRecipes: Record<string, { title: string; details: string[] }> = {
     title: 'Curd Setting',
     details: ['Let curd set for 30 minutes', 'Do not disturb during this time'],
   },
-  curd_cutting: {
-    title: 'Curd Cutting + Heating to 42°C',
-    details: ['Cut curd into pieces', 'Heat slowly to 42°C over 40 minutes', 'Gently lift curd while heating'],
+  curd_cut: {
+    title: 'Curd Cutting',
+    details: ['Cut curd into pieces', 'Ready for heating'],
+  },
+  heating_42c: {
+    title: 'Heating to 42°C (40 min)',
+    details: ['Heat slowly to 42°C over 40 minutes', 'Gently lift curd while heating', 'This separates whey from curd'],
   },
   presses: {
     title: 'Presses',
@@ -147,7 +154,7 @@ export default function HalloumiTab() {
           if (round.status === 'curd_setting' && round.curdSettingStartedAt) {
             const elapsed = Math.floor((Date.now() - new Date(round.curdSettingStartedAt).getTime()) / 1000);
             updated[round.id] = Math.max(0, 1800 - elapsed); // 30 minutes
-          } else if (round.status === 'curd_cutting' && round.curdCuttingStartedAt) {
+          } else if (round.status === 'heating_42c' && round.curdCuttingStartedAt) {
             const elapsed = Math.floor((Date.now() - new Date(round.curdCuttingStartedAt).getTime()) / 1000);
             updated[round.id] = Math.max(0, 2400 - elapsed); // 40 minutes
           }
@@ -234,7 +241,7 @@ export default function HalloumiTab() {
     
     if (newStatus === 'curd_setting') {
       updates.curdSettingStartedAt = new Date().toISOString();
-    } else if (newStatus === 'curd_cutting') {
+    } else if (newStatus === 'heating_42c') {
       updates.curdCuttingStartedAt = new Date().toISOString();
     }
 
@@ -311,25 +318,36 @@ export default function HalloumiTab() {
           <span className="text-xs font-mono font-bold text-indigo-700">{formatTime(timer)}</span>
           {timer === 0 && (
             <button
-              onClick={() => handleStatusChange(round.id, 'curd_cutting')}
-              className="px-3 py-1.5 bg-purple-500 text-white rounded text-xs font-medium hover:bg-purple-600"
+              onClick={() => handleStatusChange(round.id, 'curd_cut')}
+              className="px-3 py-1.5 bg-purple-400 text-white rounded text-xs font-medium hover:bg-purple-500"
             >
               <Scissors className="w-3 h-3 inline mr-1" />
-              Cut Curd (40 min)
+              Cut Curd
             </button>
           )}
         </div>
       );
-    } else if (round.status === 'curd_cutting') {
+    } else if (round.status === 'curd_cut') {
+      buttons.push(
+        <button
+          key="start_heating"
+          onClick={() => handleStatusChange(round.id, 'heating_42c')}
+          className="px-3 py-1.5 bg-purple-500 text-white rounded text-xs font-medium hover:bg-purple-600"
+        >
+          <Thermometer className="w-3 h-3 inline mr-1" />
+          Start Heating to 42°C (40 min)
+        </button>
+      );
+    } else if (round.status === 'heating_42c') {
       const timer = timers[round.id] || 0;
       buttons.push(
-        <div key="cut_timer" className="flex items-center gap-2">
-          <Clock className="w-4 h-4 text-purple-500" />
+        <div key="heating_timer" className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-purple-600" />
           <span className="text-xs font-mono font-bold text-purple-700">{formatTime(timer)}</span>
           {timer === 0 && (
             <button
               onClick={() => handleStatusChange(round.id, 'presses')}
-              className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700"
+              className="px-3 py-1.5 bg-purple-700 text-white rounded text-xs font-medium hover:bg-purple-800"
             >
               To Presses
             </button>

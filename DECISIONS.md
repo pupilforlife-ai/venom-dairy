@@ -96,7 +96,7 @@ Ready for Cutting → Cut → [Clingwrapped] → [Frozen] → Packed → Handed 
 ### Complete Status Pipeline
 ```
 Scheduled → Add CaCl2 → Heat to 34°C → Add Rennet → 
-Curd Setting (30min) → Curd Cutting + Heating to 42°C (40min) → 
+Curd Setting (30min) → Curd Cut → Heating to 42°C (40min) → 
 Presses → Whey Heating to 90°C → Halloumi Boiling → 
 Salted → Chiller Storage (4-6hr) → Weighed → 
 [Vacuum Pack OR Send to HCP] → Handed Over
@@ -127,39 +127,43 @@ Each stage shows specific recipe details inline:
    - **30-minute timer**
    - Let curd set, do not disturb
 
-5. **Curd Cutting + Heating to 42°C** ⏱️
-   - **40-minute timer**
+5. **Curd Cut**
    - Cut curd into pieces
+   - Quick action, no timer
+
+6. **Heating to 42°C** ⏱️
+   - **40-minute timer**
    - Heat slowly to 42°C over 40 minutes
    - Gently lift curd while heating
+   - This separates whey from curd
 
-6. **Presses**
+7. **Presses**
    - Remove curd into presses
    - Press until firm
 
-7. **Whey Heating to 90°C**
+8. **Whey Heating to 90°C**
    - Whey remains in vessel
    - Heat whey to 90°C
 
-8. **Halloumi Boiling**
+9. **Halloumi Boiling**
    - Cut pressed halloumi to smaller pieces
    - Cook in hot whey until floating
    - Monitor until pieces float
 
-9. **Salted**
-   - Remove from whey
-   - Cool and salt
+10. **Salted**
+    - Remove from whey
+    - Cool and salt
 
-10. **Chiller Storage**
+11. **Chiller Storage**
     - Store in chiller
     - Hold for 4-6 hours
 
-11. **Weighed**
+12. **Weighed**
     - Weigh final product
     - Record output weight
     - Expected yield: 24-28 kg from 240L milk
 
-12. **Final Decision**
+13. **Final Decision**
     - **Vacuum Pack** — for direct sale
     - **Send to HCP** — for Halloumi Cheese Poppers (crumbing tab)
 
@@ -179,16 +183,16 @@ Each stage shows specific recipe details inline:
 | Recipe display | Not inline | Inline at each stage |
 
 ### Timer Durations
-- **Curd Setting:** 30 minutes
-- **Curd Cutting + Heating:** 40 minutes (while reaching 42°C)
+- **Curd Setting:** 30 minutes (let curd set)
+- **Heating to 42°C:** 40 minutes (slowly heat while lifting curd to separate whey)
 - **Chiller Storage:** 4-6 hours (manual, no timer)
 
 ### Implementation Status
 - ✅ Halloumi tab created with correct workflow
 - ✅ Shift and round management (240L default)
-- ✅ Correct status pipeline (15 stages)
+- ✅ Correct status pipeline (16 stages)
 - ✅ Inline recipe display at each stage
-- ✅ Timers for curd setting (30min) and curd cutting (40min)
+- ✅ Timers for curd setting (30min) and heating to 42°C (40min)
 - ✅ Temperature targets shown (34°C, 42°C, 90°C)
 - ✅ Weight recording modal with expected yield
 - ✅ Vacuum pack / Send to HCP options

@@ -83,7 +83,7 @@ All products derived from the same milk lot share the same base date code with d
 ### Status Pipeline
 ```
 Scheduled → Add CaCl2 → Heat to 34°C → Add Rennet → 
-Curd Setting (30min) → Curd Cutting + Heating to 42°C (40min) → 
+Curd Setting (30min) → Curd Cut → Heating to 42°C (40min) → 
 Presses → Whey Heating to 90°C → Halloumi Boiling → 
 Salted → Chiller Storage (4-6hr) → Weighed → 
 [Vacuum Pack OR Send to HCP] → Handed Over
@@ -96,27 +96,28 @@ Each stage shows specific recipe details inline:
 2. **Heat to 34°C**: Monitor temperature carefully
 3. **Add Rennet**: 15ml rennet in 500ml water
 4. **Curd Setting** ⏱️: 30-minute timer, do not disturb
-5. **Curd Cutting + Heating to 42°C** ⏱️: 40-minute timer, gently lift curd
-6. **Presses**: Press until firm
-7. **Whey Heating to 90°C**: Heat whey in vessel
-8. **Halloumi Boiling**: Cook in hot whey until floating
-9. **Salted**: Remove from whey, cool and salt
-10. **Chiller Storage**: Hold for 4-6 hours
-11. **Weighed**: Record final weight (expected 24-28 kg)
-12. **Final Decision**: Vacuum Pack OR Send to HCP
+5. **Curd Cut**: Quick action, cut curd into pieces
+6. **Heating to 42°C** ⏱️: 40-minute timer, slowly heat while lifting curd to separate whey
+7. **Presses**: Press until firm
+8. **Whey Heating to 90°C**: Heat whey in vessel
+9. **Halloumi Boiling**: Cook in hot whey until floating
+10. **Salted**: Remove from whey, cool and salt
+11. **Chiller Storage**: Hold for 4-6 hours
+12. **Weighed**: Record final weight (expected 24-28 kg)
+13. **Final Decision**: Vacuum Pack OR Send to HCP
 
 ### Timer Durations
-- **Curd Setting:** 30 minutes
-- **Curd Cutting + Heating:** 40 minutes (while reaching 42°C)
+- **Curd Setting:** 30 minutes (let curd set)
+- **Heating to 42°C:** 40 minutes (slowly heat while lifting curd to separate whey)
 - **Chiller Storage:** 4-6 hours (manual, no timer)
 
 ### Key Features
 - ✅ Inline recipe display at each stage
-- ✅ Timers for curd setting (30min) and curd cutting (40min)
+- ✅ Timers for curd setting (30min) and heating to 42°C (40min)
 - ✅ Temperature targets shown (34°C, 42°C, 90°C)
 - ✅ Weight recording modal with expected yield
 - ✅ Vacuum pack / Send to HCP options
-- ✅ Halloumi-specific status pipeline (15 stages)
+- ✅ Halloumi-specific status pipeline (16 stages)
 
 ---
 
