@@ -200,6 +200,156 @@ Each stage shows specific recipe details inline:
 
 ---
 
+## 1C. Butter Production Workflow
+
+### Key Distinction
+- **Churning** = Cream → Butter (physical process)
+- **Blending** = Butter + Replacer → PUBBB/PSBBB (mixing process)
+- These are **separate stages** with different purposes
+
+### Internal Cream Workflow
+```
+CREAM (from C/S rounds)
+  ↓
+CHURNING
+  ↓
+BUTTER
+  ↓
+  ├─→ BUTTER FOR GHEE → [Ghee Tab]
+  ├─→ PACK AS PUBB → Final SKU: PUBB (pasteurised unsalted butter balls)
+  └─→ SEND TO BLENDING
+        ↓
+      BLENDING (butter + replacer, 3.3:1 ratio)
+        ↓
+        ├─→ PUBBB (unsalted blended)
+        │     ↓
+        │   PACK AS FINAL SKU: PUBBB
+        │
+        └─→ PSBBB (salted blended)
+              ↓
+              ├─→ PACK AS FINAL SKU: PSBBB
+              └─→ MAKE BRICKS → PACK AS FINAL SKU: BB05
+```
+
+### External Cream Workflow
+```
+CREAM (purchased from supplier)
+  ↓
+CHURNING
+  ↓
+BUTTER
+  ↓
+BLENDING (ALWAYS - no direct packing)
+  ↓
+PUBBB (unsalted blended)
+  ↓
+  ├─→ PACK AS FINAL SKU: PUBBB
+  └─→ ADD SALT → PSBBB (salted blended)
+        ↓
+        ├─→ PACK AS FINAL SKU: PSBBB
+        └─→ MAKE BRICKS → PACK AS FINAL SKU: BB05
+```
+
+### Key Differences: Internal vs External
+
+| Aspect | Internal Cream | External Cream |
+|--------|---------------|----------------|
+| Source | C/S rounds (recovered) | Purchased (cream receiving) |
+| After churning | 3 options: Ghee / PUBB / Blending | **Must** go to blending |
+| Can pack as PUBB? | ✅ Yes | ❌ No |
+| Can send to Ghee? | ✅ Yes | ❌ No |
+| Blending required? | Optional | **Always** |
+| Final products | PUBB, PUBBB, PSBBB, BB05 | PUBBB, PSBBB, BB05 |
+
+### Status Pipeline
+
+**Internal Cream:**
+```
+Scheduled → Churning → Churned → 
+[Send to Ghee OR Pack as PUBB OR Send to Blending]
+  ↓ (if blending)
+Blending → PUBBB Pool OR PSBBB Pool
+  ↓ (if PSBBB)
+[Pack as PSBBB OR Make Bricks]
+  ↓ (if bricks)
+BB05 Pool → Packed → Handed Over
+```
+
+**External Cream:**
+```
+Scheduled → Churning → Churned → Blending → PUBBB Pool
+  ↓
+[Pack as PUBBB OR Add Salt]
+  ↓ (if salt)
+PSBBB Pool
+  ↓
+[Pack as PSBBB OR Make Bricks]
+  ↓ (if bricks)
+BB05 Pool → Packed → Handed Over
+```
+
+### Blending Process
+- **Ratio**: 3.3:1 (Butter : Replacer)
+- **Default**: 16.5 kg butter + 5 kg replacer
+- **Auto-calculation**: Change butter quantity → replacer auto-adjusts
+- **Salt option**: Unsalted (PUBBB) or Salted (PSBBB)
+
+### Packing Configurations
+
+**PUBB/PUBBB/PSBBB (Balls):**
+- Each ball = 500g
+- 12 balls/packet
+- 3 packets/case
+- 36 balls = 18 kg/case
+- Loose = number of balls
+
+**BB05 (Bricks):**
+- Each brick = 500g
+- 30 bricks/case = 15 kg/case
+- Loose = number of bricks
+
+### Batch Codes
+- **Butter**: `03-DATE` (e.g., `03-160626`)
+- **Cream (external)**: `02-DATE` (e.g., `02-160626`)
+
+### Data Model
+**Added to ProductionRound:**
+- `creamSource`: 'internal' | 'external'
+- `creamLotId`: string
+- `butterOutput`: number (kg)
+- `buttermilkOutput`: number (kg)
+- `destination`: 'ghee' | 'pubb' | 'blending'
+- `isSalted`: boolean
+- `replacerQuantity`: number (kg)
+- `pool`: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05'
+- `usedInGhee`: number (kg)
+
+**Added CreamLot interface:**
+- `lotCode`: string (02-DATE)
+- `dateReceived`: string
+- `quantity`: number (kg)
+- `invoiceNo`: string
+- `supplier`: string
+- `consumed`: number (kg)
+- `remaining`: number (kg)
+
+### Implementation Status
+- ✅ Butter tab created with complete workflow
+- ✅ Cream source selection (internal/external)
+- ✅ Shift + Round structure
+- ✅ Churning process with output recording
+- ✅ Three-path decision for internal cream (Ghee/PUBB/Blending)
+- ✅ Mandatory blending for external cream
+- ✅ Auto-calculated blending ratio (3.3:1)
+- ✅ Salt/unsalt toggle for blending
+- ✅ Packing for all SKUs (PUBB, PUBBB, PSBBB, BB05)
+- ✅ +Add Packing button for multiple sessions
+- ✅ Batch codes (03-DATE)
+- ✅ Data model updated with butter-specific fields
+- ✅ CreamLot interface added
+
+---
+
 ## 2. Cream Recovery
 
 ### When to Record

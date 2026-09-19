@@ -21,6 +21,7 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { milkLots, statusFlow, statusLabels, statusColors } from '../data/mockData';
 import HalloumiTab from './HalloumiTab';
+import ButterTab from './ButterTab';
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
   const currentIndex = statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
@@ -1020,19 +1021,7 @@ export default function ProductionBoard() {
 
       {/* Butter Tab Content */}
       {activeTab === 'butter' && (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <div className="text-6xl mb-4">🧈</div>
-          <h3 className="text-xl font-bold text-slate-900 mb-2">Butter Production</h3>
-          <p className="text-slate-600 mb-4">Butter workflow coming soon...</p>
-          <p className="text-sm text-slate-500">This tab will include:</p>
-          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
-            <li>• Cream source selection (internal/external)</li>
-            <li>• Shift + Round structure</li>
-            <li>• PUBBB/PSBBB pools</li>
-            <li>• Blending subsection</li>
-            <li>• Multiple packing sessions</li>
-          </ul>
-        </div>
+        <ButterTab />
       )}
 
       {/* Ghee Tab Content */}
