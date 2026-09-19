@@ -132,9 +132,8 @@ export default function HalloumiTab() {
 
   // Filter halloumi rounds only
   const halloumiRounds = productionRounds.filter(r => r.type === 'Halloumi');
-  const halloumiShifts = productionShifts.filter(s => 
-    halloumiRounds.some(r => r.shiftId === s.id)
-  );
+  // Show ALL active shifts, not just those with halloumi rounds
+  const halloumiShifts = productionShifts.filter(s => s.status === 'active');
 
   // Group by shift
   const groupedByShift = halloumiRounds.reduce((acc, round) => {

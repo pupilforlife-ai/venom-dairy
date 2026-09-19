@@ -92,9 +92,8 @@ export default function ButterTab() {
 
   // Filter butter rounds
   const butterRounds = productionRounds.filter(r => r.type === 'Butter');
-  const butterShifts = productionShifts.filter(s => 
-    butterRounds.some(r => r.shiftId === s.id)
-  );
+  // Show ALL active shifts, not just those with butter rounds
+  const butterShifts = productionShifts.filter(s => s.status === 'active');
 
   // Group by shift
   const groupedByShift = butterRounds.reduce((acc, round) => {
