@@ -442,12 +442,11 @@ export default function GheeTab() {
 
       {/* Production Board */}
       <div className="space-y-4">
-        {Object.entries(groupedByShift).map(([shiftId, rounds]) => {
-          const shift = productionShifts.find(s => s.id === shiftId);
-          if (!shift) return null;
+        {gheeShifts.map((shift) => {
+          const rounds = groupedByShift[shift.id] || [];
 
           return (
-            <div key={shiftId} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div key={shift.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               {/* Shift Header */}
               <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-200">
                 <div className="flex items-center justify-between">
@@ -465,6 +464,7 @@ export default function GheeTab() {
               </div>
 
               {/* Rounds Table */}
+              {rounds.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -517,13 +517,18 @@ export default function GheeTab() {
                   </tbody>
                 </table>
               </div>
+              ) : (
+                <div className="p-6 text-center text-slate-400 text-sm">
+                  No rounds in this shift yet. <button onClick={() => setShowNewRoundModal(true)} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
+                </div>
+              )}
             </div>
           );
         })}
 
-        {gheeRounds.length === 0 && (
+        {gheeShifts.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <p className="text-slate-500">No ghee rounds yet. Create a shift and round to begin.</p>
+            <p className="text-slate-500">No ghee shifts yet. Create a shift to begin.</p>
           </div>
         )}
       </div>
