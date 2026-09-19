@@ -22,6 +22,7 @@ import { Modal } from '../components/Modal';
 import { milkLots, statusFlow, statusLabels, statusColors } from '../data/mockData';
 import HalloumiTab from './HalloumiTab';
 import ButterTab from './ButterTab';
+import GheeTab from './GheeTab';
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
   const currentIndex = statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
@@ -1049,19 +1050,7 @@ export default function ProductionBoard() {
 
       {/* Ghee Tab Content */}
       {activeTab === 'ghee' && (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <div className="text-6xl mb-4">🫙</div>
-          <h3 className="text-xl font-bold text-slate-900 mb-2">Ghee Production</h3>
-          <p className="text-slate-600 mb-4">Ghee workflow coming soon...</p>
-          <p className="text-sm text-slate-500">This tab will include:</p>
-          <ul className="text-sm text-slate-500 text-left max-w-md mx-auto mt-2 space-y-1">
-            <li>• Shift + Round structure</li>
-            <li>• Auto AF oil calculation</li>
-            <li>• Dual SKU packing (400g + 1.5kg)</li>
-            <li>• Auto-subtract from butter balance</li>
-            <li>• Close production button</li>
-          </ul>
-        </div>
+        <GheeTab />
       )}
 
       {/* Crumbing Tab Content */}

@@ -150,6 +150,11 @@ export interface ProductionRound {
   pool?: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05';
   usedInGhee?: number; // kg
   
+  // Ghee-specific fields
+  butterInput?: number; // kg
+  afOilInput?: number; // kg
+  expectedYield?: number; // kg
+  
   notes?: string;
   locked: boolean;
 }
