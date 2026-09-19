@@ -30,6 +30,18 @@ export interface PackedSku {
   cases: number;
 }
 
+export interface CreamLot {
+  id: string;
+  lotCode: string; // e.g. "02-160626"
+  dateReceived: string;
+  quantity: number; // kg
+  invoiceNo?: string;
+  supplier: string;
+  notes?: string;
+  consumed: number; // kg
+  remaining: number; // kg
+}
+
 export interface MilkLot {
   id: string;
   lotCode: string; // e.g. "160626" (date-based)
@@ -49,6 +61,7 @@ export interface MilkLot {
   reconciliation?: ProductionReconciliation;
   packedSkus?: PackedSku[];
   milkSales?: MilkSale[];
+  creamLots?: CreamLot[];
 }
 
 export interface ProductionShift {
@@ -115,6 +128,17 @@ export interface ProductionRound {
   creamRecovered?: number; // kg
   creamRecoveredAt?: string;
   creamRecoveredBy?: string;
+  
+  // Butter-specific fields
+  creamSource?: 'internal' | 'external';
+  creamLotId?: string;
+  butterOutput?: number; // kg
+  buttermilkOutput?: number; // kg
+  destination?: 'ghee' | 'pubb' | 'blending';
+  isSalted?: boolean;
+  replacerQuantity?: number; // kg
+  pool?: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05';
+  usedInGhee?: number; // kg
   
   notes?: string;
   locked: boolean;

@@ -123,81 +123,150 @@ Each stage shows specific recipe details inline:
 
 ## 5. Tab 3: Butter
 
+### Status
+✅ **Implemented with complete workflow**
+
+### Key Distinction
+- **Churning** = Cream → Butter (physical process)
+- **Blending** = Butter + Replacer → PUBBB/PSBBB (mixing process)
+- These are **separate stages** with different purposes
+
 ### Cream Source (First Step)
 
 #### Internal Cream
-- Select milk lot (from C/S rounds)
-- Cream automatically available from that lot
-- Used for: Butter for ghee (primarily), occasionally PUB
+- Select from C/S rounds with recovered cream
+- Shows: Milk lot code, cream quantity (kg), date recovered
+- After churning: **3 options** - Send to Ghee / Pack as PUBB / Send to Blending
 
 #### External Cream
-- Select cream lot (from "Receive Cream" section)
-- Must add **"Receive Cream"** to Milk Receiving page:
-  - Date received (becomes lot number in dummy format)
-  - Quantity (kg)
-  - Invoice number
-  - Supplier name
-- Used for: Blended products (PUBBB, PSBBB, BB05), occasionally PUB
+- Select from cream lots (purchased via "Receive Cream" section)
+- Shows: Cream lot code, quantity (kg), date received, supplier, invoice #
+- After churning: **Must go to blending** (no other options)
 
-### Butter Production (Round-based)
+### Internal Cream Workflow
+```
+CREAM (from C/S rounds)
+  ↓
+CHURNING
+  ↓
+BUTTER
+  ↓
+  ├─→ BUTTER FOR GHEE → [Ghee Tab]
+  ├─→ PACK AS PUBB → Final SKU: PUBB
+  └─→ SEND TO BLENDING
+        ↓
+      BLENDING (butter + replacer, 3.3:1 ratio)
+        ↓
+        ├─→ PUBBB (unsalted) → PACK AS FINAL SKU
+        └─→ PSBBB (salted)
+              ↓
+              ├─→ PACK AS FINAL SKU
+              └─→ MAKE BRICKS → BB05
+```
 
-**Add Shift** and **Add Round** buttons (like paneer)
+### External Cream Workflow
+```
+CREAM (purchased)
+  ↓
+CHURNING
+  ↓
+BUTTER
+  ↓
+BLENDING (ALWAYS - no direct packing)
+  ↓
+PUBBB (unsalted)
+  ↓
+  ├─→ PACK AS FINAL SKU
+  └─→ ADD SALT → PSBBB
+        ↓
+        ├─→ PACK AS FINAL SKU
+        └─→ MAKE BRICKS → BB05
+```
 
-**Columns:**
-- Round no
-- Input quantity (cream, kg)
-- Output butter quantity (kg)
-- Buttermilk (kg, if any) - tracked as byproduct
-- Used in Ghee (auto-subtract when ghee rounds recorded)
-- Balance (remaining butter)
-- **Pack button** (pack as PUB)
+### Status Pipeline
+
+**Internal Cream (11 stages):**
+1. Scheduled
+2. Churning
+3. Churned (Butter)
+4. Sent to Ghee / Packed as PUBB / Blending
+5. Blending (if sent to blending)
+6. PUBBB Pool / PSBBB Pool
+7. Pack as PSBBB / Make Bricks (if PSBBB)
+8. BB05 Pool (if bricks)
+9. Packed
+10. Handed Over
+
+**External Cream (10 stages):**
+1. Scheduled
+2. Churning
+3. Churned (Butter)
+4. Blending (mandatory)
+5. PUBBB Pool
+6. Pack as PUBBB / Add Salt
+7. PSBBB Pool (if salted)
+8. Pack as PSBBB / Make Bricks
+9. BB05 Pool (if bricks)
+10. Packed
+11. Handed Over
 
 ### Blending Process
+- **Ratio**: 3.3:1 (Butter : Replacer)
+- **Default**: 16.5 kg butter + 5 kg replacer
+- **Auto-calculation**: Change butter quantity → replacer auto-adjusts
+- **Salt option**: Unsalted (PUBBB) or Salted (PSBBB)
 
-**After salted/unsalted choice:**
+### Packing Configurations
 
-#### Unsalted → PUBBB Pool
-- PUBBB = Pasteurised Unsalted Blended Butter (pool, NOT final SKU yet)
-- Moisture loss occurs before final packing
-- Can be packed as: **PUBBB (butter balls)**
-  - Record: packets + loose balls
-
-#### Salted → PSBBB Pool
-- PSBBB = Pasteurised Salted Blended Butter (pool, NOT final SKU yet)
-- Moisture loss occurs before final packing
-- Can be packed as:
-  - **(a) PSBBB (butter balls)** — same format as PUBBB
-  - **(b) BB05 (butter bricks)** — different format
-
-### Blending Subsection
-
-**Master row with butter lot details** (same structure as cream lot)
-
-**Columns:**
-- Shift + Round details
-- Butter quantity (default 16.5kg, changeable)
-- Butter replacer quantity (default 5kg, **must change in same ratio** as butter)
-  - Example: If butter = 33kg → replacer = 10kg (same 16.5/5 ratio = 3.3:1)
-- **Salted / Unsalted** button
-
-### PUB Packing Configuration
+**PUBB/PUBBB/PSBBB (Balls):**
 - Each ball = 500g
-- 1 packet = 12 balls (6kg)
-- 1 case = 3 packets × 12 balls = 36 balls = 18kg
-- **Loose recorded as number of balls** (not packets)
+- 12 balls/packet
+- 3 packets/case
+- 36 balls = 18 kg/case
+- Loose = number of balls
 
-### External Cream Flow
-```
-Cream Source (from receiving) 
-  ↓
-Shift + Round details
-  ↓
-Input quantity
-  ↓
-Butter obtained
-  ↓
-Pack as PUB OR Send to Blending
-```
+**BB05 (Bricks):**
+- Each brick = 500g
+- 30 bricks/case = 15 kg/case
+- Loose = number of bricks
+
+### Batch Codes
+- **Butter**: `03-DATE` (e.g., `03-160626`)
+- **Cream (external)**: `02-DATE` (e.g., `02-160626`)
+
+### Data Model
+**Added to ProductionRound:**
+- `creamSource`: 'internal' | 'external'
+- `creamLotId`: string
+- `butterOutput`: number (kg)
+- `buttermilkOutput`: number (kg)
+- `destination`: 'ghee' | 'pubb' | 'blending'
+- `isSalted`: boolean
+- `replacerQuantity`: number (kg)
+- `pool`: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05'
+- `usedInGhee`: number (kg)
+
+**Added CreamLot interface:**
+- `lotCode`: string (02-DATE)
+- `dateReceived`: string
+- `quantity`: number (kg)
+- `invoiceNo`: string
+- `supplier`: string
+- `consumed`: number (kg)
+- `remaining`: number (kg)
+
+### Key Features
+- ✅ Cream source selection (internal/external)
+- ✅ Shift + Round structure
+- ✅ Churning process with output recording (butter + buttermilk)
+- ✅ Three-path decision for internal cream (Ghee/PUBB/Blending)
+- ✅ Mandatory blending for external cream
+- ✅ Auto-calculated blending ratio (3.3:1)
+- ✅ Salt/unsalt toggle for blending
+- ✅ Packing for all SKUs (PUBB, PUBBB, PSBBB, BB05)
+- ✅ +Add Packing button for multiple sessions
+- ✅ Batch codes (03-DATE)
+- ✅ Data model updated with butter-specific fields
 
 ---
 
