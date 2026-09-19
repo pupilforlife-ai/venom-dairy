@@ -147,14 +147,18 @@ export default function GheeTab() {
     const milkLot = milkLots.find(m => m.id === newShift.milkLotId);
     if (!milkLot) return;
 
-    addProductionShift({
+    const newShiftData = {
       milkLotId: newShift.milkLotId,
       milkLotCode: milkLot.lotCode,
       shiftNumber: newShift.shiftNumber,
       startedAt: new Date(newShift.startedAt).toISOString(),
       team: newShift.team.split(',').map(t => t.trim()).filter(Boolean),
-      status: 'active',
-    });
+      status: 'active' as const,
+    };
+
+    console.log('Creating shift with data:', newShiftData);
+    addProductionShift(newShiftData);
+    console.log('Shift added to context');
     showToast('success', `Ghee Shift ${newShift.shiftNumber} created`);
     setShowNewShiftModal(false);
     setNewShift({ milkLotId: '', shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16) });
@@ -190,13 +194,13 @@ export default function GheeTab() {
 
     console.log('Creating ghee round with shiftId:', shift.id, 'type: Ghee');
 
-    addProductionRound({
+    const newRoundData = {
       milkLotId: shift.milkLotId,
       milkLotCode: shift.milkLotCode,
       shiftId: shift.id,
       shiftNumber: shift.shiftNumber,
       roundNumber: newRound.roundNumber,
-      type: 'Ghee',
+      type: 'Ghee' as const,
       status: 'butter_selected',
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
       plannedInput: newRound.butterInput,
@@ -208,9 +212,11 @@ export default function GheeTab() {
       afOilInput: afOilInput,
       expectedYield: expectedYield,
       remainingBalance: 0,
-    });
+    };
 
-    console.log('Round created, current gheeRounds:', gheeRounds);
+    console.log('Creating round with data:', newRoundData);
+    addProductionRound(newRoundData);
+    console.log('Round added to context');
 
     // Update butter rounds to mark as used in ghee
     const butterRounds = productionRounds.filter(r => 
@@ -459,10 +465,32 @@ export default function GheeTab() {
         </div>
       </div>
 
+      {/* Debug Panel */}
+      <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4 mb-4">
+        <h3 className="text-sm font-bold text-yellow-900 mb-2">🐛 Debug Info</h3>
+        <div className="text-xs space-y-1">
+          <p><strong>Total Rounds:</strong> {productionRounds.length}</p>
+          <p><strong>Ghee Rounds:</strong> {gheeRounds.length}</p>
+          <p><strong>Active Shifts:</strong> {gheeShifts.length}</p>
+          <p><strong>Grouped By Shift:</strong> {Object.keys(groupedByShift).length} shifts</p>
+          {gheeRounds.length > 0 && (
+            <div className="mt-2 p-2 bg-white rounded border">
+              <p className="font-bold mb-1">Ghee Rounds Details:</p>
+              {gheeRounds.map(r => (
+                <p key={r.id} className="ml-2">
+                  ID: {r.id}, Shift: {r.shiftId}, Type: {r.type}, Status: {r.status}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Production Board */}
       <div className="space-y-4">
         {gheeShifts.map((shift) => {
           const rounds = groupedByShift[shift.id] || [];
+          console.log(`Rendering shift ${shift.shiftNumber}: ${rounds.length} rounds`);
 
           return (
             <div key={shift.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
