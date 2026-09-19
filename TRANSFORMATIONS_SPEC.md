@@ -72,30 +72,52 @@ All products derived from the same milk lot share the same base date code with d
 
 ## 4. Tab 2: Halloumi
 
-### Workflow (Similar to Paneer)
-- **Default milk input:** 240L (changeable)
-- Recipe scales proportionally with milk quantity
-- Shift + Round structure (like paneer)
+### Status
+✅ **Implemented with correct halloumi-specific workflow**
+
+### Workflow (Distinct from Paneer)
+- **Default milk input:** 240L (fixed for halloumi)
+- **Inline recipe display** at each stage (not separate modal)
+- Shift + Round structure
 
 ### Status Pipeline
 ```
-Scheduled → In Production → Coagulation → Pressing → Cooling → Resting → 
-Ready for Cutting → Cut → [Vacuum Pack OR Send to HCP]
+Scheduled → Add CaCl2 → Heat to 34°C → Add Rennet → 
+Curd Setting (30min) → Curd Cut → Heating to 42°C (40min) → 
+Presses → Whey Heating to 90°C → Halloumi Boiling → 
+Salted → Chiller Storage (4-6hr) → Weighed → 
+[Vacuum Pack OR Send to HCP] → Handed Over
 ```
 
-### Recipe Display (Staged for Workers)
-- Recipe visible to workers but **step-by-step**:
-  - Step 1: "Add CaCl2" → shows quantity
-  - Step 2: "Add Rennet" → shows quantity
-  - Step 3: etc.
-- Full recipe visible to owners/supervisors
+### Stage-by-Stage Recipe Display
+Each stage shows specific recipe details inline:
 
-### Discard/Spoilt Button
-- **Owner/Supervisor only** (not factory workers)
-- Must record:
-  - Reason for discard
-  - People responsible
-- **Also available on Paneer rounds**
+1. **Add CaCl2 Solution**: 192g CaCl2 in 3.8L water
+2. **Heat to 34°C**: Monitor temperature carefully
+3. **Add Rennet**: 15ml rennet in 500ml water
+4. **Curd Setting** ⏱️: 30-minute timer, do not disturb
+5. **Curd Cut**: Quick action, cut curd into pieces
+6. **Heating to 42°C** ⏱️: 40-minute timer, slowly heat while lifting curd to separate whey
+7. **Presses**: Press until firm
+8. **Whey Heating to 90°C**: Heat whey in vessel
+9. **Halloumi Boiling**: Cook in hot whey until floating
+10. **Salted**: Remove from whey, cool and salt
+11. **Chiller Storage**: Hold for 4-6 hours
+12. **Weighed**: Record final weight (expected 24-28 kg)
+13. **Final Decision**: Vacuum Pack OR Send to HCP
+
+### Timer Durations
+- **Curd Setting:** 30 minutes (let curd set)
+- **Heating to 42°C:** 40 minutes (slowly heat while lifting curd to separate whey)
+- **Chiller Storage:** 4-6 hours (manual, no timer)
+
+### Key Features
+- ✅ Inline recipe display at each stage
+- ✅ Timers for curd setting (30min) and heating to 42°C (40min)
+- ✅ Temperature targets shown (34°C, 42°C, 90°C)
+- ✅ Weight recording modal with expected yield
+- ✅ Vacuum pack / Send to HCP options
+- ✅ Halloumi-specific status pipeline (16 stages)
 
 ---
 

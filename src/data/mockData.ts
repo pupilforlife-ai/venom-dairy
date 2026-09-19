@@ -71,8 +71,8 @@ export interface ProductionRound {
   shiftNumber: number;
   roundNumber: number;
   type: 'D' | 'C/S' | 'Halloumi' | 'Butter' | 'Ghee';
-  // Status flow: scheduled → in_production → coagulation → pressing → cooling → resting → ready_cutting → cut → [clingwrapped] → [frozen] → packed → handed_over
-  status: 'scheduled' | 'in_production' | 'coagulation' | 'pressing' | 'cooling' | 'resting' | 'ready_cutting' | 'cut' | 'clingwrapped' | 'frozen' | 'packed' | 'handed_over';
+  // Status flow varies by product type - using string for flexibility
+  status: string;
   team: string[];
   plannedInput: number; // litres
   actualInput: number; // litres
@@ -80,21 +80,25 @@ export interface ProductionRound {
   startTime: string;
   completedAt?: string;
   
-  // Production details
+  // Production details (paneer)
   vat?: 'vat2' | 'vat3';
-  startingTemperature?: number; // °C - recorded when moving to in_production
+  startingTemperature?: number; // °C
   pressingStartedAt?: string;
   coolingStartedAt?: string;
   coolingLocation?: 'tank' | 'chiller';
   restingStartedAt?: string;
   
-  // Cutting details
+  // Halloumi-specific timestamps
+  curdSettingStartedAt?: string;
+  curdCuttingStartedAt?: string;
+  
+  // Cutting details (paneer)
   cutBy?: string;
   cuttingType?: string;
-  blockWeights?: number[]; // individual block weights in kg
+  blockWeights?: number[];
   numberOfBlocks?: number;
   
-  // Intermediate balance (kg remaining after cutting/consumption)
+  // Intermediate balance
   intermediateBalance?: number;
   
   // Packing results - supports multiple SKUs per round

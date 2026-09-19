@@ -5,7 +5,7 @@
 ### 1. Master Tabs Structure
 Added 5 tabs to the Production Board:
 - 🧀 **Paneer** (existing, fully functional)
-- 🥙 **Halloumi** (NEW - fully functional)
+- 🥙 **Halloumi** (NEW - fully functional with correct workflow)
 - 🧈 **Butter** (placeholder)
 - 🫙 **Ghee** (placeholder)
 - 🍗 **Crumbing** (placeholder)
@@ -14,85 +14,96 @@ Added 5 tabs to the Production Board:
 
 #### Core Functionality
 - ✅ **Add Shift** button - Create new halloumi shifts
-- ✅ **Add Round** button - Create new halloumi rounds (default 240L input)
-- ✅ **View Recipe** button - Shows complete halloumi recipe with 12 process steps
-- ✅ **Discard button** - For owner/supervisor (role check not yet implemented)
+- ✅ **Add Round** button - Create new halloumi rounds (fixed 240L input)
+- ✅ **Inline recipe display** - Shows recipe details at each stage
+- ✅ **Weight recording** - Modal for final product weight
 
-#### Status Pipeline
+#### Status Pipeline (Halloumi-Specific)
 ```
-Scheduled → In Production → Coagulation → Pressing (30min) → 
-Cooling (90min) → Resting (90min) → Ready for Cutting → Cut → 
+Scheduled → Add CaCl2 → Heat to 34°C → Add Rennet → 
+Curd Setting (30min) → Curd Cut → Heating to 42°C (40min) → 
+Presses → Whey Heating to 90°C → Halloumi Boiling → 
+Salted → Chiller Storage (4-6hr) → Weighed → 
 [Vacuum Pack OR Send to HCP] → Handed Over
 ```
 
-#### Workflow Stages
-1. **Scheduled** → Click "Start Production"
-2. **In Production** → Click "Start Coagulation"
-3. **Coagulation** → Click "Start Pressing (30 min)"
-4. **Pressing** → Timer shows 30:00 → Click "Start Cooling"
-5. **Cooling** → Timer shows 90:00 → Click "Start Resting (90 min)"
-6. **Resting** → Timer shows 90:00 → Click "Ready to Cut"
-7. **Ready for Cutting** → Click "Cut"
-8. **Cut** → Two options:
-   - **Vacuum Pack** → For direct sale
-   - **Send to HCP** → For Halloumi Cheese Poppers
-9. **Vacuum Packed / Sent to HCP** → Click "Hand Over"
+#### Workflow Stages (16 Total)
+1. **Scheduled** → Click "Add CaCl2"
+2. **CaCl2 Added** → Shows recipe: 192g CaCl2 in 3.8L water → Click "Heat to 34°C"
+3. **Heating to 34°C** → Click "Add Rennet"
+4. **Rennet Added** → Shows recipe: 15ml rennet in 500ml water → Click "Start Curd Setting (30 min)"
+5. **Curd Setting** ⏱️ → Timer shows 30:00 → Click "Cut Curd"
+6. **Curd Cut** → Quick action → Click "Start Heating to 42°C (40 min)"
+7. **Heating to 42°C** ⏱️ → Timer shows 40:00 → Click "To Presses"
+8. **Presses** → Click "Heat Whey to 90°C"
+9. **Whey Heating to 90°C** → Click "Start Boiling"
+10. **Halloumi Boiling** → Cook until floating → Click "Salt"
+11. **Salted** → Click "Store in Chiller"
+12. **Chiller Storage** → Hold 4-6 hours → Click "Record Weight"
+13. **Weighed** → Weight modal opens → Enter final weight → Click "Record Weight"
+14. **Weighed (after recording)** → Two options:
+    - **Vacuum Pack** → For direct sale
+    - **Send to HCP** → For Halloumi Cheese Poppers
+15. **Vacuum Packed / Sent to HCP** → Click "Hand Over"
 
-#### Recipe Modal
-Shows complete halloumi recipe including:
-- **Ingredients** (for 240L milk):
-  - Raw milk: 240 L
-  - CaCl2 solution: 240 mL
-  - Rennet: 60 mL
-  - Salt: 2.4 kg
-- **Process Steps** (12 steps):
-  1. Heat milk to 34°C
-  2. Add CaCl2 solution, stir gently
-  3. Add rennet, stir gently
-  4. Let coagulate for 30-45 minutes
-  5. Cut curd into 2cm cubes
-  6. Heat to 40°C over 30 minutes, stirring gently
-  7. Let curd settle, drain whey
-  8. Press curd for 2-3 hours
-  9. Cut into blocks
-  10. Cook blocks in hot whey (90°C) for 30 minutes
-  11. Cool in cold water
-  12. Salt in brine for 2-4 hours
-- **Expected Yield**: 24-28 kg from 240L milk
+#### Inline Recipe Display
+Each stage shows specific recipe details in a blue info box:
+- **CaCl2 Added**: "192g CaCl2 in 3.8L water, Add to milk and stir gently"
+- **Heating to 34°C**: "Heat milk slowly to 34°C, Monitor temperature carefully"
+- **Rennet Added**: "15ml rennet in 500ml water, Add to milk and stir gently"
+- **Curd Setting**: "Let curd set for 30 minutes, Do not disturb during this time"
+- **Curd Cut**: "Cut curd into pieces, Ready for heating"
+- **Heating to 42°C**: "Heat slowly to 42°C over 40 minutes, Gently lift curd while heating, This separates whey from curd"
+- **Presses**: "Remove curd into presses, Press until firm"
+- **Whey Heating**: "Whey remains in vessel, Heat whey to 90°C"
+- **Boiling**: "Cut pressed halloumi to smaller pieces, Cook in hot whey until floating, Monitor until pieces float"
+- **Salted**: "Remove from whey, Cool and salt"
+- **Chiller Storage**: "Store in chiller, Hold for 4-6 hours"
+- **Weighed**: "Weigh final product, Record output weight"
 
-#### Discard Functionality
-- Click "Discard" button on any active round
-- Enter reason (prompt)
-- Enter responsible person (prompt)
-- Round is locked with discard note
+#### Weight Recording Modal
+- Opens when clicking "Record Weight" after chiller storage
+- Shows expected yield: 24-28 kg from 240L milk
+- Records final product weight
+- Updates round with output weight
 
 ### 3. Documentation Updates
 
 #### DECISIONS.md
-- Added **Section 1B: Halloumi Production Workflow**
-- Documented complete status pipeline
+- Updated **Section 1B: Halloumi Production Workflow** with correct workflow
+- Documented complete 15-stage status pipeline
+- Documented inline recipe display at each stage
+- Documented timer durations (30min curd setting, 40min curd cutting)
+- Documented temperature targets (34°C, 42°C, 90°C)
 - Documented key differences from paneer
-- Documented recipe details
-- Documented timer durations
 - Updated implementation status
-- Updated file structure
 
 #### TRANSFORMATIONS_SPEC.md
-- Already contains halloumi specifications
-- Ready for future enhancements
+- Updated **Section 4: Tab 2: Halloumi** with correct workflow
+- Documented stage-by-stage recipe display
+- Documented timer durations
+- Documented key features
+
+#### HALLOUMI_IMPLEMENTATION.md
+- This file - complete implementation summary
 
 ## 📊 Key Differences from Paneer
 
 | Feature | Paneer | Halloumi |
 |---------|--------|----------|
-| Default milk input | 500L | 240L |
+| Default milk input | 500L | 240L (fixed) |
 | Vat selection | Vat 2 or Vat 3 | Not applicable |
-| Cooling options | Tank (90min) or Chiller (120min) | Fixed 90min |
-| After cutting | Clingwrap/Freeze/Pack | Vacuum Pack or Send to HCP |
+| CaCl2/Rennet | Not used | Used (specific quantities shown inline) |
+| Status stages | 12 stages | 16 stages |
+| Timers | Pressing 30min, Cooling 90/120min, Resting 90min | Curd Setting 30min, Heating to 42°C 40min |
+| Cooling choice | Tank or Chiller | Not applicable |
+| Unique step | — | Cooking in hot whey until floating |
+| Temperature targets | — | 34°C, 42°C, 90°C shown at each stage |
+| After processing | Clingwrap/Freeze/Pack | Vacuum Pack or Send to HCP |
 | Cream recovery | Yes (C/S rounds only) | No |
 | PAN111 | Yes (once per milk lot) | No |
-| Recipe display | Not implemented | Staged recipe modal |
-| Discard button | Not implemented | Yes (no role check yet) |
+| Recipe display | Not inline | Inline at each stage |
+| Weight recording | At cutting stage | Separate modal after chiller storage |
 
 ## 🚀 How to Test
 
@@ -100,16 +111,17 @@ Shows complete halloumi recipe including:
 2. **Go to Production Board** (https://vejoy-dairy.vercel.app/production-board)
 3. **Click "Halloumi" tab**
 4. **Click "New Shift"** → Create a shift
-5. **Click "New Round"** → Create a round (default 240L)
-6. **Click "View Recipe"** → See the complete recipe
-7. **Click "Start Production"** → Move through the workflow
-8. **Test timers** → Watch the countdown
-9. **Test discard** → Click "Discard" on a round
+5. **Click "New Round"** → Create a round (240L fixed)
+6. **Click "Add CaCl2"** → See inline recipe details
+7. **Move through workflow** → Watch recipe details change at each stage
+8. **Test timers** → Watch 30min curd setting and 40min heating to 42°C countdowns
+9. **Test weight recording** → Click "Record Weight" after chiller storage
+10. **Test final decision** → Choose Vacuum Pack or Send to HCP
 
 ## 📝 Next Steps
 
 ### Immediate
-1. ✅ Halloumi tab - **DONE**
+1. ✅ Halloumi tab - **DONE** (with correct workflow)
 2. ⏳ Butter tab - **Next**
 3. ⏳ Ghee tab
 4. ⏳ Crumbing tab (SPP/JP/HCP)
@@ -117,8 +129,7 @@ Shows complete halloumi recipe including:
 ### Future Enhancements
 - Add user roles (Owner/Supervisor/Worker)
 - Implement role-based access control
-- Add discard reason dropdown (instead of free text)
-- Add halloumi-specific cutting form (block weights)
+- Add halloumi-specific cutting form (if needed)
 - Add vacuum packing form (weight, date, etc.)
 - Link halloumi to HCP in crumbing tab
 
@@ -126,18 +137,23 @@ Shows complete halloumi recipe including:
 
 ### Files Modified
 - `src/pages/ProductionBoard.tsx` - Added master tabs structure
-- `src/pages/HalloumiTab.tsx` - **NEW** - Complete halloumi tab implementation
-- `DECISIONS.md` - Added halloumi documentation
+- `src/pages/HalloumiTab.tsx` - **NEW** - Complete halloumi tab with correct workflow
+- `src/data/mockData.ts` - Updated ProductionRound interface to support halloumi-specific timestamps
+- `DECISIONS.md` - Updated halloumi documentation
+- `TRANSFORMATIONS_SPEC.md` - Updated halloumi specifications
 
-### Data Model
-- Uses existing `ProductionRound` interface
+### Data Model Updates
+- Changed `ProductionRound.status` from union type to `string` for flexibility
+- Added `curdSettingStartedAt?: string` for halloumi curd setting timer
+- Added `curdCuttingStartedAt?: string` for halloumi heating to 42°C timer
 - Type field: `'Halloumi'`
-- Status field: Same as paneer but with `vacuum_packed` and `sent_to_hcp` instead of `clingwrapped`/`frozen`/`packed`
+- Status field: 16 halloumi-specific stages
 
 ### State Management
 - Uses existing `useApp()` context
 - Shares `productionRounds` and `productionShifts` with paneer
 - Filters by `type === 'Halloumi'`
+- Separate timer state for halloumi-specific timers
 
 ## ✅ Build Status
 - ✅ TypeScript compilation: **PASS**
@@ -147,4 +163,4 @@ Shows complete halloumi recipe including:
 
 ---
 
-**Status:** Halloumi tab is complete and ready for testing. Next: Butter tab.
+**Status:** Halloumi tab is complete with correct workflow (16 stages) and ready for testing. The 40-minute timer is correctly placed on the "Heating to 42°C" stage (after curd cutting), not on the curd cutting itself. Next: Butter tab.
