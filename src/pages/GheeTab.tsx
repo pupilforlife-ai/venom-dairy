@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Package, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -48,6 +48,15 @@ export default function GheeTab() {
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('=== GHEE TAB STATE ===');
+    console.log('Total productionRounds:', productionRounds.length);
+    console.log('Ghee rounds:', productionRounds.filter(r => r.type === 'Ghee'));
+    console.log('Total productionShifts:', productionShifts.length);
+    console.log('Active shifts:', productionShifts.filter(s => s.status === 'active'));
+  }, [productionRounds, productionShifts]);
 
   // Forms
   const [newShift, setNewShift] = useState({
@@ -158,10 +167,16 @@ export default function GheeTab() {
     }
 
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
-    if (!shift) return;
+    if (!shift) {
+      showToast('error', 'Shift not found');
+      return;
+    }
 
     const milkLot = milkLots.find(m => m.id === newRound.milkLotId);
-    if (!milkLot) return;
+    if (!milkLot) {
+      showToast('error', 'Milk lot not found');
+      return;
+    }
 
     const availableButter = getAvailableButter(newRound.milkLotId);
     if (newRound.butterInput > availableButter) {
@@ -172,6 +187,8 @@ export default function GheeTab() {
     const afOilInput = calculateAFOil(newRound.butterInput);
     const totalInput = newRound.butterInput + afOilInput;
     const expectedYield = calculateExpectedYield(totalInput);
+
+    console.log('Creating ghee round with shiftId:', shift.id, 'type: Ghee');
 
     addProductionRound({
       milkLotId: shift.milkLotId,
@@ -192,6 +209,8 @@ export default function GheeTab() {
       expectedYield: expectedYield,
       remainingBalance: 0,
     });
+
+    console.log('Round created, current gheeRounds:', gheeRounds);
 
     // Update butter rounds to mark as used in ghee
     const butterRounds = productionRounds.filter(r => 
@@ -442,12 +461,11 @@ export default function GheeTab() {
 
       {/* Production Board */}
       <div className="space-y-4">
-        {Object.entries(groupedByShift).map(([shiftId, rounds]) => {
-          const shift = productionShifts.find(s => s.id === shiftId);
-          if (!shift) return null;
+        {gheeShifts.map((shift) => {
+          const rounds = groupedByShift[shift.id] || [];
 
           return (
-            <div key={shiftId} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div key={shift.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               {/* Shift Header */}
               <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-200">
                 <div className="flex items-center justify-between">
@@ -465,6 +483,7 @@ export default function GheeTab() {
               </div>
 
               {/* Rounds Table */}
+              {rounds.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -517,13 +536,18 @@ export default function GheeTab() {
                   </tbody>
                 </table>
               </div>
+              ) : (
+                <div className="p-6 text-center text-slate-400 text-sm">
+                  No rounds in this shift yet. <button onClick={() => setShowNewRoundModal(true)} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
+                </div>
+              )}
             </div>
           );
         })}
 
-        {gheeRounds.length === 0 && (
+        {gheeShifts.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <p className="text-slate-500">No ghee rounds yet. Create a shift and round to begin.</p>
+            <p className="text-slate-500">No ghee shifts yet. Create a shift to begin.</p>
           </div>
         )}
       </div>
