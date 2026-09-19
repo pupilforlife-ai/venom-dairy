@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Package, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -48,6 +48,15 @@ export default function GheeTab() {
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('=== GHEE TAB STATE ===');
+    console.log('Total productionRounds:', productionRounds.length);
+    console.log('Ghee rounds:', productionRounds.filter(r => r.type === 'Ghee'));
+    console.log('Total productionShifts:', productionShifts.length);
+    console.log('Active shifts:', productionShifts.filter(s => s.status === 'active'));
+  }, [productionRounds, productionShifts]);
 
   // Forms
   const [newShift, setNewShift] = useState({
@@ -158,10 +167,16 @@ export default function GheeTab() {
     }
 
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
-    if (!shift) return;
+    if (!shift) {
+      showToast('error', 'Shift not found');
+      return;
+    }
 
     const milkLot = milkLots.find(m => m.id === newRound.milkLotId);
-    if (!milkLot) return;
+    if (!milkLot) {
+      showToast('error', 'Milk lot not found');
+      return;
+    }
 
     const availableButter = getAvailableButter(newRound.milkLotId);
     if (newRound.butterInput > availableButter) {
@@ -172,6 +187,8 @@ export default function GheeTab() {
     const afOilInput = calculateAFOil(newRound.butterInput);
     const totalInput = newRound.butterInput + afOilInput;
     const expectedYield = calculateExpectedYield(totalInput);
+
+    console.log('Creating ghee round with shiftId:', shift.id, 'type: Ghee');
 
     addProductionRound({
       milkLotId: shift.milkLotId,
@@ -192,6 +209,8 @@ export default function GheeTab() {
       expectedYield: expectedYield,
       remainingBalance: 0,
     });
+
+    console.log('Round created, current gheeRounds:', gheeRounds);
 
     // Update butter rounds to mark as used in ghee
     const butterRounds = productionRounds.filter(r => 
