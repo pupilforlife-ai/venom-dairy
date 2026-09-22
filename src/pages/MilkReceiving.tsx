@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Plus,
   ChevronDown,
@@ -18,9 +18,22 @@ import { Modal } from '../components/Modal';
 export default function MilkReceiving() {
   const { milkLots, addMilkLot } = useApp();
   const { showToast } = useToast();
-  const [selectedLot, setSelectedLot] = useState(milkLots[0]?.id || '');
+  const newestLot = milkLots.find((lot) => lot.isLatest) ?? milkLots[0];
+  const [selectedLot, setSelectedLot] = useState(newestLot?.id || '');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set());
   const [showNewLotModal, setShowNewLotModal] = useState(false);
+
+  const orderedLots = useMemo(() => [...milkLots].sort((a, b) => {
+    const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
+    const bDate = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
+    return bDate - aDate;
+  }), [milkLots]);
+
+  useEffect(() => {
+    if (newestLot && !milkLots.some((lot) => lot.id === selectedLot)) {
+      setSelectedLot(newestLot.id);
+    }
+  }, [milkLots, newestLot, selectedLot]);
   
   const activeLot = milkLots.find((l) => l.id === selectedLot);
 
@@ -135,7 +148,7 @@ export default function MilkReceiving() {
       <div>
         <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Select a lot to view details</h3>
         <div className="flex gap-2 overflow-x-auto pb-1">
-          {milkLots.slice(0, 5).map((lot) => (
+          {orderedLots.map((lot) => (
             <button
               key={lot.id}
               onClick={() => setSelectedLot(lot.id)}
@@ -321,7 +334,7 @@ export default function MilkReceiving() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {milkLots.slice(0, 5).map((lot) => {
+              {orderedLots.map((lot) => {
                 const isExpanded = expandedLots.has(lot.id);
                 const milkLeft = lot.litresRemaining;
                 
