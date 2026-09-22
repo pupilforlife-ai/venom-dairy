@@ -28,6 +28,8 @@ export default function MilkReceiving() {
     const bDate = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
     return bDate - aDate;
   }), [milkLots]);
+  const quickLots = orderedLots.slice(0, 4);
+  const olderLots = orderedLots.slice(4);
 
   useEffect(() => {
     if (newestLot && !milkLots.some((lot) => lot.id === selectedLot)) {
@@ -144,11 +146,12 @@ export default function MilkReceiving() {
         </button>
       </div>
 
-      {/* Lot Selector Cards - Last 5 lots */}
+      {/* Lot selector: four newest lots plus an older-lots dropdown */}
       <div>
         <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Select a lot to view details</h3>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {orderedLots.map((lot) => (
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <div className="grid grid-cols-2 sm:flex gap-2">
+          {quickLots.map((lot) => (
             <button
               key={lot.id}
               onClick={() => setSelectedLot(lot.id)}
@@ -167,6 +170,20 @@ export default function MilkReceiving() {
               )}
             </button>
           ))}
+          </div>
+          {olderLots.length > 0 && (
+            <select
+              value={olderLots.some((lot) => lot.id === selectedLot) ? selectedLot : ''}
+              onChange={(event) => event.target.value && setSelectedLot(event.target.value)}
+              className="w-full sm:w-auto min-w-48 px-3 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700"
+              aria-label="Select an older milk lot"
+            >
+              <option value="">Older lots...</option>
+              {olderLots.map((lot) => (
+                <option key={lot.id} value={lot.id}>Lot {lot.lotCode}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
