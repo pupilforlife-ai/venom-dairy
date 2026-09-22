@@ -708,6 +708,20 @@ export default function ProductionBoard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={selectedMilkLotId}
+            onChange={(event) => setFilters(current => ({ ...current, milkLot: event.target.value, shift: 'all' }))}
+            className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700"
+            aria-label="Select production milk lot"
+          >
+            {milkLots.slice(0, 4).map((lot) => (
+              <option key={lot.id} value={lot.id}>Lot {lot.lotCode}</option>
+            ))}
+            {milkLots.length > 4 && <option disabled>Older lots</option>}
+            {milkLots.slice(4).map((lot) => (
+              <option key={lot.id} value={lot.id}>Lot {lot.lotCode}</option>
+            ))}
+          </select>
           {activeTab === 'paneer' && (
             <button onClick={() => setShowPan111Modal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors">
               <AlertTriangle className="w-4 h-4" /> Record PAN111
