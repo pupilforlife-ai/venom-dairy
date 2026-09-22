@@ -18,7 +18,11 @@ import { Modal } from '../components/Modal';
 export default function MilkReceiving() {
   const { milkLots, addMilkLot } = useApp();
   const { showToast } = useToast();
-  const newestLot = milkLots.find((lot) => lot.isLatest) ?? milkLots[0];
+  const newestLot = [...milkLots].sort((a, b) => {
+    const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
+    const bDate = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
+    return bDate - aDate;
+  })[0];
   const [selectedLot, setSelectedLot] = useState(newestLot?.id || '');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set());
   const [showNewLotModal, setShowNewLotModal] = useState(false);

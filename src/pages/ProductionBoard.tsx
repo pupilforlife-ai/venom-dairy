@@ -114,7 +114,11 @@ export default function ProductionBoard() {
     team: '',
   });
 
-  const newestMilkLot = milkLots.find((m) => m.isLatest) ?? milkLots.find((m) => m.status === 'active') ?? milkLots[0];
+  const newestMilkLot = [...milkLots].sort((a, b) => {
+    const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
+    const bDate = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
+    return bDate - aDate;
+  })[0];
   const selectedMilkLotId = filters.milkLot || newestMilkLot?.id || '';
   const activeMilkLot = milkLots.find((m) => m.id === selectedMilkLotId);
 
