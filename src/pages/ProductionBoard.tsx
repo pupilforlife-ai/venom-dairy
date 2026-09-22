@@ -49,7 +49,7 @@ export default function ProductionBoard() {
   const { showToast } = useToast();
   
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
-  const [filters, setFilters] = useState({ milkLot: 'all', status: 'all', type: 'all', shift: 'all' });
+  const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all' });
   const [showFilters, setShowFilters] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
@@ -114,7 +114,15 @@ export default function ProductionBoard() {
     team: '',
   });
 
-  const activeMilkLot = milkLots.find((m) => m.status === 'active');
+  const newestMilkLot = milkLots.find((m) => m.isLatest) ?? milkLots.find((m) => m.status === 'active') ?? milkLots[0];
+  const selectedMilkLotId = filters.milkLot || newestMilkLot?.id || '';
+  const activeMilkLot = milkLots.find((m) => m.id === selectedMilkLotId);
+
+  useEffect(() => {
+    if (selectedMilkLotId && filters.milkLot !== selectedMilkLotId) {
+      setFilters(current => ({ ...current, milkLot: selectedMilkLotId, shift: 'all' }));
+    }
+  }, [filters.milkLot, selectedMilkLotId]);
 
   // Update timers every second
   useEffect(() => {
@@ -149,7 +157,7 @@ export default function ProductionBoard() {
 
   // Filter rounds
   const filteredRounds = productionRounds.filter((round) => {
-    if (filters.milkLot !== 'all' && round.milkLotId !== filters.milkLot) return false;
+    if (round.milkLotId !== selectedMilkLotId) return false;
     if (filters.status !== 'all' && round.status !== filters.status) return false;
     if (filters.type !== 'all' && round.type !== filters.type) return false;
     if (filters.shift !== 'all' && round.shiftId !== filters.shift) return false;
@@ -165,7 +173,7 @@ export default function ProductionBoard() {
 
   // Get active shifts (latest first)
   const activeShifts = productionShifts
-    .filter(s => groupedByShift[s.id] || s.status !== 'completed')
+    .filter(s => s.milkLotId === selectedMilkLotId && (groupedByShift[s.id] || s.status !== 'completed'))
     .sort((a, b) => b.shiftNumber - a.shiftNumber);
 
   // Check for FIFO violations
@@ -422,15 +430,16 @@ export default function ProductionBoard() {
   };
 
   const handleCreateShift = () => {
-    if (!newShift.milkLotId) {
-      showToast('error', 'Please select a milk lot');
+    const milkLotId = newShift.milkLotId || selectedMilkLotId;
+    if (!milkLotId) {
+      showToast('error', 'Select a milk lot before creating a shift');
       return;
     }
-    const milkLot = milkLots.find(m => m.id === newShift.milkLotId);
+    const milkLot = milkLots.find(m => m.id === milkLotId);
     if (!milkLot) return;
 
     addProductionShift({
-      milkLotId: newShift.milkLotId,
+      milkLotId,
       milkLotCode: milkLot.lotCode,
       shiftNumber: newShift.shiftNumber,
       startedAt: new Date(newShift.startedAt).toISOString(),
@@ -440,7 +449,7 @@ export default function ProductionBoard() {
     });
     showToast('success', `Shift ${newShift.shiftNumber} created`);
     setShowNewShiftModal(false);
-    setNewShift({ milkLotId: '', shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16), teamNotes: '' });
+    setNewShift({ milkLotId: selectedMilkLotId, shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16), teamNotes: '' });
   };
 
   const handleEndShift = (shiftId: string) => {
@@ -450,7 +459,7 @@ export default function ProductionBoard() {
 
   const getLatestActiveShift = () => {
     return productionShifts
-      .filter(s => s.status === 'active')
+      .filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId)
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0] || null;
   };
 
@@ -690,7 +699,7 @@ export default function ProductionBoard() {
             <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">LIVE</span>
           </div>
           <p className="text-sm text-slate-500 mt-0.5">
-            Milk Lot: <span className="font-medium text-slate-700">{activeMilkLot?.lotCode}</span>
+            Milk Lot: <span className="font-medium text-slate-700">{activeMilkLot?.lotCode ?? 'No lot selected'}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -794,8 +803,7 @@ export default function ProductionBoard() {
         <div className="bg-white rounded-xl border border-slate-200 p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Milk Lot</label>
-            <select value={filters.milkLot} onChange={(e) => setFilters({ ...filters, milkLot: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-              <option value="all">All Lots</option>
+            <select value={selectedMilkLotId} onChange={(e) => setFilters({ ...filters, milkLot: e.target.value, shift: 'all' })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               {milkLots.map((lot) => <option key={lot.id} value={lot.id}>{lot.lotCode}</option>)}
             </select>
           </div>
