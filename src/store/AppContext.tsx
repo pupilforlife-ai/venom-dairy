@@ -79,7 +79,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Milk lot actions
   const addMilkLot = (lot: Omit<MilkLot, 'id'>) => {
     const newLot = { ...lot, id: `ml-${Date.now()}` };
-    setMilkLots([...milkLots, newLot]);
+    setMilkLots(currentLots => [
+      ...currentLots.map(existingLot => (
+        existingLot.status === 'active' || existingLot.isLatest
+          ? { ...existingLot, status: 'completed' as MilkLot['status'], isLatest: false }
+          : existingLot
+      )),
+      { ...newLot, status: 'active', isLatest: true },
+    ]);
   };
 
   const updateMilkLot = (id: string, updates: Partial<MilkLot>) => {

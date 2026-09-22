@@ -19,7 +19,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { milkLots, statusFlow, statusLabels, statusColors } from '../data/mockData';
+import { statusFlow, statusLabels, statusColors } from '../data/mockData';
 import HalloumiTab from './HalloumiTab';
 import ButterTab from './ButterTab';
 import GheeTab from './GheeTab';
