@@ -175,6 +175,7 @@ export default function ProductionBoard() {
   const activeShifts = productionShifts
     .filter(s => s.milkLotId === selectedMilkLotId && (groupedByShift[s.id] || s.status !== 'completed'))
     .sort((a, b) => b.shiftNumber - a.shiftNumber);
+  const hasSelectedLotBoard = activeShifts.length > 0;
 
   // Check for FIFO violations
   const frozenLots = intermediateLots
@@ -785,6 +786,19 @@ export default function ProductionBoard() {
       {/* Paneer Tab Content */}
       {activeTab === 'paneer' && (
         <>
+      {!hasSelectedLotBoard && activeMilkLot && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-emerald-900">Fresh production board for lot {activeMilkLot.lotCode}</p>
+            <p className="text-sm text-emerald-700 mt-1">
+              {activeMilkLot.litresReceived.toLocaleString()} L received. No shifts or rounds have been created for this lot yet.
+            </p>
+          </div>
+          <button onClick={() => setShowNewShiftModal(true)} className="shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+            <Plus className="w-4 h-4" /> Create first shift
+          </button>
+        </div>
+      )}
       {/* FIFO Warning Banner */}
       {hasFifoViolation && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
