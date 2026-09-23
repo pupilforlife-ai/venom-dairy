@@ -20,8 +20,8 @@ export default function Login({ message = '' }: { message?: string }) {
 
     setBusy(true);
     const normalizedUsername = username.trim().toLowerCase();
-    if (!/^[a-z0-9._-]{3,32}$/.test(normalizedUsername)) {
-      setError('Use 3–32 letters, numbers, dots, dashes, or underscores.');
+    if (!/^[a-z0-9._-]{2,32}$/.test(normalizedUsername)) {
+      setError('Use 2–32 letters, numbers, dots, dashes, or underscores.');
       setBusy(false);
       return;
     }

@@ -8,29 +8,12 @@ create table if not exists public.app_state (
 
 alter table public.app_state enable row level security;
 
--- Temporary prototype policies. Replace these with authenticated user/team policies
--- before using this app for sensitive production data.
+-- Access policies are installed by auth_schema.sql after profiles and its
+-- authorization helpers exist.
 drop policy if exists "Allow public state reads" on public.app_state;
 drop policy if exists "Allow public state writes" on public.app_state;
 drop policy if exists "Allow public state updates" on public.app_state;
 drop policy if exists "Allow public state deletes" on public.app_state;
-
-create policy "Allow public state reads"
-  on public.app_state for select
-  using (true);
-
-create policy "Allow public state writes"
-  on public.app_state for insert
-  with check (true);
-
-create policy "Allow public state updates"
-  on public.app_state for update
-  using (true)
-  with check (true);
-
-create policy "Allow public state deletes"
-  on public.app_state for delete
-  using (true);
 
 create or replace function public.set_app_state_updated_at()
 returns trigger

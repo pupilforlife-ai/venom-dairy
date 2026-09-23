@@ -6,6 +6,10 @@ set role = 'owner',
     approved_at = now()
 where username in ('hk', 'sa', 'kb');
 
+-- Synthetic @users.vejoy.internal addresses cannot receive confirmation emails.
+-- Disable email confirmation in Supabase Dashboard > Authentication > Providers > Email
+-- before asking these users to sign in.
+
 select username, role, status
 from public.profiles
 where username in ('hk', 'sa', 'kb')
