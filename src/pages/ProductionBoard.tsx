@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   History,
+  ShieldAlert,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -47,6 +48,8 @@ export default function ProductionBoard() {
     updateMilkLot
   } = useApp();
   const { showToast } = useToast();
+  const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
+  const canForceStage = currentRole === 'admin' || currentRole === 'owner';
   
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all' });
@@ -520,6 +523,16 @@ export default function ProductionBoard() {
   const handleShiftChange = (shiftId: string) => {
     const existingRoundsInShift = productionRounds.filter(r => r.shiftId === shiftId).length;
     setNewRound({ ...newRound, shiftId, roundNumber: existingRoundsInShift + 1 });
+  };
+
+  const handleForceNextStage = (roundId: string) => {
+    if (!canForceStage) return;
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round) return;
+    const confirmed = window.confirm(`Force ${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber} to the next stage?`);
+    if (!confirmed) return;
+    advanceRoundStatus(roundId);
+    showToast('success', 'Round advanced to the next stage by admin override');
   };
 
   // Get action buttons for each round
@@ -1063,6 +1076,15 @@ export default function ProductionBoard() {
                             {!round.locked && (
                               <div className="flex gap-1 flex-wrap">
                                 {getActionButtons(round)}
+                                {canForceStage && statusFlow.indexOf(round.status as typeof statusFlow[number]) < statusFlow.length - 1 && (
+                                  <button
+                                    onClick={() => handleForceNextStage(round.id)}
+                                    className="flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium hover:bg-red-200"
+                                    title="Admin/Owner override"
+                                  >
+                                    <ShieldAlert className="w-3 h-3" /> Force next stage
+                                  </button>
+                                )}
                               </div>
                             )}
                           </td>
