@@ -43,7 +43,7 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
 export default function ProductionBoard() {
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots,
-    advanceRoundStatus, updateProductionRound, addProductionRound,
+    advanceRoundStatus, forceAdvanceRoundStatus, updateProductionRound, addProductionRound,
     addProductionShift, updateProductionShift, addIntermediateLot,
     updateMilkLot
   } = useApp();
@@ -531,8 +531,10 @@ export default function ProductionBoard() {
     if (!round) return;
     const confirmed = window.confirm(`Force ${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber} to the next stage?`);
     if (!confirmed) return;
-    advanceRoundStatus(roundId);
-    showToast('success', 'Round advanced to the next stage by admin override');
+    void forceAdvanceRoundStatus(roundId).then((success) => {
+      if (success) showToast('success', 'Round advanced to the next stage by admin override');
+      else showToast('error', 'The server rejected this admin override');
+    });
   };
 
   // Get action buttons for each round

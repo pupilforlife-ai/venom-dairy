@@ -1,5 +1,6 @@
 import { createContext, useContext, ReactNode } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
+import { supabase } from '../lib/supabase';
 import { 
   milkLots as initialMilkLots, 
   productionRounds as initialRounds,
@@ -44,6 +45,7 @@ interface AppContextType extends AppState {
   addProductionRound: (round: Omit<ProductionRound, 'id'>) => void;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
   advanceRoundStatus: (id: string) => void;
+  forceAdvanceRoundStatus: (id: string) => Promise<boolean>;
   recordRoundOutput: (id: string, outputWeight: number, notes?: string) => void;
   
   // Temperature actions
@@ -131,6 +133,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  const forceAdvanceRoundStatus = async (id: string) => {
+    if (!supabase) return false;
+    const { data, error } = await supabase.rpc('force_production_round_next_stage', { round_id: id });
+    if (error || !data) {
+      console.error('Error forcing round stage:', error);
+      return false;
+    }
+    setProductionRounds(current => current.map(round => round.id === id ? data as ProductionRound : round));
+    return true;
+  };
+
   const recordRoundOutput = (id: string, outputWeight: number, notes?: string) => {
     setProductionRounds(productionRounds.map(round => 
       round.id === id ? { ...round, outputWeight, notes: notes || round.notes } : round
@@ -196,6 +209,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addProductionRound,
     updateProductionRound,
     advanceRoundStatus,
+    forceAdvanceRoundStatus,
     recordRoundOutput,
     addTemperatureReading,
     addWasteEvent,
