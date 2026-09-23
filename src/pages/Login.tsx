@@ -2,11 +2,12 @@ import { FormEvent, useState } from 'react';
 import { ArrowRight, Factory, LockKeyhole, Mail, ShieldCheck } from 'lucide-react';
 import { supabase, supabaseEnabled } from '../lib/supabase';
 
-export default function Login() {
-  const [email, setEmail] = useState('');
+export default function Login({ message = '' }: { message?: string }) {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<'signIn' | 'request'>('signIn');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(message);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -18,8 +19,25 @@ export default function Login() {
     }
 
     setBusy(true);
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    if (signInError) setError(signInError.message);
+    const normalizedUsername = username.trim().toLowerCase();
+    if (!/^[a-z0-9._-]{3,32}$/.test(normalizedUsername)) {
+      setError('Use 3–32 letters, numbers, dots, dashes, or underscores.');
+      setBusy(false);
+      return;
+    }
+    const internalEmail = `${normalizedUsername}@users.vejoy.internal`;
+    if (mode === 'request') {
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: internalEmail,
+        password,
+        options: { data: { username: normalizedUsername } },
+      });
+      if (signUpError) setError(signUpError.message);
+      else setError('Request submitted. An owner must approve this username before access is granted.');
+    } else {
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email: internalEmail, password });
+      if (signInError) setError(signInError.message);
+    }
     setBusy(false);
   };
 
@@ -54,14 +72,14 @@ export default function Login() {
           <div className="max-w-sm mx-auto lg:mx-0">
             <p className="text-sm font-medium text-emerald-400">Welcome back</p>
             <h2 className="mt-2 text-3xl font-bold">Sign in to Vejoy</h2>
-            <p className="mt-2 text-sm text-slate-400">Use your team account to access production operations.</p>
+            <p className="mt-2 text-sm text-slate-400">Use your internal username to access production operations.</p>
 
             <form onSubmit={handleSubmit} className="mt-8 space-y-5">
               <label className="block">
-                <span className="text-sm font-medium text-slate-300">Email</span>
+                <span className="text-sm font-medium text-slate-300">Username</span>
                 <span className="relative block mt-2">
                   <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
-                  <input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-800 py-3 pl-10 pr-3 text-sm outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20" placeholder="name@company.com" />
+                  <input required type="text" value={username} onChange={(event) => setUsername(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-800 py-3 pl-10 pr-3 text-sm outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20" placeholder="e.g. rajesh" autoComplete="username" />
                 </span>
               </label>
               <label className="block">
@@ -73,9 +91,12 @@ export default function Login() {
               </label>
               {error && <p role="alert" className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-300">{error}</p>}
               <button disabled={busy} className="w-full rounded-xl bg-emerald-500 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60">
-                {busy ? 'Signing in...' : <span className="flex items-center justify-center gap-2">Sign in <ArrowRight className="w-4 h-4" /></span>}
+                {busy ? 'Please wait...' : <span className="flex items-center justify-center gap-2">{mode === 'signIn' ? 'Sign in' : 'Request access'} <ArrowRight className="w-4 h-4" /></span>}
               </button>
             </form>
+            <button type="button" onClick={() => { setMode(mode === 'signIn' ? 'request' : 'signIn'); setError(''); }} className="mt-5 w-full text-center text-sm text-emerald-400 hover:text-emerald-300">
+              {mode === 'signIn' ? 'New staff member? Request access' : 'Already approved? Sign in'}
+            </button>
           </div>
         </section>
       </div>

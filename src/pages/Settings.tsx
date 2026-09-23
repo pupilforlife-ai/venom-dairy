@@ -1,9 +1,36 @@
-import { Settings as SettingsIcon, Users, Package, Thermometer, Shield, Database, RotateCcw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Settings as SettingsIcon, Users, Package, Thermometer, Shield, Database, RotateCcw, Check, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
 
 export default function Settings() {
   const { showToast } = useToast();
+  const [isOwner, setIsOwner] = useState(false);
+  const [pendingUsers, setPendingUsers] = useState<Array<{ id: string; username: string; created_at: string }>>([]);
+
+  const loadPendingUsers = async () => {
+    if (!supabase) return;
+    const { data: currentProfile } = await supabase.from('profiles').select('role').eq('id', (await supabase.auth.getUser()).data.user?.id || '').maybeSingle<{ role: string }>();
+    const owner = currentProfile?.role === 'owner';
+    setIsOwner(owner);
+    if (owner) {
+      const { data } = await supabase.from('profiles').select('id, username, created_at').eq('status', 'pending').order('created_at', { ascending: true });
+      setPendingUsers(data || []);
+    }
+  };
+
+  useEffect(() => { void loadPendingUsers(); }, []);
+
+  const updateUserStatus = async (id: string, status: 'approved' | 'rejected') => {
+    if (!supabase) return;
+    const user = (await supabase.auth.getUser()).data.user;
+    const { error } = await supabase.from('profiles').update({ status, approved_at: status === 'approved' ? new Date().toISOString() : null, approved_by: user?.id || null }).eq('id', id);
+    if (error) showToast('error', error.message);
+    else {
+      showToast('success', status === 'approved' ? 'User approved' : 'User rejected');
+      await loadPendingUsers();
+    }
+  };
 
   const handleResetData = async () => {
     if (confirm('Are you sure you want to reset all data to initial state? This cannot be undone.')) {
@@ -66,6 +93,26 @@ export default function Settings() {
         <h2 className="text-lg font-bold text-slate-900">Settings</h2>
         <p className="text-sm text-slate-500 mt-0.5">Configure master data, roles, and system parameters</p>
       </div>
+
+      {isOwner && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Pending user approvals</h3>
+              <p className="text-xs text-slate-500 mt-1">Approve usernames before they can enter the production system.</p>
+            </div>
+            <Users className="w-4 h-4 text-slate-500" />
+          </div>
+          <div className="divide-y divide-slate-100">
+            {pendingUsers.length === 0 ? <p className="p-4 text-sm text-slate-500">No pending requests.</p> : pendingUsers.map((user) => (
+              <div key={user.id} className="p-4 flex items-center justify-between gap-3">
+                <div><p className="text-sm font-medium text-slate-900">{user.username}</p><p className="text-xs text-slate-500">Requested {new Date(user.created_at).toLocaleDateString()}</p></div>
+                <div className="flex gap-2"><button onClick={() => void updateUserStatus(user.id, 'approved')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-medium hover:bg-emerald-100"><Check className="w-3 h-3" /> Approve</button><button onClick={() => void updateUserStatus(user.id, 'rejected')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-medium hover:bg-red-100"><X className="w-3 h-3" /> Reject</button></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {sections.map((section) => {
