@@ -13,7 +13,9 @@ import {
   X,
   ChevronRight,
   Factory,
+  LogOut,
 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -98,6 +100,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <p className="text-sm font-medium truncate">Production Manager</p>
               <p className="text-xs text-slate-400">Shift 2 Active</p>
             </div>
+            <button onClick={() => void supabase?.auth.signOut()} className="text-slate-400 hover:text-white" title="Sign out" aria-label="Sign out">
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </aside>
