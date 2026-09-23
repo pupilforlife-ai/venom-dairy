@@ -468,6 +468,10 @@ export default function ProductionBoard() {
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0] || null;
   };
 
+  const availableRoundShifts = productionShifts
+    .filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId)
+    .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+
   const openNewRoundModal = () => {
     const latestShift = getLatestActiveShift();
     if (!latestShift) {
@@ -1513,8 +1517,10 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift</label>
             <select value={newRound.shiftId} onChange={(e) => handleShiftChange(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select shift</option>
-              {productionShifts.filter(s => s.status === 'active').map(s => (
-                <option key={s.id} value={s.id}>Shift {s.shiftNumber} - {s.milkLotCode}</option>
+              {availableRoundShifts.map((shift, index) => (
+                <option key={shift.id} value={shift.id}>
+                  Shift {shift.shiftNumber} - {shift.milkLotCode}{index === 0 ? ' (Latest)' : ''}
+                </option>
               ))}
             </select>
           </div>
