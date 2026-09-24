@@ -171,8 +171,12 @@ export default function ProductionBoard() {
     return true;
   });
 
+  // The Paneer board is intentionally limited to its two Paneer workflows.
+  // Other product types have their own dedicated tabs below.
+  const paneerRounds = filteredRounds.filter((round) => round.type === 'D' || round.type === 'C/S');
+
   // Group rounds by shift
-  const groupedByShift = filteredRounds.reduce((acc, round) => {
+  const groupedByShift = paneerRounds.reduce((acc, round) => {
     if (!acc[round.shiftId]) acc[round.shiftId] = [];
     acc[round.shiftId].push(round);
     return acc;
