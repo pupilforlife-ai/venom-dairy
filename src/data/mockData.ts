@@ -120,6 +120,7 @@ export interface ProductionRound {
   cuttingType?: string;
   blockWeights?: number[];
   numberOfBlocks?: number;
+  sppRecordedWeight?: number; // kg routed into SPP production
   
   // Intermediate balance
   intermediateBalance?: number;

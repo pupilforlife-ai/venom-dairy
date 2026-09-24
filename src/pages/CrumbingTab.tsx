@@ -461,7 +461,7 @@ export default function CrumbingTab() {
               <option value="">Select source...</option>
               {getAvailableSources(activeType).map((source: any) => (
                 <option key={source.id} value={source.id}>
-                  {activeType === 'SPP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/C/S - ${source.outputWeight} kg`}
+                  {activeType === 'SPP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/C/S - ${(source.sppRecordedWeight ?? source.outputWeight ?? 0)} kg SPP`}
                   {activeType === 'JP' && `${source.lotCode} - ${source.currentQuantity} kg PAN111`}
                   {activeType === 'HCP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/Halloumi - ${source.outputWeight} kg`}
                 </option>
