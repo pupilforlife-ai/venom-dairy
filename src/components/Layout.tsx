@@ -37,7 +37,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [role, setRole] = useState('');
+  const [theme, setTheme] = useState(() => window.localStorage.getItem('vejoy_theme') || 'light');
   const location = useLocation();
+
+  useEffect(() => {
+    window.localStorage.setItem('vejoy_theme', theme);
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -138,6 +144,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </h2>
           </div>
           <div className="flex items-center gap-3">
+            <select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value)} className="hidden sm:block rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="black">Black / OLED</option>
+              <option value="contrast">High Contrast</option>
+              <option value="amber">Amber Night</option>
+              <option value="system">System Default</option>
+            </select>
             <span className="hidden sm:inline text-sm text-slate-500">
               Milk Lot: <span className="font-medium text-slate-700">ML-2026-W24</span>
             </span>
