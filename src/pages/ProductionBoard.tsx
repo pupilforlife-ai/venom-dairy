@@ -1058,7 +1058,7 @@ export default function ProductionBoard() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100">
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-36">Batch ID</th>
+                        <th className="sticky left-0 z-20 bg-white px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-36 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">Batch ID</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Temp (°C)</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Milk (L)</th>
                         <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Type</th>
@@ -1077,7 +1077,7 @@ export default function ProductionBoard() {
                     <tbody className="divide-y divide-slate-50">
                       {rounds.map((round) => (
                         <tr key={round.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-4 py-3">
+                          <td className="sticky left-0 z-10 bg-white px-4 py-3 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">
                             <button
                               onClick={() => {
                                 setHistoryRoundId(round.id);
