@@ -3,7 +3,6 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { Plus, Clock, Package, Scissors, CheckCircle2, Thermometer, Beaker } from 'lucide-react';
-import { milkLots } from '../data/mockData';
 
 // Halloumi-specific status flow
 const halloumiStatusFlow = [
@@ -117,8 +116,8 @@ const stageRecipes: Record<string, { title: string; details: string[] }> = {
   },
 };
 
-export default function HalloumiTab() {
-  const { productionRounds, productionShifts, updateProductionRound, addProductionRound, addProductionShift } = useApp();
+export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: string }) {
+  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift } = useApp();
   const { showToast } = useToast();
 
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
@@ -131,9 +130,9 @@ export default function HalloumiTab() {
   const [timers, setTimers] = useState<Record<string, number>>({});
 
   // Filter halloumi rounds only
-  const halloumiRounds = productionRounds.filter(r => r.type === 'Halloumi');
+  const halloumiRounds = productionRounds.filter(r => r.type === 'Halloumi' && r.milkLotId === selectedMilkLotId);
   // Show ALL active shifts, not just those with halloumi rounds
-  const halloumiShifts = productionShifts.filter(s => s.status === 'active');
+  const halloumiShifts = productionShifts.filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId);
 
   // Group by shift
   const groupedByShift = halloumiRounds.reduce((acc, round) => {
@@ -142,7 +141,7 @@ export default function HalloumiTab() {
     return acc;
   }, {} as Record<string, typeof halloumiRounds>);
 
-  const activeMilkLot = milkLots.find(m => m.status === 'active');
+  const activeMilkLot = milkLots.find(m => m.id === selectedMilkLotId);
 
   // Update timers every second
   useEffect(() => {

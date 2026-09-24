@@ -1111,7 +1111,7 @@ export default function ProductionBoard() {
 
       {/* Halloumi Tab Content */}
       {activeTab === 'halloumi' && (
-        <HalloumiTab />
+        <HalloumiTab selectedMilkLotId={selectedMilkLotId} />
       )}
 
       {/* Butter Tab Content */}
