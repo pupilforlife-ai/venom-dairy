@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Settings as SettingsIcon, Users, Package, Thermometer, Shield, Database, RotateCcw, Check, X } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Package, Thermometer, Shield, Database, RotateCcw, Check, X, KeyRound } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
 
 export default function Settings() {
   const { showToast } = useToast();
   const [isOwner, setIsOwner] = useState(false);
-  const [pendingUsers, setPendingUsers] = useState<Array<{ id: string; username: string; created_at: string }>>([]);
+  const [users, setUsers] = useState<Array<{ id: string; username: string; role: string; status: string; created_at: string }>>([]);
+  const [passwordUser, setPasswordUser] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
 
   const loadPendingUsers = async () => {
     if (!supabase) return;
@@ -14,9 +16,24 @@ export default function Settings() {
     const owner = currentProfile?.role === 'owner';
     setIsOwner(owner);
     if (owner) {
-      const { data } = await supabase.from('profiles').select('id, username, created_at').eq('status', 'pending').order('created_at', { ascending: true });
-      setPendingUsers(data || []);
+      const { data } = await supabase.from('profiles').select('id, username, role, status, created_at').order('created_at', { ascending: true });
+      setUsers(data || []);
     }
+  };
+
+  const updateUser = async (id: string, updates: { status?: string; role?: string }) => {
+    if (!supabase) return;
+    const user = (await supabase.auth.getUser()).data.user;
+    const { error } = await supabase.from('profiles').update({ ...updates, approved_at: updates.status === 'approved' ? new Date().toISOString() : undefined, approved_by: user?.id || null }).eq('id', id);
+    if (error) showToast('error', error.message);
+    else { showToast('success', 'User updated'); await loadPendingUsers(); }
+  };
+
+  const changePassword = async () => {
+    if (!supabase || !passwordUser || newPassword.length < 6) { showToast('error', 'Password must be at least 6 characters'); return; }
+    const { error } = await supabase.functions.invoke('owner-reset-password', { body: { userId: passwordUser, password: newPassword } });
+    if (error) showToast('error', error.message);
+    else { showToast('success', 'Password changed'); setPasswordUser(null); setNewPassword(''); }
   };
 
   useEffect(() => { void loadPendingUsers(); }, []);
@@ -98,21 +115,28 @@ export default function Settings() {
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-semibold text-slate-900">Pending user approvals</h3>
-              <p className="text-xs text-slate-500 mt-1">Approve usernames before they can enter the production system.</p>
+          <h3 className="text-sm font-semibold text-slate-900">Team access and roles</h3>
+              <p className="text-xs text-slate-500 mt-1">Approve users, assign roles, and manage passwords.</p>
             </div>
             <Users className="w-4 h-4 text-slate-500" />
           </div>
           <div className="divide-y divide-slate-100">
-            {pendingUsers.length === 0 ? <p className="p-4 text-sm text-slate-500">No pending requests.</p> : pendingUsers.map((user) => (
-              <div key={user.id} className="p-4 flex items-center justify-between gap-3">
-                <div><p className="text-sm font-medium text-slate-900">{user.username}</p><p className="text-xs text-slate-500">Requested {new Date(user.created_at).toLocaleDateString()}</p></div>
-                <div className="flex gap-2"><button onClick={() => void updateUserStatus(user.id, 'approved')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-medium hover:bg-emerald-100"><Check className="w-3 h-3" /> Approve</button><button onClick={() => void updateUserStatus(user.id, 'rejected')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-medium hover:bg-red-100"><X className="w-3 h-3" /> Reject</button></div>
+            {users.length === 0 ? <p className="p-4 text-sm text-slate-500">No users found.</p> : users.map((user) => (
+              <div key={user.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                <div><p className="text-sm font-medium text-slate-900">{user.username}</p><p className="text-xs text-slate-500">{user.status} · {new Date(user.created_at).toLocaleDateString()}</p></div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select value={user.role} onChange={(e) => void updateUser(user.id, { role: e.target.value })} className="px-2 py-1.5 rounded-lg border border-slate-200 text-xs"><option value="staff">Staff</option><option value="admin">Admin</option><option value="owner">Owner</option></select>
+                  {user.status === 'pending' && <button onClick={() => void updateUserStatus(user.id, 'approved')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-medium"><Check className="w-3 h-3" /> Approve</button>}
+                  {user.status !== 'rejected' && user.status !== 'pending' && <button onClick={() => setPasswordUser(user.id)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-medium"><KeyRound className="w-3 h-3" /> Password</button>}
+                  {user.status === 'pending' && <button onClick={() => void updateUserStatus(user.id, 'rejected')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-medium"><X className="w-3 h-3" /> Reject</button>}
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {passwordUser && <div className="fixed inset-0 z-50 bg-slate-950/50 flex items-center justify-center p-4"><div className="bg-white rounded-xl p-5 w-full max-w-sm"><h3 className="font-semibold text-slate-900">Set user password</h3><input autoFocus type="password" minLength={6} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New password" className="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" /><div className="mt-4 flex justify-end gap-2"><button onClick={() => { setPasswordUser(null); setNewPassword(''); }} className="px-3 py-2 text-sm">Cancel</button><button onClick={() => void changePassword()} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm">Change password</button></div></div></div>}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {sections.map((section) => {
