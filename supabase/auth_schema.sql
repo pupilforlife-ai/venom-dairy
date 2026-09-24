@@ -93,6 +93,13 @@ begin
       end if;
       next_status := statuses[status_index + 1];
       round_item := jsonb_set(round_item, '{status}', to_jsonb(next_status), true);
+      if next_status = 'pressing' then
+        round_item := jsonb_set(round_item, '{pressingStartedAt}', to_jsonb(now()), true);
+      elsif next_status = 'cooling' then
+        round_item := jsonb_set(round_item, '{coolingStartedAt}', to_jsonb(now()), true);
+      elsif next_status = 'resting' then
+        round_item := jsonb_set(round_item, '{restingStartedAt}', to_jsonb(now()), true);
+      end if;
       if next_status = 'handed_over' then
         round_item := jsonb_set(round_item, '{locked}', 'true'::jsonb, true);
       end if;
