@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -34,7 +34,20 @@ const navItems = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [username, setUsername] = useState('');
+  const [role, setRole] = useState('');
   const location = useLocation();
+
+  useEffect(() => {
+    if (!supabase) return;
+    void supabase.auth.getUser().then(async ({ data }) => {
+      const user = data.user;
+      if (!user) return;
+      setUsername(user.user_metadata?.username || user.email?.split('@')[0] || 'User');
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle<{ role: string }>();
+      if (profile?.role) setRole(profile.role);
+    });
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -94,11 +107,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-700">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-xs font-bold">
-              PM
+                {username.slice(0, 2).toUpperCase() || 'US'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">Production Manager</p>
-              <p className="text-xs text-slate-400">Shift 2 Active</p>
+              <p className="text-sm font-medium truncate">{username || 'User'}</p>
+              <p className="text-xs text-slate-400">{role || 'staff'}</p>
             </div>
             <button onClick={() => void supabase?.auth.signOut()} className="text-slate-400 hover:text-white" title="Sign out" aria-label="Sign out">
               <LogOut className="w-4 h-4" />
