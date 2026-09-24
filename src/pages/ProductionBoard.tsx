@@ -1191,8 +1191,8 @@ export default function ProductionBoard() {
                             )}
                           </td>
                         </tr>
-                        <tr key={`${round.id}-pipeline`} className="border-b border-slate-100 bg-slate-50/60">
-                          <td colSpan={4} className="px-4 py-2">
+                        <tr key={`${round.id}-pipeline`} className="border-t-2 border-b border-slate-200 bg-slate-50/80">
+                          <td colSpan={4} className="px-4 py-3">
                             <div className="flex items-center justify-between gap-3 min-w-max">
                               <div className="flex items-center gap-3">
                                 <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pipeline</span>
@@ -1201,7 +1201,7 @@ export default function ProductionBoard() {
                               <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span>
                             </div>
                           </td>
-                          <td colSpan={8} className="px-4 py-2" />
+                          <td colSpan={8} className="px-4 py-3" />
                         </tr>
                       ))}
                     </tbody>
