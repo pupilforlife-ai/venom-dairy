@@ -319,8 +319,8 @@ export default function ProductionBoard() {
       numberOfBlocks: sppForm.numberOfBlocks,
       cuttingType: 'SPP pieces',
       sppRecordedWeight: sppForm.recordedWeight,
-      outputWeight: sppForm.recordedWeight,
-      remainingBalance: 0,
+      outputWeight: totalWeight,
+      remainingBalance: Math.max(0, balance),
       balancePaneerWeight: Math.max(0, balance),
       balanceDisposition: balance > 0 ? sppForm.balanceDisposition : undefined,
       balanceDispositionWeight: balance > 0 ? balance : undefined,
@@ -709,7 +709,7 @@ export default function ProductionBoard() {
     } else if (round.status === 'cut') {
       buttons.push(
         <div key="cut-actions" className="flex gap-1 flex-wrap">
-          <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
+          {round.cuttingType !== 'SPP pieces' && <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>}
           <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
             <Package className="w-3 h-3" /> {round.packedSkus && round.packedSkus.length > 0 ? '+Add Packing' : 'Pack'}
           </button>
@@ -1086,7 +1086,7 @@ export default function ProductionBoard() {
                               {statusLabels[round.status]}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.outputWeight > 0 ? `${round.outputWeight.toFixed(1)} kg` : '—'}</td>
+                          <td className="px-4 py-3 text-slate-600 text-xs">{round.outputWeight > 0 ? <><div>{round.outputWeight.toFixed(1)} kg</div>{round.sppRecordedWeight !== undefined && <div className="text-pink-600">SPP: {round.sppRecordedWeight.toFixed(1)} kg</div>}</> : '—'}</td>
                           <td className="px-4 py-3 text-slate-600 text-xs">{round.numberOfBlocks ? `${round.numberOfBlocks} blocks` : '—'}</td>
                           <td className="px-4 py-3">
                             {round.cuttingType ? (
