@@ -309,8 +309,8 @@ export default function ProductionBoard() {
       showToast('error', 'Enter a valid SPP weight not greater than the round total');
       return;
     }
-    if (balance > 0.01 && (!sppForm.balanceDisposition || sppForm.balanceWeight <= 0 || sppForm.balanceWeight > balance + 0.01)) {
-      showToast('error', 'Record how the balance Paneer was used and its weight');
+    if (balance > 0.01 && !sppForm.balanceDisposition) {
+      showToast('error', 'Record how the balance Paneer was used');
       return;
     }
     updateProductionRound(roundId, {
@@ -323,7 +323,7 @@ export default function ProductionBoard() {
       remainingBalance: 0,
       balancePaneerWeight: Math.max(0, balance),
       balanceDisposition: balance > 0 ? sppForm.balanceDisposition : undefined,
-      balanceDispositionWeight: balance > 0 ? sppForm.balanceWeight : undefined,
+      balanceDispositionWeight: balance > 0 ? balance : undefined,
     });
     setShowSppModal(false);
     showToast('success', `Recorded ${sppForm.recordedWeight.toFixed(2)} kg for SPP`);
@@ -1249,7 +1249,7 @@ export default function ProductionBoard() {
             <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">No. of blocks cut in SPP pieces</span><input type="number" min="1" value={sppForm.numberOfBlocks} onChange={(e) => setSppForm({ ...sppForm, numberOfBlocks: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
             <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded Paneer weight for SPP (kg)</span><input type="number" min="0" step="0.01" value={sppForm.recordedWeight} onChange={(e) => setSppForm({ ...sppForm, recordedWeight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">Balance Paneer: <strong>{balance.toFixed(2)} kg</strong></div>
-            {balance > 0.01 && <><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Balance disposition</span><select value={sppForm.balanceDisposition} onChange={(e) => setSppForm({ ...sppForm, balanceDisposition: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"><option value="">Select what happened to balance</option><option value="400g cubes">Cut in 400g</option><option value="200g cubes">Cut in 200g</option><option value="Restaurant blocks">Restaurant blocks</option><option value="PAN111">Went into PAN111</option></select></label><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Balance weight (kg)</span><input type="number" min="0" step="0.01" value={sppForm.balanceWeight} onChange={(e) => setSppForm({ ...sppForm, balanceWeight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label></>}
+            {balance > 0.01 && <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Balance disposition</span><select value={sppForm.balanceDisposition} onChange={(e) => setSppForm({ ...sppForm, balanceDisposition: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"><option value="">Select what happened to balance</option><option value="400g cubes">Cut in 400g</option><option value="200g cubes">Cut in 200g</option><option value="Restaurant blocks">Restaurant blocks</option><option value="PAN111">Went into PAN111</option></select></label>}
             <div className="flex gap-2 pt-2"><button onClick={() => selectedRound && handleRecordSppWeight(selectedRound)} className="flex-1 px-4 py-2.5 bg-pink-600 text-white rounded-lg text-sm font-medium">Save SPP record</button><button onClick={() => setShowSppModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
           </div>;
         })()}
