@@ -43,6 +43,7 @@ interface AppContextType extends AppState {
   
   // Production round actions
   addProductionRound: (round: Omit<ProductionRound, 'id'>) => void;
+  createProductionRound: (round: Omit<ProductionRound, 'id' | 'roundNumber'>) => Promise<ProductionRound | null>;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
   advanceRoundStatus: (id: string) => void;
   forceAdvanceRoundStatus: (id: string) => Promise<boolean>;
@@ -111,6 +112,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addProductionRound = (round: Omit<ProductionRound, 'id'>) => {
     const newRound = { ...round, id: `pr-${Date.now()}` };
     setProductionRounds([...productionRounds, newRound]);
+  };
+
+  const createProductionRound = async (round: Omit<ProductionRound, 'id' | 'roundNumber'>) => {
+    if (!supabase) return null;
+    const { data, error } = await supabase.rpc('create_production_round', { round_input: round });
+    if (error || !data) { console.error('Error creating production round:', error); return null; }
+    setProductionRounds(current => [...current, data as ProductionRound]);
+    return data as ProductionRound;
   };
 
   const updateProductionRound = (id: string, updates: Partial<ProductionRound>) => {
@@ -207,6 +216,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addProductionShift,
     updateProductionShift,
     addProductionRound,
+    createProductionRound,
     updateProductionRound,
     advanceRoundStatus,
     forceAdvanceRoundStatus,

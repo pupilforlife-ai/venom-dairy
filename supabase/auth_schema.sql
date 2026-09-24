@@ -123,6 +123,37 @@ $$;
 revoke all on function public.force_production_round_next_stage(text) from public;
 grant execute on function public.force_production_round_next_stage(text) to authenticated;
 
+create or replace function public.create_production_round(round_input jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_rounds jsonb;
+  new_round jsonb;
+  next_number integer;
+  shift_id text;
+begin
+  if not public.is_approved_user() then
+    raise exception 'Approved access required';
+  end if;
+  shift_id := round_input->>'shiftId';
+  if shift_id is null or shift_id = '' then raise exception 'Shift is required'; end if;
+  select value into current_rounds from public.app_state where key = 'vejoy_productionRounds' for update;
+  if current_rounds is null or jsonb_typeof(current_rounds) <> 'array' then raise exception 'Production rounds state is unavailable'; end if;
+  select coalesce(max((item->>'roundNumber')::integer), 0) + 1 into next_number
+  from jsonb_array_elements(current_rounds) item
+  where item->>'shiftId' = shift_id;
+  new_round := round_input || jsonb_build_object('id', 'pr-' || floor(extract(epoch from clock_timestamp()) * 1000)::bigint, 'roundNumber', next_number);
+  update public.app_state set value = current_rounds || jsonb_build_array(new_round) where key = 'vejoy_productionRounds';
+  return new_round;
+end;
+$$;
+
+revoke all on function public.create_production_round(jsonb) from public;
+grant execute on function public.create_production_round(jsonb) to authenticated;
+
 -- Shared operational state is inaccessible until the user is approved.
 drop policy if exists "Allow public state reads" on public.app_state;
 drop policy if exists "Allow public state writes" on public.app_state;

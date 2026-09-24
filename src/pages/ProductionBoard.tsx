@@ -43,7 +43,7 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
 export default function ProductionBoard() {
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots,
-    advanceRoundStatus, forceAdvanceRoundStatus, updateProductionRound, addProductionRound,
+    advanceRoundStatus, forceAdvanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
     addProductionShift, updateProductionShift, addIntermediateLot,
     updateMilkLot
   } = useApp();
@@ -501,12 +501,11 @@ export default function ProductionBoard() {
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
     if (!shift) return;
 
-    addProductionRound({
+    void createProductionRound({
       milkLotId: shift.milkLotId,
       milkLotCode: shift.milkLotCode,
       shiftId: shift.id,
       shiftNumber: shift.shiftNumber,
-      roundNumber: newRound.roundNumber,
       type: newRound.type,
       status: 'scheduled',
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
@@ -515,9 +514,12 @@ export default function ProductionBoard() {
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
+    }).then((createdRound) => {
+      if (createdRound) {
+        showToast('success', `Round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${createdRound.roundNumber}/${createdRound.type}`);
+        setShowNewRoundModal(false);
+      } else showToast('error', 'The server could not create this round');
     });
-    showToast('success', `Round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}/${newRound.type}`);
-    setShowNewRoundModal(false);
   };
 
   const handleShiftChange = (shiftId: string) => {
