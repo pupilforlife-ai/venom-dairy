@@ -1100,7 +1100,7 @@ export default function ProductionBoard() {
                             ) : '—'}
                           </td>
                           <td className="px-4 py-3 text-slate-600 text-xs">
-                            {round.actualInput > 0 ? round.actualInput : round.plannedInput}
+                            <input type="number" min="0" value={round.actualInput > 0 ? round.actualInput : round.plannedInput} onChange={(e) => { const quantity = parseInt(e.target.value) || 0; updateProductionRound(round.id, { plannedInput: quantity, actualInput: quantity }); }} className="w-20 px-2 py-1 border border-slate-200 rounded text-xs" aria-label={`Milk quantity for round ${round.roundNumber}`} />
                           </td>
                           <td className="px-4 py-3">
                             <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-bold">{round.type}</span>
@@ -1114,8 +1114,8 @@ export default function ProductionBoard() {
                           <td className="px-4 py-3 text-slate-600 text-xs">{round.outputWeight > 0 ? <><div>{round.outputWeight.toFixed(1)} kg</div>{round.sppRecordedWeight !== undefined && <div className="text-pink-600">SPP: {round.sppRecordedWeight.toFixed(1)} kg</div>}</> : '—'}</td>
                           <td className="px-4 py-3 text-slate-600 text-xs">{round.blockWeights?.length ? <button onClick={() => openBlockWeights(round.id)} className="text-indigo-600 hover:text-indigo-800 hover:underline font-medium">{round.blockWeights.length} blocks</button> : '—'}</td>
                           <td className="px-4 py-3">
-                            {round.cuttingType ? (
-                              <span className="text-xs font-medium text-slate-700">{round.cuttingType}</span>
+                            {round.cuttingType || round.status === 'ready_cutting' ? (
+                              <select value={round.cuttingType || ''} onChange={(e) => updateProductionRound(round.id, { cuttingType: e.target.value || undefined })} className="w-32 px-2 py-1 border border-slate-200 rounded text-xs bg-white" aria-label={`Cutting status for round ${round.roundNumber}`}><option value="">Select</option><option value="400g cubes">400g cubes</option><option value="200g cubes">200g cubes</option><option value="Restaurant blocks">Restaurant blocks</option><option value="SPP pieces">SPP pieces</option></select>
                             ) : round.status === 'clingwrapped' ? (
                               <span className="text-xs font-medium text-pink-600">Clingwrapped</span>
                             ) : '—'}
