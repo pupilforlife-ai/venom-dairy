@@ -657,7 +657,6 @@ export default function ProductionBoard() {
     } else if (round.status === 'cut') {
       buttons.push(
         <div key="cut-actions" className="flex gap-1 flex-wrap">
-          {!round.clingwrappedAt && <button onClick={() => handleClingwrap(round.id)} className="px-2 py-1 bg-pink-400 text-white rounded text-xs hover:bg-pink-500">Clingwrap</button>}
           <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>
           <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
             <Package className="w-3 h-3" /> {round.packedSkus && round.packedSkus.length > 0 ? '+Add Packing' : 'Pack'}
