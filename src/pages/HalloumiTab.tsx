@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { Plus, Clock, Package, Scissors, CheckCircle2, Thermometer, Beaker } from 'lucide-react';
+import { Plus, Clock, Package, Scissors, CheckCircle2, Thermometer, Beaker, ShieldAlert } from 'lucide-react';
 
 // Halloumi-specific status flow
 const halloumiStatusFlow = [
@@ -116,8 +116,8 @@ const stageRecipes: Record<string, { title: string; details: string[] }> = {
   },
 };
 
-export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: string }) {
-  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift } = useApp();
+export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { selectedMilkLotId: string; canForceStage: boolean }) {
+  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift, forceAdvanceRoundStatus } = useApp();
   const { showToast } = useToast();
 
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
@@ -265,6 +265,10 @@ export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: 
 
   const getActionButtons = (round: any) => {
     const buttons = [];
+
+    if (canForceStage && round.status !== 'handed_over') {
+      buttons.push(<button key="force" onClick={() => { if (window.confirm('Force this Halloumi round to the next stage?')) void forceAdvanceRoundStatus(round.id).then((ok) => showToast(ok ? 'success' : 'error', ok ? 'Round advanced by admin override' : 'Server rejected the override')); }} className="flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-medium hover:bg-amber-700"><ShieldAlert className="w-3 h-3" /> Force next stage</button>);
+    }
 
     if (round.status === 'scheduled') {
       buttons.push(

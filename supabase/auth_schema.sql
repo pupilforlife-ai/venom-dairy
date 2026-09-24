@@ -64,6 +64,7 @@ declare
   current_status text;
   next_status text;
   statuses text[] := array['scheduled', 'in_production', 'coagulation', 'pressing', 'cooling', 'resting', 'ready_cutting', 'cut', 'clingwrapped', 'frozen', 'packed', 'handed_over'];
+  halloumi_statuses text[] := array['scheduled', 'cacl2_added', 'heating_34c', 'rennet_added', 'curd_setting', 'curd_cut', 'heating_42c', 'presses', 'whey_heating', 'boiling', 'salted', 'chiller_storage', 'weighed', 'vacuum_packed', 'sent_to_hcp', 'handed_over'];
   status_index integer;
   updated_round jsonb := null;
 begin
@@ -87,11 +88,15 @@ begin
   loop
     if round_item->>'id' = round_id then
       current_status := round_item->>'status';
-      status_index := array_position(statuses, current_status);
-      if status_index is null or status_index >= cardinality(statuses) then
-        raise exception 'Round is already at its final stage or has an unknown status';
+      if round_item->>'type' = 'Halloumi' then
+        status_index := array_position(halloumi_statuses, current_status);
+        if status_index is null or status_index >= cardinality(halloumi_statuses) then raise exception 'Round is already at its final stage or has an unknown status'; end if;
+        next_status := halloumi_statuses[status_index + 1];
+      else
+        status_index := array_position(statuses, current_status);
+        if status_index is null or status_index >= cardinality(statuses) then raise exception 'Round is already at its final stage or has an unknown status'; end if;
+        next_status := statuses[status_index + 1];
       end if;
-      next_status := statuses[status_index + 1];
       round_item := jsonb_set(round_item, '{status}', to_jsonb(next_status), true);
       if next_status = 'pressing' then
         round_item := jsonb_set(round_item, '{pressingStartedAt}', to_jsonb(now()), true);
@@ -99,6 +104,10 @@ begin
         round_item := jsonb_set(round_item, '{coolingStartedAt}', to_jsonb(now()), true);
       elsif next_status = 'resting' then
         round_item := jsonb_set(round_item, '{restingStartedAt}', to_jsonb(now()), true);
+      elsif next_status = 'curd_setting' then
+        round_item := jsonb_set(round_item, '{curdSettingStartedAt}', to_jsonb(now()), true);
+      elsif next_status = 'heating_42c' then
+        round_item := jsonb_set(round_item, '{curdCuttingStartedAt}', to_jsonb(now()), true);
       end if;
       if next_status = 'handed_over' then
         round_item := jsonb_set(round_item, '{locked}', 'true'::jsonb, true);
