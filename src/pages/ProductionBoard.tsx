@@ -268,6 +268,11 @@ export default function ProductionBoard() {
 
     const totalWeight = cutForm.blockWeights.reduce((sum, w) => sum + w, 0);
 
+    if (!cutForm.cutBy || !cutForm.cuttingType || cutForm.numberOfBlocks <= 0 || totalWeight <= 0) {
+      showToast('error', 'Enter cutter, cutting option, block count, and block weights');
+      return;
+    }
+
     if (cutForm.cuttingType === 'SPP pieces') {
       if (!cutForm.cutBy || cutForm.numberOfBlocks <= 0 || totalWeight <= 0) {
         showToast('error', 'Enter cutter, block count, and block weights for SPP');
@@ -286,6 +291,29 @@ export default function ProductionBoard() {
       setShowSppModal(true);
       return;
     }
+
+    const isClingwrapStorage = cutForm.cuttingType === 'Clingwrapped / Stored';
+    const isFinalCutAfterStorage = round.status === 'clingwrapped';
+    if (isClingwrapStorage) {
+      updateProductionRound(roundId, {
+        status: 'clingwrapped',
+        cutBy: cutForm.cutBy,
+        cuttingType: 'Clingwrapped / Stored',
+        numberOfBlocks: cutForm.numberOfBlocks,
+        blockWeights: cutForm.blockWeights,
+        outputWeight: totalWeight,
+        remainingBalance: totalWeight,
+        storedCutBy: cutForm.cutBy,
+        storedNumberOfBlocks: cutForm.numberOfBlocks,
+        storedBlockWeights: cutForm.blockWeights,
+        storedOutputWeight: totalWeight,
+        clingwrappedAt: new Date().toISOString(),
+      });
+      showToast('success', `Stored ${cutForm.numberOfBlocks} clingwrapped blocks (${totalWeight.toFixed(2)} kg)`);
+      setShowCutModal(false);
+      setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] });
+      return;
+    }
     
     updateProductionRound(roundId, {
       status: 'cut',
@@ -295,6 +323,13 @@ export default function ProductionBoard() {
       blockWeights: cutForm.blockWeights,
       outputWeight: totalWeight,
       remainingBalance: totalWeight,
+      ...(isFinalCutAfterStorage ? {
+        // Keep the original large-block record for audit/review after final cutting.
+        storedBlockWeights: round.storedBlockWeights || round.blockWeights,
+        storedNumberOfBlocks: round.storedNumberOfBlocks || round.numberOfBlocks,
+        storedCutBy: round.storedCutBy || round.cutBy,
+        storedOutputWeight: round.storedOutputWeight || round.outputWeight,
+      } : {}),
     });
 
     showToast('success', `Cut recorded: ${cutForm.numberOfBlocks} blocks, ${totalWeight.toFixed(2)} kg`);
@@ -329,11 +364,6 @@ export default function ProductionBoard() {
     });
     setShowSppModal(false);
     showToast('success', `Recorded ${sppForm.recordedWeight.toFixed(2)} kg for SPP`);
-  };
-
-  const handleClingwrap = (roundId: string) => {
-    updateProductionRound(roundId, { status: 'clingwrapped', clingwrappedAt: new Date().toISOString() });
-    showToast('success', 'Clingwrapped and stored in chiller');
   };
 
   const handleFreeze = (roundId: string) => {
@@ -721,7 +751,6 @@ export default function ProductionBoard() {
           <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
             <Scissors className="w-3 h-3" /> Cut
           </button>
-          <button onClick={() => handleClingwrap(round.id)} className="px-2 py-1 bg-pink-400 text-white rounded text-xs hover:bg-pink-500">Clingwrap & Chiller</button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -1224,6 +1253,7 @@ export default function ProductionBoard() {
               <option value="200g cubes">200g cubes</option>
               <option value="Restaurant blocks">Restaurant blocks</option>
               <option value="SPP pieces">SPP pieces</option>
+              <option value="Clingwrapped / Stored">Clingwrapped / Stored</option>
             </select>
           </div>
           <div>
@@ -1267,6 +1297,7 @@ export default function ProductionBoard() {
           const total = blockWeightsDraft.reduce((sum, weight) => sum + weight, 0);
           return <div className="space-y-4">
             <p className="text-sm text-slate-600">{round?.milkLotCode}/S{round?.shiftNumber}/R{round?.roundNumber} · {round?.type}</p>
+            {round?.storedBlockWeights?.length && round?.status !== 'clingwrapped' && <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 text-xs text-pink-900">Stored before final cutting: {round.storedBlockWeights.length} large blocks · {round.storedOutputWeight?.toFixed(2)} kg · by {round.storedCutBy || '—'}</div>}
             <div className="space-y-2">{blockWeightsDraft.map((weight, index) => <label key={index} className="flex items-center gap-3 text-sm"><span className="w-20">Block {index + 1}</span><input type="number" min="0" step="0.01" value={weight} onChange={(e) => { if (!canForceStage) return; const next = [...blockWeightsDraft]; next[index] = parseFloat(e.target.value) || 0; setBlockWeightsDraft(next); }} disabled={!canForceStage} className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50" /><span>kg</span></label>)}</div>
             <div className="bg-slate-50 rounded-lg p-3 text-sm font-medium">Total recorded: {total.toFixed(2)} kg{round?.sppRecordedWeight !== undefined && <div className="text-pink-600 mt-1">SPP: {round.sppRecordedWeight.toFixed(2)} kg · Balance: {Math.max(0, total - round.sppRecordedWeight).toFixed(2)} kg</div>}</div>
             {canForceStage ? <div className="flex gap-2"><button onClick={saveBlockWeights} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium">Save correction</button><button onClick={() => setBlockWeightsRoundId(null)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm">Cancel</button></div> : <button onClick={() => setBlockWeightsRoundId(null)} className="w-full px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm">Close</button>}

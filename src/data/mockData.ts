@@ -120,6 +120,12 @@ export interface ProductionRound {
   cuttingType?: string;
   blockWeights?: number[];
   numberOfBlocks?: number;
+  // When large blocks are clingwrapped for later cutting, preserve the
+  // weights recorded at storage separately from the eventual final-cut weights.
+  storedBlockWeights?: number[];
+  storedNumberOfBlocks?: number;
+  storedCutBy?: string;
+  storedOutputWeight?: number;
   sppRecordedWeight?: number; // kg routed into SPP production
   balancePaneerWeight?: number;
   balanceDisposition?: string;
