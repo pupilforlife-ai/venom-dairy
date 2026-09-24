@@ -182,6 +182,7 @@ export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: 
   const [newRound, setNewRound] = useState({
     shiftId: '',
     roundNumber: 1,
+    plannedInput: 240,
     team: '',
   });
 
@@ -223,15 +224,15 @@ export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: 
       type: 'Halloumi',
       status: 'scheduled',
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
-      plannedInput: 240, // Fixed 240L for halloumi
-      actualInput: 240,
+      plannedInput: newRound.plannedInput,
+      actualInput: newRound.plannedInput,
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
     });
     showToast('success', `Halloumi round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
     setShowNewRoundModal(false);
-    setNewRound({ shiftId: '', roundNumber: 1, team: '' });
+    setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 240, team: '' });
   };
 
   const handleStatusChange = (roundId: string, newStatus: HalloumiStatus) => {
@@ -513,7 +514,7 @@ export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: 
                             <div className="font-mono text-xs font-bold text-slate-900">
                               {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
                             </div>
-                            <div className="text-xs text-slate-500">240L input</div>
+                            <div className="text-xs text-slate-500">{round.plannedInput}L input</div>
                           </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white ${halloumiStatusColors[round.status]}`}>
@@ -617,7 +618,7 @@ export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: 
         <div className="space-y-4">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <p className="text-xs text-blue-800">
-              <strong>Note:</strong> Halloumi rounds use 240L milk (fixed). Recipe details will be shown at each stage.
+              <strong>Note:</strong> Halloumi rounds default to 240L milk. Adjust the input quantity when needed.
             </p>
           </div>
           <div>
@@ -648,6 +649,10 @@ export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: 
             />
           </div>
           <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Input Quantity (L)</label>
+            <input type="number" value={newRound.plannedInput} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+          </div>
+          <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (optional)</label>
             <input
               type="text"
@@ -663,7 +668,7 @@ export default function HalloumiTab({ selectedMilkLotId }: { selectedMilkLotId: 
               <p className="font-mono text-sm font-bold text-slate-900 mt-1">
                 {productionShifts.find(s => s.id === newRound.shiftId)?.milkLotCode}/S{productionShifts.find(s => s.id === newRound.shiftId)?.shiftNumber}/R{newRound.roundNumber}/Halloumi
               </p>
-              <p className="text-xs text-slate-500 mt-1">Input: 240L milk</p>
+              <p className="text-xs text-slate-500 mt-1">Input: {newRound.plannedInput}L milk</p>
             </div>
           )}
           <div className="flex gap-2 pt-2">
