@@ -4,9 +4,12 @@ import Login from '../pages/Login';
 import { supabase, supabaseEnabled } from '../lib/supabase';
 
 export default function AuthGate({ children }: { children: ReactNode }) {
+  const localDemoMode = import.meta.env.VITE_LOCAL_DEMO_MODE === 'true';
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authMessage, setAuthMessage] = useState('');
+
+  if (localDemoMode) return <>{children}</>;
 
   useEffect(() => {
     if (!supabase) {
