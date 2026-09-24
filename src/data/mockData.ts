@@ -121,6 +121,9 @@ export interface ProductionRound {
   blockWeights?: number[];
   numberOfBlocks?: number;
   sppRecordedWeight?: number; // kg routed into SPP production
+  balancePaneerWeight?: number;
+  balanceDisposition?: string;
+  balanceDispositionWeight?: number;
   
   // Intermediate balance
   intermediateBalance?: number;
@@ -983,6 +986,7 @@ export const statusFlow = [
 ] as const;
 
 export const statusLabels: Record<string, string> = {
+  spp_pending: 'SPP Weight Pending',
   scheduled: 'Scheduled',
   in_production: 'In Production',
   coagulation: 'Coagulation',
@@ -998,6 +1002,7 @@ export const statusLabels: Record<string, string> = {
 };
 
 export const statusColors: Record<string, string> = {
+  spp_pending: 'bg-pink-500',
   scheduled: 'bg-slate-400',
   in_production: 'bg-blue-500',
   coagulation: 'bg-violet-500',

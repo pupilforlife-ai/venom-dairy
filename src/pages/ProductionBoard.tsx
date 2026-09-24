@@ -62,6 +62,7 @@ export default function ProductionBoard() {
   const [showPan111Modal, setShowPan111Modal] = useState(false);
   const [showCreamModal, setShowCreamModal] = useState(false);
   const [showTemperatureModal, setShowTemperatureModal] = useState(false);
+  const [showSppModal, setShowSppModal] = useState(false);
   const [startingTemperature, setStartingTemperature] = useState<number | null>(null);
   const [selectedVat, setSelectedVat] = useState<'vat2' | 'vat3' | null>(null);
   const [collapsedShifts, setCollapsedShifts] = useState<Set<string>>(new Set());
@@ -78,6 +79,7 @@ export default function ProductionBoard() {
     numberOfBlocks: 0,
     blockWeights: [] as number[],
   });
+  const [sppForm, setSppForm] = useState({ cutBy: '', numberOfBlocks: 0, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 });
   
   // Pack form state
   const [packForm, setPackForm] = useState({
@@ -263,6 +265,25 @@ export default function ProductionBoard() {
     if (!round) return;
 
     const totalWeight = cutForm.blockWeights.reduce((sum, w) => sum + w, 0);
+
+    if (cutForm.cuttingType === 'SPP pieces') {
+      if (!cutForm.cutBy || cutForm.numberOfBlocks <= 0 || totalWeight <= 0) {
+        showToast('error', 'Enter cutter, block count, and block weights for SPP');
+        return;
+      }
+      updateProductionRound(roundId, {
+        status: 'spp_pending',
+        cutBy: cutForm.cutBy,
+        numberOfBlocks: cutForm.numberOfBlocks,
+        blockWeights: cutForm.blockWeights,
+        outputWeight: totalWeight,
+        cuttingType: 'SPP pieces',
+      });
+      setSppForm({ cutBy: cutForm.cutBy, numberOfBlocks: cutForm.numberOfBlocks, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 });
+      setShowCutModal(false);
+      setShowSppModal(true);
+      return;
+    }
     
     updateProductionRound(roundId, {
       status: 'cut',
@@ -277,6 +298,35 @@ export default function ProductionBoard() {
     showToast('success', `Cut recorded: ${cutForm.numberOfBlocks} blocks, ${totalWeight.toFixed(2)} kg`);
     setShowCutModal(false);
     setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] });
+  };
+
+  const handleRecordSppWeight = (roundId: string) => {
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round) return;
+    const totalWeight = (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
+    const balance = totalWeight - sppForm.recordedWeight;
+    if (!sppForm.cutBy || sppForm.numberOfBlocks <= 0 || sppForm.recordedWeight <= 0 || balance < -0.01) {
+      showToast('error', 'Enter a valid SPP weight not greater than the round total');
+      return;
+    }
+    if (balance > 0.01 && (!sppForm.balanceDisposition || sppForm.balanceWeight <= 0 || sppForm.balanceWeight > balance + 0.01)) {
+      showToast('error', 'Record how the balance Paneer was used and its weight');
+      return;
+    }
+    updateProductionRound(roundId, {
+      status: 'cut',
+      cutBy: sppForm.cutBy,
+      numberOfBlocks: sppForm.numberOfBlocks,
+      cuttingType: 'SPP pieces',
+      sppRecordedWeight: sppForm.recordedWeight,
+      outputWeight: sppForm.recordedWeight,
+      remainingBalance: 0,
+      balancePaneerWeight: Math.max(0, balance),
+      balanceDisposition: balance > 0 ? sppForm.balanceDisposition : undefined,
+      balanceDispositionWeight: balance > 0 ? sppForm.balanceWeight : undefined,
+    });
+    setShowSppModal(false);
+    showToast('success', `Recorded ${sppForm.recordedWeight.toFixed(2)} kg for SPP`);
   };
 
   const handleClingwrap = (roundId: string) => {
@@ -654,6 +704,8 @@ export default function ProductionBoard() {
           )}
         </div>
       );
+    } else if (round.status === 'spp_pending') {
+      buttons.push(<button key="spp-weight" onClick={() => { setSelectedRound(round.id); setSppForm({ cutBy: round.cutBy || '', numberOfBlocks: round.numberOfBlocks || 0, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 }); setShowSppModal(true); }} className="px-2 py-1 bg-pink-600 text-white rounded text-xs hover:bg-pink-700">Record SPP Weight</button>);
     } else if (round.status === 'cut') {
       buttons.push(
         <div key="cut-actions" className="flex gap-1 flex-wrap">
@@ -1181,6 +1233,26 @@ export default function ProductionBoard() {
             <button onClick={() => setShowCutModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
+      </Modal>
+
+      {/* SPP weight and balance modal */}
+      <Modal isOpen={showSppModal} onClose={() => setShowSppModal(false)} title="Record SPP Weight">
+        {selectedRound && (() => {
+          const round = productionRounds.find(item => item.id === selectedRound);
+          const totalWeight = (round?.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
+          const balance = Math.max(0, totalWeight - sppForm.recordedWeight);
+          return <div className="space-y-4">
+            <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 text-xs text-pink-900">
+              Total Paneer for this round: <strong>{totalWeight.toFixed(2)} kg</strong>
+            </div>
+            <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Name of cutter</span><input value={sppForm.cutBy} onChange={(e) => setSppForm({ ...sppForm, cutBy: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
+            <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">No. of blocks cut in SPP pieces</span><input type="number" min="1" value={sppForm.numberOfBlocks} onChange={(e) => setSppForm({ ...sppForm, numberOfBlocks: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
+            <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded Paneer weight for SPP (kg)</span><input type="number" min="0" step="0.01" value={sppForm.recordedWeight} onChange={(e) => setSppForm({ ...sppForm, recordedWeight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">Balance Paneer: <strong>{balance.toFixed(2)} kg</strong></div>
+            {balance > 0.01 && <><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Balance disposition</span><select value={sppForm.balanceDisposition} onChange={(e) => setSppForm({ ...sppForm, balanceDisposition: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"><option value="">Select what happened to balance</option><option value="400g cubes">Cut in 400g</option><option value="200g cubes">Cut in 200g</option><option value="Restaurant blocks">Restaurant blocks</option><option value="PAN111">Went into PAN111</option></select></label><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Balance weight (kg)</span><input type="number" min="0" step="0.01" value={sppForm.balanceWeight} onChange={(e) => setSppForm({ ...sppForm, balanceWeight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label></>}
+            <div className="flex gap-2 pt-2"><button onClick={() => selectedRound && handleRecordSppWeight(selectedRound)} className="flex-1 px-4 py-2.5 bg-pink-600 text-white rounded-lg text-sm font-medium">Save SPP record</button><button onClick={() => setShowSppModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
+          </div>;
+        })()}
       </Modal>
 
       {/* Pack Modal */}
