@@ -19,7 +19,7 @@
    small screens instead of allowing long values to stretch neighbouring
    columns. The board keeps its horizontal scroll container on narrow views. */
 .production-board-table {
-  min-width: 72rem;
+  min-width: 146rem;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -28,6 +28,7 @@
 .production-board-table td {
   border: 1px solid rgb(226 232 240);
   vertical-align: top;
+  white-space: nowrap;
 }
 
 [data-theme="dark"] .production-board-table th,

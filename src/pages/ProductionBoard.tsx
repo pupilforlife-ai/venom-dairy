@@ -1089,19 +1089,32 @@ export default function ProductionBoard() {
               {!isCollapsed && rounds.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="production-board-table w-full text-xs">
+                    <colgroup>
+                      <col style={{ width: '9rem' }} />
+                      <col style={{ width: '8rem' }} />
+                      <col style={{ width: '7rem' }} />
+                      <col style={{ width: '8rem' }} />
+                      <col style={{ width: '16rem' }} />
+                      <col style={{ width: '8rem' }} />
+                      <col style={{ width: '16rem' }} />
+                      <col style={{ width: '12rem' }} />
+                      <col style={{ width: '15rem' }} />
+                      <col style={{ width: '18rem' }} />
+                      <col style={{ width: '29rem' }} />
+                    </colgroup>
                     <thead>
                       <tr className="border-b border-slate-100">
-                        <th className="sticky left-0 z-20 bg-white px-1 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-24 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">Batch ID</th>
-                        <th className="px-1 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-20">Milk Qty</th>
-                        <th className="px-1 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-16">Milk °C</th>
-                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-14">Type</th>
-                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-36">Current Stage</th>
-                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-16">Blocks</th>
-                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-28">Block Weights</th>
-                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-20">Cut By</th>
-                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-28">Cut Into</th>
-                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-32">Packed Into</th>
-                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Actions</th>
+                        <th className="sticky left-0 z-20 bg-white px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide shadow-[2px_0_3px_rgba(15,23,42,0.08)]">Batch ID</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Milk Qty</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Milk °C</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Type</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Current Stage</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Blocks</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Block Weights</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Cut By</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Cut Into</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Packed Into</th>
+                        <th className="px-2 py-2 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1188,7 +1201,7 @@ export default function ProductionBoard() {
                         </tr>
                         <tr key={`${round.id}-pipeline`} className="border-t-2 border-b border-slate-200 bg-slate-50/80">
                           <td colSpan={11} className="px-2 py-2">
-                            <div className="grid min-w-max grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-3">
+                            <div className="grid min-w-max grid-cols-[9rem_minmax(0,1fr)_auto] items-center gap-3">
                               <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pipeline</span>
                               <StatusPipeline currentStatus={round.status} />
                               <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span>
