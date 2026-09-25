@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import {
   Filter,
   Plus,
@@ -1103,7 +1103,8 @@ export default function ProductionBoard() {
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {rounds.map((round) => (
-                        <tr key={round.id} className="hover:bg-slate-50/50 transition-colors">
+                        <Fragment key={round.id}>
+                        <tr className="hover:bg-slate-50/50 transition-colors">
                           <td className="sticky left-0 z-10 bg-white px-4 py-3 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">
                             <button
                               onClick={() => {
@@ -1203,6 +1204,7 @@ export default function ProductionBoard() {
                           </td>
                           <td colSpan={8} className="px-4 py-3" />
                         </tr>
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
