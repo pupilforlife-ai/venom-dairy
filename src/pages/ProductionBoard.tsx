@@ -15,7 +15,6 @@ import {
   ChevronDown,
   ChevronUp,
   History,
-  ShieldAlert,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -43,13 +42,15 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
 export default function ProductionBoard() {
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots,
-    advanceRoundStatus, forceAdvanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
+    advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
     addProductionShift, updateProductionShift, addIntermediateLot,
     updateMilkLot
   } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
+  const isOwner = currentRole === 'owner';
+  const editableStageOptions = [...statusFlow, 'spp_pending'] as string[];
   
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all' });
@@ -90,6 +91,7 @@ export default function ProductionBoard() {
     cases: 0,
     loose: 0,
   });
+  const [editingPackIndex, setEditingPackIndex] = useState<number | null>(null);
   
   // PAN111 form state
   const [pan111Form, setPan111Form] = useState({
@@ -392,13 +394,21 @@ export default function ProductionBoard() {
     const weightPerPacket = weightPerCase / 24; // Assuming 24 packets per case for most SKUs
     const totalWeightPacked = (packForm.cases * weightPerCase) + (packForm.loose * weightPerPacket);
 
-    // Calculate new balance (can go negative for over-packing)
-    const currentBalance = round.remainingBalance ?? round.outputWeight ?? 0;
+    // When correcting an existing packing entry, return its old weight to the
+    // balance before applying the corrected values.
+    const existingPacked = round.packedSkus || [];
+    const previousPack = editingPackIndex !== null ? existingPacked[editingPackIndex] : undefined;
+    const previousWeight = previousPack
+      ? ((skuWeightPerCase[previousPack.sku] || 0) * previousPack.cases) + ((skuWeightPerCase[previousPack.sku] || 0) / 24 * previousPack.loose)
+      : 0;
+    const currentBalance = (round.remainingBalance ?? round.outputWeight ?? 0) + previousWeight;
     const newBalance = currentBalance - totalWeightPacked;
 
     // Add to packed SKUs array
-    const existingPacked = round.packedSkus || [];
-    const newPackedSkus = [...existingPacked, { sku: packForm.sku, cases: packForm.cases, loose: packForm.loose }];
+    const replacement = { sku: packForm.sku, cases: packForm.cases, loose: packForm.loose };
+    const newPackedSkus = editingPackIndex !== null
+      ? existingPacked.map((pack, index) => index === editingPackIndex ? replacement : pack)
+      : [...existingPacked, replacement];
 
     // Determine new status - mark as packed if balance is 0 or negative
     const newStatus = newBalance <= 0 ? 'packed' : round.status;
@@ -419,6 +429,7 @@ export default function ProductionBoard() {
     
     setShowPackModal(false);
     setPackForm({ sku: '', cases: 0, loose: 0 });
+    setEditingPackIndex(null);
   };
 
   const handleHandover = (roundId: string) => {
@@ -614,16 +625,18 @@ export default function ProductionBoard() {
     setNewRound({ ...newRound, shiftId, roundNumber: existingRoundsInShift + 1 });
   };
 
-  const handleForceNextStage = (roundId: string) => {
+  const handleStageChange = (roundId: string, nextStatus: string) => {
     if (!canForceStage) return;
     const round = productionRounds.find(item => item.id === roundId);
-    if (!round) return;
-    const confirmed = window.confirm(`Force ${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber} to the next stage?`);
-    if (!confirmed) return;
-    void forceAdvanceRoundStatus(roundId).then((success) => {
-      if (success) showToast('success', 'Round advanced to the next stage by admin override');
-      else showToast('error', 'The server rejected this admin override');
-    });
+    if (!round || round.status === nextStatus) return;
+    if (!window.confirm(`Set ${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber} to ${statusLabels[nextStatus] || nextStatus}?`)) return;
+    const now = new Date().toISOString();
+    const stageUpdates: any = { status: nextStatus, locked: nextStatus === 'handed_over' };
+    if (nextStatus === 'pressing') stageUpdates.pressingStartedAt = now;
+    if (nextStatus === 'cooling') stageUpdates.coolingStartedAt = now;
+    if (nextStatus === 'resting') stageUpdates.restingStartedAt = now;
+    updateProductionRound(roundId, stageUpdates);
+    showToast('success', `Stage changed to ${statusLabels[nextStatus] || nextStatus}`);
   };
 
   const openBlockWeights = (roundId: string) => {
@@ -717,7 +730,6 @@ export default function ProductionBoard() {
           {timer === 0 && (
             <>
               <span className="text-xs font-bold text-emerald-600 animate-pulse">✓ Ready to Take Out for Resting</span>
-              <button onClick={() => handleStartResting(round.id)} className="px-2 py-1 bg-teal-500 text-white rounded text-xs hover:bg-teal-600">Start Resting</button>
             </>
           )}
           {round.type === 'C/S' && !round.creamRecovered && (
@@ -760,14 +772,11 @@ export default function ProductionBoard() {
         </div>
       );
     } else if (round.status === 'spp_pending') {
-      buttons.push(<button key="spp-weight" onClick={() => { setSelectedRound(round.id); setSppForm({ cutBy: round.cutBy || '', numberOfBlocks: round.numberOfBlocks || 0, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 }); setShowSppModal(true); }} className="px-2 py-1 bg-pink-600 text-white rounded text-xs hover:bg-pink-700">Record SPP Weight</button>);
+      // The SPP weight action is rendered in the Cut Into column.
     } else if (round.status === 'cut') {
       buttons.push(
         <div key="cut-actions" className="flex gap-1 flex-wrap">
           {round.cuttingType !== 'SPP pieces' && <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>}
-          <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-            <Package className="w-3 h-3" /> {round.packedSkus && round.packedSkus.length > 0 ? '+Add Packing' : 'Pack'}
-          </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -791,9 +800,6 @@ export default function ProductionBoard() {
     } else if (round.status === 'frozen') {
       buttons.push(
         <div key="frozen-actions" className="flex gap-1 flex-wrap">
-          <button key="pack" onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-            <Package className="w-3 h-3" /> {round.packedSkus && round.packedSkus.length > 0 ? '+Add Packing' : 'Pack'}
-          </button>
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -804,12 +810,9 @@ export default function ProductionBoard() {
     } else if (round.status === 'packed') {
       buttons.push(
         <div key="packed-actions" className="flex gap-1 flex-wrap">
-          <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
+          {isOwner && <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
             <CheckCircle2 className="w-3 h-3" /> Hand Over
-          </button>
-          <button onClick={() => { setSelectedRound(round.id); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white rounded text-xs hover:bg-emerald-600">
-            <Package className="w-3 h-3" /> +Add Packing
-          </button>
+          </button>}
           {round.type === 'C/S' && !round.creamRecovered && (
             <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
               +Cream
@@ -1116,6 +1119,7 @@ export default function ProductionBoard() {
                             >
                               S{round.shiftNumber}/R{round.roundNumber}
                             </button>
+                            <button onClick={() => { setHistoryRoundId(round.id); setShowHistoryModal(true); }} className="mt-1 block text-xs font-semibold text-indigo-600 hover:text-indigo-800">History</button>
                             {round.locked && (
                               <span className="inline-flex items-center gap-0.5 text-[10px] text-slate-400">
                                 <Lock className="w-2.5 h-2.5" /> Locked
@@ -1135,8 +1139,16 @@ export default function ProductionBoard() {
                             {round.creamRecovered !== undefined && <div className="mt-1 inline-flex rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Cream {round.creamRecovered} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</div>}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
-                            <div className="inline-flex rounded-lg border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">{statusLabels[round.status]}</div>
+                            {canForceStage ? (
+                              <select value={round.status} onChange={(e) => handleStageChange(round.id, e.target.value)} className="w-36 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm font-semibold text-slate-700" aria-label={`Current stage for round ${round.roundNumber}`}>
+                                {editableStageOptions.map(stage => <option key={stage} value={stage}>{statusLabels[stage] || stage}</option>)}
+                              </select>
+                            ) : <div className="inline-flex rounded-lg border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">{statusLabels[round.status] || round.status}</div>}
                             {round.startTime && <div className="mt-1 text-[10px] text-slate-500">{new Date(round.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
+                            {round.status === 'cooling' && <div className="mt-1 flex items-center gap-2 text-[10px]">
+                              <span className="font-mono font-bold">{formatTime(timers[round.id] || 0)}</span>
+                              {(timers[round.id] || 0) === 0 && <button onClick={() => handleStartResting(round.id)} className="rounded bg-teal-500 px-2 py-1 text-white font-medium hover:bg-teal-600">Start Resting</button>}
+                            </div>}
                           </td>
                           <td className="px-2 py-1.5 text-slate-600 text-sm">{round.blockWeights?.length ? <button onClick={() => setExpandedBlockRoundIds(current => { const next = new Set(current); if (next.has(round.id)) next.delete(round.id); else next.add(round.id); return next; })} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-medium text-indigo-700 hover:bg-indigo-100" aria-expanded={expandedBlockRoundIds.has(round.id)}>{round.blockWeights.length} blocks {expandedBlockRoundIds.has(round.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}</button> : '—'}</td>
                           <td className="px-2 py-1.5 text-sm">
@@ -1154,6 +1166,7 @@ export default function ProductionBoard() {
                             ) : round.status === 'clingwrapped' ? (
                               <span className="inline-flex rounded-lg border border-pink-200 bg-pink-50 px-2 py-1 text-xs font-medium text-pink-600">Clingwrapped</span>
                             ) : '—'}
+                            {round.status === 'spp_pending' && round.cuttingType === 'SPP pieces' && <button onClick={() => { setSelectedRound(round.id); setSppForm({ cutBy: round.cutBy || '', numberOfBlocks: round.numberOfBlocks || 0, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 }); setShowSppModal(true); }} className="mt-1 rounded bg-pink-600 px-2 py-1 text-xs font-medium text-white hover:bg-pink-700">Record SPP Weight</button>}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             {round.packedSkus && round.packedSkus.length > 0 ? (
@@ -1162,20 +1175,13 @@ export default function ProductionBoard() {
                               </div>
                             ) : <span className="text-slate-400">—</span>}
                             {round.remainingBalance !== undefined && <div className={`mt-1 inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold ${round.remainingBalance > 0 ? 'border-amber-200 bg-amber-50 text-amber-600' : round.remainingBalance < 0 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>Balance {round.remainingBalance.toFixed(2)} kg</div>}
+                            {['cut', 'frozen', 'packed'].includes(round.status) && !round.locked && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"><Package className="h-3 w-3" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
+                            {isOwner && round.packedSkus && round.packedSkus.length > 0 && <button onClick={() => { const index = round.packedSkus!.length - 1; const pack = round.packedSkus![index]; setSelectedRound(round.id); setEditingPackIndex(index); setPackForm({ sku: pack.sku, cases: pack.cases, loose: pack.loose }); setShowPackModal(true); }} className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             {!round.locked && (
                               <div className="flex gap-1 flex-wrap">
                                 {getActionButtons(round)}
-                                {canForceStage && statusFlow.indexOf(round.status as typeof statusFlow[number]) < statusFlow.length - 1 && (
-                                  <button
-                                    onClick={() => handleForceNextStage(round.id)}
-                                    className="flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium hover:bg-red-200"
-                                    title="Admin/Owner override"
-                                  >
-                                    <ShieldAlert className="w-3 h-3" /> Force next stage
-                                  </button>
-                                )}
                               </div>
                             )}
                           </td>
@@ -1346,7 +1352,7 @@ export default function ProductionBoard() {
       </Modal>
 
       {/* Pack Modal */}
-      <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title={selectedRound && productionRounds.find(r => r.id === selectedRound)?.packedSkus?.length ? "+Add Packing" : "Record Packing"}>
+      <Modal isOpen={showPackModal} onClose={() => { setShowPackModal(false); setEditingPackIndex(null); }} title={editingPackIndex !== null ? "Correct Packing" : selectedRound && productionRounds.find(r => r.id === selectedRound)?.packedSkus?.length ? "+Add Packing" : "Record Packing"}>
         <div className="space-y-4">
           {selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
