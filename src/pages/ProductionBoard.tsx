@@ -1092,10 +1092,12 @@ export default function ProductionBoard() {
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-16">Milk (L)</th>
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-14">Type</th>
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-20">Output</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-16">Blocks</th>
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-28">Cutting Status</th>
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-20">Cut By</th>
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-16">Balance</th>
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-24">Packed</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-20">Cream (kg)</th>
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
@@ -1130,9 +1132,9 @@ export default function ProductionBoard() {
                           </td>
                           <td className="px-2 py-2">
                             <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-bold">{round.type}</span>
-                            {round.creamRecovered !== undefined && <div className="mt-1 text-[10px] font-medium text-amber-700">{round.creamRecovered} kg cream{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</div>}
                           </td>
-                          <td className="px-2 py-2 text-slate-600 text-xs">{round.outputWeight > 0 ? <><div>{round.outputWeight.toFixed(1)} kg</div>{round.sppRecordedWeight !== undefined && <div className="text-pink-600">SPP: {round.sppRecordedWeight.toFixed(1)} kg</div>}{round.blockWeights?.length ? <button onClick={() => openBlockWeights(round.id)} className="block text-indigo-600 hover:text-indigo-800 hover:underline font-medium">{round.blockWeights.length} blocks</button> : null}</> : '—'}</td>
+                          <td className="px-2 py-2 text-slate-600 text-xs">{round.outputWeight > 0 ? <><div>{round.outputWeight.toFixed(1)} kg</div>{round.sppRecordedWeight !== undefined && <div className="text-pink-600">SPP: {round.sppRecordedWeight.toFixed(1)} kg</div>}</> : '—'}</td>
+                          <td className="px-2 py-2 text-slate-600 text-xs">{round.blockWeights?.length ? <button onClick={() => openBlockWeights(round.id)} className="text-indigo-600 hover:text-indigo-800 hover:underline font-medium">{round.blockWeights.length} blocks</button> : '—'}</td>
                           <td className="px-2 py-2">
                             {round.cuttingType || round.status === 'ready_cutting' ? (
                               <select value={round.cuttingType || ''} onChange={(e) => updateProductionRound(round.id, { cuttingType: e.target.value || undefined })} className="w-32 px-2 py-1 border border-slate-200 rounded text-xs bg-white" aria-label={`Cutting status for round ${round.roundNumber}`}><option value="">Select</option><option value="400g cubes">400g cubes</option><option value="200g cubes">200g cubes</option><option value="Restaurant blocks">Restaurant blocks</option><option value="SPP pieces">SPP pieces</option></select>
@@ -1164,6 +1166,14 @@ export default function ProductionBoard() {
                             ) : '—'}
                           </td>
                           <td className="px-2 py-2">
+                            {round.type === 'C/S' && round.creamRecovered ? (
+                              <div className="text-[10px]">
+                                <div className="font-medium text-amber-700">{round.creamRecovered} kg</div>
+                                {round.creamRecoveredBy && <div className="text-slate-500">by {round.creamRecoveredBy}</div>}
+                              </div>
+                            ) : '—'}
+                          </td>
+                          <td className="px-2 py-2">
                             {!round.locked && (
                               <div className="flex gap-1 flex-wrap">
                                 {getActionButtons(round)}
@@ -1190,7 +1200,7 @@ export default function ProductionBoard() {
                               <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span>
                             </div>
                           </td>
-                          <td colSpan={6} className="px-2 py-2" />
+                          <td colSpan={8} className="px-2 py-2" />
                         </tr>
                         </Fragment>
                       ))}
