@@ -1088,7 +1088,7 @@ export default function ProductionBoard() {
               {/* Rounds table */}
               {!isCollapsed && rounds.length > 0 ? (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="production-board-table w-full text-xs">
                     <thead>
                       <tr className="border-b border-slate-100">
                         <th className="sticky left-0 z-20 bg-white px-1 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-24 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">Batch ID</th>
@@ -1104,7 +1104,7 @@ export default function ProductionBoard() {
                         <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50">
+                    <tbody>
                       {rounds.map((round) => (
                         <Fragment key={round.id}>
                         <tr className="hover:bg-slate-50/50 transition-colors">

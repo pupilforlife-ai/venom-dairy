@@ -15,6 +15,34 @@
   animation: slide-in 0.3s ease-out;
 }
 
+/* Production board grid: keep every round column aligned and visible on
+   small screens instead of allowing long values to stretch neighbouring
+   columns. The board keeps its horizontal scroll container on narrow views. */
+.production-board-table {
+  min-width: 72rem;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.production-board-table th,
+.production-board-table td {
+  border: 1px solid rgb(226 232 240);
+  vertical-align: top;
+}
+
+[data-theme="dark"] .production-board-table th,
+[data-theme="dark"] .production-board-table td,
+[data-theme="black"] .production-board-table th,
+[data-theme="black"] .production-board-table td,
+[data-theme="amber"] .production-board-table th,
+[data-theme="amber"] .production-board-table td,
+[data-theme="contrast"] .production-board-table th,
+[data-theme="contrast"] .production-board-table td,
+[data-theme="system"] .production-board-table th,
+[data-theme="system"] .production-board-table td {
+  border-color: rgb(71 85 105);
+}
+
 /* Theme surface overrides. Existing utility classes remain unchanged in light mode. */
 [data-theme="dark"] body, [data-theme="black"] body, [data-theme="amber"] body,
 [data-theme="contrast"] body { background: #0f172a; color: #e2e8f0; }
