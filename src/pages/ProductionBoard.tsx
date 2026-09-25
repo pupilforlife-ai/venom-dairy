@@ -1084,28 +1084,26 @@ export default function ProductionBoard() {
               {/* Rounds table */}
               {!isCollapsed && rounds.length > 0 ? (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-slate-100">
-                        <th className="sticky left-0 z-20 bg-white px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-36 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">Batch ID</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Temp (°C)</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Milk (L)</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Type</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-16">Output</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Blocks</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-32">Cutting Status</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cut By</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Balance</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Packed</th>
-                        <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Cream (kg)</th>
-                      <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
+                        <th className="sticky left-0 z-20 bg-white px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-32 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">Batch ID</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Temp (°C)</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-16">Milk (L)</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-14">Type</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-20">Output</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-28">Cutting Status</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-20">Cut By</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-16">Balance</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide w-24">Packed</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-slate-500 text-[10px] uppercase tracking-wide">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {rounds.map((round) => (
                         <Fragment key={round.id}>
                         <tr className="hover:bg-slate-50/50 transition-colors">
-                          <td className="sticky left-0 z-10 bg-white px-4 py-3 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">
+                          <td className="sticky left-0 z-10 bg-white px-2 py-2 shadow-[2px_0_3px_rgba(15,23,42,0.08)]">
                             <button
                               onClick={() => {
                                 setHistoryRoundId(round.id);
@@ -1122,30 +1120,30 @@ export default function ProductionBoard() {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 py-2">
                             {round.startingTemperature !== undefined ? (
                               <span className="text-xs font-medium text-slate-700">{round.startingTemperature}°C</span>
                             ) : '—'}
                           </td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">
+                          <td className="px-2 py-2 text-slate-600 text-xs">
                             <input type="number" min="0" value={round.actualInput > 0 ? round.actualInput : round.plannedInput} onChange={(e) => { const quantity = parseInt(e.target.value) || 0; updateProductionRound(round.id, { plannedInput: quantity, actualInput: quantity }); }} className="w-20 px-2 py-1 border border-slate-200 rounded text-xs" aria-label={`Milk quantity for round ${round.roundNumber}`} />
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 py-2">
                             <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-bold">{round.type}</span>
+                            {round.creamRecovered !== undefined && <div className="mt-1 text-[10px] font-medium text-amber-700">{round.creamRecovered} kg cream{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</div>}
                           </td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.outputWeight > 0 ? <><div>{round.outputWeight.toFixed(1)} kg</div>{round.sppRecordedWeight !== undefined && <div className="text-pink-600">SPP: {round.sppRecordedWeight.toFixed(1)} kg</div>}</> : '—'}</td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.blockWeights?.length ? <button onClick={() => openBlockWeights(round.id)} className="text-indigo-600 hover:text-indigo-800 hover:underline font-medium">{round.blockWeights.length} blocks</button> : '—'}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 py-2 text-slate-600 text-xs">{round.outputWeight > 0 ? <><div>{round.outputWeight.toFixed(1)} kg</div>{round.sppRecordedWeight !== undefined && <div className="text-pink-600">SPP: {round.sppRecordedWeight.toFixed(1)} kg</div>}{round.blockWeights?.length ? <button onClick={() => openBlockWeights(round.id)} className="block text-indigo-600 hover:text-indigo-800 hover:underline font-medium">{round.blockWeights.length} blocks</button> : null}</> : '—'}</td>
+                          <td className="px-2 py-2">
                             {round.cuttingType || round.status === 'ready_cutting' ? (
                               <select value={round.cuttingType || ''} onChange={(e) => updateProductionRound(round.id, { cuttingType: e.target.value || undefined })} className="w-32 px-2 py-1 border border-slate-200 rounded text-xs bg-white" aria-label={`Cutting status for round ${round.roundNumber}`}><option value="">Select</option><option value="400g cubes">400g cubes</option><option value="200g cubes">200g cubes</option><option value="Restaurant blocks">Restaurant blocks</option><option value="SPP pieces">SPP pieces</option></select>
                             ) : round.status === 'clingwrapped' ? (
                               <span className="text-xs font-medium text-pink-600">Clingwrapped</span>
                             ) : '—'}
                           </td>
-                          <td className="px-4 py-3 text-xs">
+                          <td className="px-2 py-2 text-xs">
                             {round.cutBy || '—'}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 py-2">
                             {round.remainingBalance !== undefined ? (
                               <span className={`text-xs font-bold ${
                                 round.remainingBalance > 0 ? 'text-amber-600' : 
@@ -1156,7 +1154,7 @@ export default function ProductionBoard() {
                               </span>
                             ) : '—'}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 py-2">
                             {round.packedSkus && round.packedSkus.length > 0 ? (
                               <div className="text-xs">
                                 {round.packedSkus.map((p, i) => (
@@ -1165,17 +1163,7 @@ export default function ProductionBoard() {
                               </div>
                             ) : '—'}
                           </td>
-                          <td className="px-4 py-3">
-                            {round.type === 'C/S' && round.creamRecovered ? (
-                              <div className="text-xs">
-                                <div className="font-medium text-amber-700">{round.creamRecovered} kg</div>
-                                {round.creamRecoveredBy && (
-                                  <div className="text-slate-500">by {round.creamRecoveredBy}</div>
-                                )}
-                              </div>
-                            ) : '—'}
-                          </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 py-2">
                             {!round.locked && (
                               <div className="flex gap-1 flex-wrap">
                                 {getActionButtons(round)}
@@ -1193,7 +1181,7 @@ export default function ProductionBoard() {
                           </td>
                         </tr>
                         <tr key={`${round.id}-pipeline`} className="border-t-2 border-b border-slate-200 bg-slate-50/80">
-                          <td colSpan={4} className="px-4 py-3">
+                          <td colSpan={4} className="px-2 py-2">
                             <div className="flex items-center justify-between gap-3 min-w-max">
                               <div className="flex items-center gap-3">
                                 <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pipeline</span>
@@ -1202,7 +1190,7 @@ export default function ProductionBoard() {
                               <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span>
                             </div>
                           </td>
-                          <td colSpan={8} className="px-4 py-3" />
+                          <td colSpan={6} className="px-2 py-2" />
                         </tr>
                         </Fragment>
                       ))}
