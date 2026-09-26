@@ -662,167 +662,79 @@ export default function ProductionBoard() {
     showToast('success', 'Block weights corrected');
   };
 
-  // Get action buttons for each round
-  const getActionButtons = (round: any) => {
-    const buttons = [];
-    
-    if (round.status === 'scheduled') {
-      buttons.push(
-        <div key="vat" className="flex gap-1">
-          <button onClick={() => handleVatSelection(round.id, 'vat2')} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">Vat 2</button>
-          <button onClick={() => handleVatSelection(round.id, 'vat3')} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">Vat 3</button>
-        </div>
-      );
-    } else if (round.status === 'in_production') {
-      buttons.push(
-        <div key="in-production-actions" className="flex gap-1 flex-wrap">
-          <button onClick={() => handleStartCoagulation(round.id)} className="px-2 py-1 bg-violet-500 text-white rounded text-xs hover:bg-violet-600">
-            Start Coagulation
-          </button>
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'coagulation') {
-      buttons.push(
-        <div key="coagulation-actions" className="flex gap-1 flex-wrap">
-          <button onClick={() => handleStartPressing(round.id)} className="px-2 py-1 bg-purple-500 text-white rounded text-xs hover:bg-purple-600">
-            Start Pressing
-          </button>
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'pressing') {
-      const timer = timers[round.id] || 0;
-      buttons.push(
-        <div key="pressing" className="flex items-center gap-2 flex-wrap">
-          <Timer className="w-4 h-4 text-purple-500" />
-          <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
-          {timer === 0 && (
-            <>
-              <span className="text-xs font-bold text-emerald-600 animate-pulse">✓ Ready for Cooling</span>
-              <div className="flex gap-1">
-                <button onClick={() => handleStartCooling(round.id, 'tank')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Tank</button>
-                <button onClick={() => handleStartCooling(round.id, 'chiller')} className="px-2 py-1 bg-cyan-500 text-white rounded text-xs hover:bg-cyan-600">Chiller</button>
-              </div>
-            </>
-          )}
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'cooling') {
-      const timer = timers[round.id] || 0;
-      buttons.push(
-        <div key="cooling" className="flex items-center gap-2 flex-wrap">
-          <Timer className="w-4 h-4 text-cyan-500" />
-          <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
-          {timer === 0 && (
-            <>
-              <span className="text-xs font-bold text-emerald-600 animate-pulse">✓ Ready to Take Out for Resting</span>
-            </>
-          )}
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'resting') {
-      const timer = timers[round.id] || 0;
-      buttons.push(
-        <div key="resting" className="flex items-center gap-2 flex-wrap">
-          <Timer className="w-4 h-4 text-teal-500" />
-          <span className="text-xs font-mono font-bold">{formatTime(timer)}</span>
-          {timer === 0 && (
-            <>
-              <span className="text-xs font-bold text-emerald-600 animate-pulse">✓ Ready for Cutting</span>
-              <button onClick={() => handleReadyForCutting(round.id)} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">Start Cutting</button>
-            </>
-          )}
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'ready_cutting') {
-      buttons.push(
-        <div key="ready-cutting-actions" className="flex gap-1 flex-wrap">
-          <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
-            <Scissors className="w-3 h-3" /> Cut
-          </button>
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'spp_pending') {
-      // The SPP weight action is rendered in the Cut Into column.
-    } else if (round.status === 'cut') {
-      buttons.push(
-        <div key="cut-actions" className="flex gap-1 flex-wrap">
-          {round.cuttingType !== 'SPP pieces' && <button onClick={() => handleFreeze(round.id)} className="px-2 py-1 bg-indigo-500 text-white rounded text-xs hover:bg-indigo-600">Freeze</button>}
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'clingwrapped') {
-      buttons.push(
-        <div key="clingwrap-actions" className="flex gap-1 flex-wrap">
-          <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="flex items-center gap-1 px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">
-            <Scissors className="w-3 h-3" /> Final Cut
-          </button>
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'frozen') {
-      buttons.push(
-        <div key="frozen-actions" className="flex gap-1 flex-wrap">
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    } else if (round.status === 'packed') {
-      buttons.push(
-        <div key="packed-actions" className="flex gap-1 flex-wrap">
-          {isOwner && <button key="handover" onClick={() => handleHandover(round.id)} className="flex items-center gap-1 px-2 py-1 bg-emerald-700 text-white rounded text-xs hover:bg-emerald-800">
-            <CheckCircle2 className="w-3 h-3" /> Hand Over
-          </button>}
-          {round.type === 'C/S' && !round.creamRecovered && (
-            <button onClick={() => { setSelectedRound(round.id); setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' }); setShowCreamModal(true); }} className="px-2 py-1 bg-amber-500 text-white rounded text-xs hover:bg-amber-600">
-              +Cream
-            </button>
-          )}
-        </div>
-      );
-    }
+  const openCreamModal = (roundId: string) => {
+    setSelectedRound(roundId);
+    setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' });
+    setShowCreamModal(true);
+  };
 
-    return buttons;
+  // Each action lives with the value it changes: process controls under
+  // Current Stage, cutting controls under Cut Into, packing under Packed Into,
+  // and only the owner hand-over control remains in Actions.
+  const renderCreamAction = (round: any) => {
+    const creamStages = ['in_production', 'coagulation', 'pressing', 'cooling', 'resting', 'ready_cutting', 'cut', 'clingwrapped', 'frozen', 'packed'];
+    if (round.type !== 'C/S' || round.creamRecovered !== undefined || !creamStages.includes(round.status)) return null;
+    return <button onClick={() => openCreamModal(round.id)} className="mt-1 flex w-fit items-center rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100">+ Cream</button>;
+  };
+
+  const getStageActionButtons = (round: any) => {
+    if (round.status === 'scheduled') {
+      return <div className="mt-1 flex flex-wrap gap-1">
+        <button onClick={() => handleVatSelection(round.id, 'vat2')} className="rounded bg-purple-500 px-2 py-1 text-xs text-white hover:bg-purple-600">Vat 2</button>
+        <button onClick={() => handleVatSelection(round.id, 'vat3')} className="rounded bg-purple-500 px-2 py-1 text-xs text-white hover:bg-purple-600">Vat 3</button>
+      </div>;
+    }
+    if (round.status === 'in_production') {
+      return <div className="mt-1 flex flex-wrap gap-1"><button onClick={() => handleStartCoagulation(round.id)} className="rounded bg-violet-500 px-2 py-1 text-xs text-white hover:bg-violet-600">Start Coagulation</button></div>;
+    }
+    if (round.status === 'coagulation') {
+      return <div className="mt-1 flex flex-wrap gap-1"><button onClick={() => handleStartPressing(round.id)} className="rounded bg-purple-500 px-2 py-1 text-xs text-white hover:bg-purple-600">Start Pressing</button></div>;
+    }
+    if (round.status === 'pressing') {
+      const timer = timers[round.id] || 0;
+      return <div className="mt-1 flex flex-wrap items-center gap-2">
+        <Timer className="h-4 w-4 text-purple-500" />
+        <span className="font-mono text-xs font-bold">{formatTime(timer)}</span>
+        {timer === 0 && <>
+          <span className="text-xs font-bold text-emerald-600">✓ Ready for Cooling</span>
+          <button onClick={() => handleStartCooling(round.id, 'tank')} className="rounded bg-cyan-500 px-2 py-1 text-xs text-white hover:bg-cyan-600">Tank</button>
+          <button onClick={() => handleStartCooling(round.id, 'chiller')} className="rounded bg-cyan-500 px-2 py-1 text-xs text-white hover:bg-cyan-600">Chiller</button>
+        </>}
+      </div>;
+    }
+    if (round.status === 'resting') {
+      const timer = timers[round.id] || 0;
+      return <div className="mt-1 flex flex-wrap items-center gap-2">
+        <Timer className="h-4 w-4 text-teal-500" />
+        <span className="font-mono text-xs font-bold">{formatTime(timer)}</span>
+        {timer === 0 && <>
+          <span className="text-xs font-bold text-emerald-600">✓ Ready for Cutting</span>
+          <button onClick={() => handleReadyForCutting(round.id)} className="rounded bg-amber-500 px-2 py-1 text-xs text-white hover:bg-amber-600">Start Cutting</button>
+        </>}
+      </div>;
+    }
+    if (round.status === 'cut' && round.cuttingType !== 'SPP pieces') {
+      return <div className="mt-1 flex flex-wrap gap-1"><button onClick={() => handleFreeze(round.id)} className="rounded bg-indigo-500 px-2 py-1 text-xs text-white hover:bg-indigo-600">Freeze</button></div>;
+    }
+    return null;
+  };
+
+  const getCutActionButtons = (round: any) => {
+    if (round.status === 'ready_cutting') {
+      return <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="mt-1 flex w-fit items-center gap-1 rounded bg-orange-500 px-2 py-1 text-xs text-white hover:bg-orange-600"><Scissors className="h-3 w-3" /> Cut</button>;
+    }
+    if (round.status === 'clingwrapped') {
+      return <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="mt-1 flex w-fit items-center gap-1 rounded bg-orange-500 px-2 py-1 text-xs text-white hover:bg-orange-600"><Scissors className="h-3 w-3" /> Final Cut</button>;
+    }
+    if (round.status === 'spp_pending' && round.cuttingType === 'SPP pieces') {
+      return <button onClick={() => { setSelectedRound(round.id); setSppForm({ cutBy: round.cutBy || '', numberOfBlocks: round.numberOfBlocks || 0, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 }); setShowSppModal(true); }} className="mt-1 flex w-fit rounded bg-pink-600 px-2 py-1 text-xs font-medium text-white hover:bg-pink-700">Record SPP Weight</button>;
+    }
+    return null;
+  };
+
+  const getActionButtons = (round: any) => {
+    if (!isOwner || round.status !== 'packed') return null;
+    return <button onClick={() => handleHandover(round.id)} className="flex w-fit items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-800"><CheckCircle2 className="h-3 w-3" /> Hand Over</button>;
   };
 
   return (
@@ -1149,7 +1061,8 @@ export default function ProductionBoard() {
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             <span className="inline-flex rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm font-bold text-slate-700">{round.type}</span>
-                            {round.creamRecovered !== undefined && <div className="mt-1 inline-flex rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Cream {round.creamRecovered} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</div>}
+                            {round.creamRecovered !== undefined && <div className="mt-1 flex w-fit rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Cream {round.creamRecovered} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</div>}
+                            {renderCreamAction(round)}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             {canForceStage ? (
@@ -1160,8 +1073,10 @@ export default function ProductionBoard() {
                             {round.startTime && <div className="mt-1 text-[10px] text-slate-500">{new Date(round.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
                             {round.status === 'cooling' && <div className="mt-1 flex items-center gap-2 text-[10px]">
                               <span className="font-mono font-bold">{formatTime(timers[round.id] || 0)}</span>
+                              {(timers[round.id] || 0) === 0 && <span className="font-bold text-emerald-600">✓ Ready for Resting</span>}
                               {(timers[round.id] || 0) === 0 && <button onClick={() => handleStartResting(round.id)} className="rounded bg-teal-500 px-2 py-1 text-white font-medium hover:bg-teal-600">Start Resting</button>}
                             </div>}
+                            {getStageActionButtons(round)}
                           </td>
                           <td className="px-2 py-1.5 text-slate-600 text-sm">{round.blockWeights?.length ? <button onClick={() => setExpandedBlockRoundIds(current => { const next = new Set(current); if (next.has(round.id)) next.delete(round.id); else next.add(round.id); return next; })} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-medium text-indigo-700 hover:bg-indigo-100" aria-expanded={expandedBlockRoundIds.has(round.id)}>{round.blockWeights.length} blocks {expandedBlockRoundIds.has(round.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}</button> : '—'}</td>
                           <td className="px-2 py-1.5 text-sm">
@@ -1179,7 +1094,7 @@ export default function ProductionBoard() {
                             ) : round.status === 'clingwrapped' ? (
                               <span className="inline-flex rounded-lg border border-pink-200 bg-pink-50 px-2 py-1 text-xs font-medium text-pink-600">Clingwrapped</span>
                             ) : '—'}
-                            {round.status === 'spp_pending' && round.cuttingType === 'SPP pieces' && <button onClick={() => { setSelectedRound(round.id); setSppForm({ cutBy: round.cutBy || '', numberOfBlocks: round.numberOfBlocks || 0, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 }); setShowSppModal(true); }} className="mt-1 rounded bg-pink-600 px-2 py-1 text-xs font-medium text-white hover:bg-pink-700">Record SPP Weight</button>}
+                            {getCutActionButtons(round)}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             {round.packedSkus && round.packedSkus.length > 0 ? (
@@ -1201,10 +1116,10 @@ export default function ProductionBoard() {
                         </tr>
                         <tr key={`${round.id}-pipeline`} className="border-t-2 border-b border-slate-200 bg-slate-50/80">
                           <td colSpan={11} className="px-2 py-2">
-                            <div className="grid min-w-max grid-cols-[9rem_minmax(0,1fr)_auto] items-center gap-3">
-                              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pipeline</span>
-                              <StatusPipeline currentStatus={round.status} />
-                              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span>
+                            <div className="grid min-w-[146rem] items-center" style={{ gridTemplateColumns: '9rem 8rem 7rem 8rem 16rem 8rem 16rem 12rem 15rem 18rem 29rem' }}>
+                              <span className="px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pipeline</span>
+                              <div className="col-span-4 px-2"><StatusPipeline currentStatus={round.status} /></div>
+                              <span className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span>
                             </div>
                           </td>
                         </tr>
