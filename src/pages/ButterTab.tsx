@@ -55,6 +55,10 @@ export default function ButterTab() {
   const [showBlendingModal, setShowBlendingModal] = useState(false);
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<'cream' | 'blending' | 'packing'>('cream');
+  const [creamSourceTab, setCreamSourceTab] = useState<'internal' | 'external'>('internal');
+  const [blendingSourceTab, setBlendingSourceTab] = useState<'internal' | 'external'>('internal');
+  const [packingSourceTab, setPackingSourceTab] = useState<'internal' | 'external'>('internal');
 
   // Forms
   const [newRound, setNewRound] = useState({
@@ -117,12 +121,24 @@ export default function ButterTab() {
   );
   const internalButterPools = blendingCandidates.filter(round => round.creamSource === 'internal');
   const externalButterPools = blendingCandidates.filter(round => round.creamSource === 'external');
+  const visibleBlendingCandidates = blendingSourceTab === 'internal' ? internalButterPools : externalButterPools;
   const packingCandidates = butterRounds.filter(round =>
     ['churned', 'packed_as_pubb', 'pubbb_pool', 'psbbb_pool', 'bb05_pool'].includes(round.status)
       && (round.remainingBalance || 0) > 0,
   );
+  const visiblePackingCandidates = packingCandidates.filter(round => {
+    const hasInternalButter = round.creamSource === 'internal' || (round.blendingInternalButterQuantity || 0) > 0;
+    const hasExternalButter = round.creamSource === 'external' || (round.blendingExternalButterQuantity || 0) > 0;
+    return packingSourceTab === 'internal' ? hasInternalButter : hasExternalButter;
+  });
 
   // Handlers
+  const openNewButterRound = (source: 'internal' | 'external' = creamSourceTab, creamLotId = '') => {
+    setCreamSourceTab(source);
+    setNewRound(current => ({ ...current, creamSource: source, creamLotId: creamLotId || (source === 'internal' ? current.milkLotId : '') }));
+    setShowNewRoundModal(true);
+  };
+
   const handleCreateRound = () => {
     if (!newRound.roundDate || !newRound.milkLotId || !newRound.creamLotId || newRound.inputQuantity <= 0) {
       showToast('error', 'Please fill all required fields');
@@ -513,7 +529,7 @@ export default function ButterTab() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowNewRoundModal(true)}
+            onClick={() => openNewButterRound()}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700"
           >
             <Plus className="w-4 h-4" /> New Round
@@ -521,8 +537,27 @@ export default function ButterTab() {
         </div>
       </div>
 
+      <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-white p-2">
+        {([['cream', '🥛 Cream → Butter'], ['blending', '🧈 Blending'], ['packing', '📦 Packing']] as const).map(([section, label]) => (
+          <button key={section} onClick={() => setActiveSection(section)} className={`rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${activeSection === section ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Cream Pool Summary */}
-      {internalCreamPools.length > 0 && (
+      {activeSection === 'cream' && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div><h4 className="text-sm font-semibold text-blue-950">Cream → Butter</h4><p className="text-xs text-blue-700">Choose the cream origin before opening a butter round.</p></div>
+            <div className="flex gap-1 rounded-lg bg-white p-1 border border-blue-100">
+              {([['internal', 'Internal cream'], ['external', 'Purchased cream']] as const).map(([source, label]) => <button key={source} onClick={() => setCreamSourceTab(source)} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${creamSourceTab === source ? 'bg-blue-600 text-white' : 'text-blue-700 hover:bg-blue-50'}`}>{label}</button>)}
+            </div>
+          </div>
+          <button onClick={() => openNewButterRound(creamSourceTab)} className="mt-3 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"><Plus className="mr-1 inline h-3 w-3" />Record {creamSourceTab === 'internal' ? 'internal' : 'external'} cream to butter</button>
+        </div>
+      )}
+      {activeSection === 'cream' && creamSourceTab === 'internal' && internalCreamPools.length > 0 && (
         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4">
           <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
             <span>🥛</span> Internal Cream Pools
@@ -557,7 +592,14 @@ export default function ButterTab() {
         </div>
       )}
 
-      {milkLots.some(lot => lot.butterPool) && (
+      {activeSection === 'cream' && creamSourceTab === 'external' && (
+        <div className="bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-200 rounded-xl p-4">
+          <h4 className="text-sm font-semibold text-violet-900 mb-3 flex items-center gap-2"><span>🧴</span> Purchased Cream Lots</h4>
+          {externalCreamLots.filter(cream => cream.remaining > 0).length > 0 ? <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">{externalCreamLots.filter(cream => cream.remaining > 0).map(cream => <div key={cream.id} className="bg-white rounded-lg p-3 border border-violet-100"><div className="flex items-center justify-between"><span className="text-sm font-bold text-slate-900">{cream.lotCode}</span><span className="text-xs text-violet-700">{cream.remaining.toFixed(2)} kg available</span></div><p className="mt-1 text-xs text-slate-500">{cream.supplier}</p><button onClick={() => openNewButterRound('external', cream.id)} className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100">Use in butter round</button></div>)}</div> : <p className="text-sm text-violet-700">No purchased cream is currently available.</p>}
+        </div>
+      )}
+
+      {(activeSection === 'blending' || activeSection === 'packing') && milkLots.some(lot => lot.butterPool) && (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4">
           <h4 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
             <span>🧈</span> Common Butter Pools
@@ -587,15 +629,18 @@ export default function ButterTab() {
       )}
 
       {/* Blending subsection */}
-      <section className="rounded-xl border border-purple-200 bg-purple-50/60 overflow-hidden">
+      {activeSection === 'blending' && <section className="rounded-xl border border-purple-200 bg-purple-50/60 overflow-hidden">
         <div className="px-4 py-3 border-b border-purple-200 bg-purple-100/70">
           <h4 className="text-sm font-semibold text-purple-900">Blending</h4>
-          <p className="mt-1 text-xs text-purple-700">Select the internal and/or external butter pools used for blending. These controls replace the post-output row actions.</p>
+          <p className="mt-1 text-xs text-purple-700">Select a butter origin to review. The blending form can still combine internal and purchased-cream butter when required.</p>
+          <div className="mt-3 flex gap-1 rounded-lg bg-white/70 p-1 w-fit border border-purple-200">
+            {([['internal', 'Internal butter'], ['external', 'From purchased cream']] as const).map(([source, label]) => <button key={source} onClick={() => setBlendingSourceTab(source)} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${blendingSourceTab === source ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-purple-50'}`}>{label}</button>)}
+          </div>
         </div>
         <div className="p-4">
-          {blendingCandidates.length > 0 ? (
+          {visibleBlendingCandidates.length > 0 ? (
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-              {blendingCandidates.map(round => (
+              {visibleBlendingCandidates.map(round => (
                 <div key={round.id} className="flex items-center justify-between gap-3 rounded-lg border border-purple-200 bg-white p-3">
                   <div>
                     <div className="font-mono text-xs font-bold text-slate-900">{round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber}</div>
@@ -605,20 +650,23 @@ export default function ButterTab() {
                 </div>
               ))}
             </div>
-          ) : <p className="text-sm text-purple-700">No unallocated butter output is waiting for blending.</p>}
+          ) : <p className="text-sm text-purple-700">No unallocated {blendingSourceTab === 'internal' ? 'internal' : 'purchased-cream'} butter output is waiting for blending.</p>}
         </div>
-      </section>
+      </section>}
 
       {/* Packing subsection */}
-      <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 overflow-hidden">
+      {activeSection === 'packing' && <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 overflow-hidden">
         <div className="px-4 py-3 border-b border-emerald-200 bg-emerald-100/70">
           <h4 className="text-sm font-semibold text-emerald-900">Packing</h4>
-          <p className="mt-1 text-xs text-emerald-700">Pack direct butter output into PUBB, or pack a blended butter pool into its final SKU.</p>
+          <p className="mt-1 text-xs text-emerald-700">Review the butter origin before packing. Mixed pools appear in both origin tabs so their genealogy is not hidden.</p>
+          <div className="mt-3 flex gap-1 rounded-lg bg-white/70 p-1 w-fit border border-emerald-200">
+            {([['internal', 'Internal butter'], ['external', 'Purchased-cream butter']] as const).map(([source, label]) => <button key={source} onClick={() => setPackingSourceTab(source)} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${packingSourceTab === source ? 'bg-emerald-600 text-white' : 'text-emerald-700 hover:bg-emerald-50'}`}>{label}</button>)}
+          </div>
         </div>
         <div className="p-4">
-          {packingCandidates.length > 0 ? (
+          {visiblePackingCandidates.length > 0 ? (
             <div className="space-y-2">
-              {packingCandidates.map(round => {
+              {visiblePackingCandidates.map(round => {
                 const poolSku = round.status === 'pubbb_pool' ? 'PUBBB' : round.status === 'psbbb_pool' ? 'PSBBB' : round.status === 'bb05_pool' ? 'BB05' : 'PUBB';
                 const isDirect = poolSku === 'PUBB';
                 return (
@@ -626,6 +674,7 @@ export default function ButterTab() {
                     <div>
                       <div className="font-mono text-xs font-bold text-slate-900">{round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber}</div>
                       <div className="mt-1 text-xs text-slate-500">{isDirect ? 'Butter output' : `${poolSku} blended pool`} · <span className="font-semibold text-slate-700">{(round.remainingBalance || 0).toFixed(2)} kg available</span></div>
+                      <div className="mt-1 text-[11px] text-emerald-700">{round.blendingInternalButterQuantity && round.blendingExternalButterQuantity ? 'Mixed internal + purchased-cream butter' : round.creamSource === 'internal' ? 'Internal cream → butter' : 'Purchased cream → butter'}</div>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => openPacking(round, poolSku as 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05')} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"><Package className="h-3 w-3" />Pack as {poolSku}</button>
@@ -635,9 +684,9 @@ export default function ButterTab() {
                 );
               })}
             </div>
-          ) : <p className="text-sm text-emerald-700">No butter or blended pools are waiting for packing.</p>}
+          ) : <p className="text-sm text-emerald-700">No {packingSourceTab === 'internal' ? 'internal' : 'purchased-cream'} butter pools are waiting for packing.</p>}
         </div>
-      </section>
+      </section>}
 
       {/* Production Board */}
       <div className="space-y-4">
@@ -689,6 +738,7 @@ export default function ButterTab() {
                           }`}>
                             {round.creamSource === 'internal' ? 'Internal' : 'External'}
                           </span>
+                          <div className="mt-1 text-[10px] text-slate-500">{round.sourceBatchCode || round.creamLotId || 'Source lot not recorded'}</div>
                           {(round.blendingInternalButterQuantity || round.blendingExternalButterQuantity) && <div className="mt-1 text-[10px] text-purple-700">Blend butter: {[round.blendingInternalButterQuantity ? `${round.blendingInternalButterQuantity.toFixed(2)} kg internal` : '', round.blendingExternalButterQuantity ? `${round.blendingExternalButterQuantity.toFixed(2)} kg external` : ''].filter(Boolean).join(' + ')}</div>}
                         </td>
                         <td className="px-4 py-3">

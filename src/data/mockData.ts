@@ -34,6 +34,11 @@ export interface PackedSku {
   reason?: string;
 }
 
+// Production-board packing records always include a loose-unit count. Keeping
+// that requirement separate lets older milk-lot snapshots omit the field while
+// preserving type-safe access everywhere rounds are displayed or audited.
+export type ProductionPackedSku = PackedSku & { loose: number };
+
 export interface CreamLot {
   id: string;
   lotCode: string; // e.g. "02-160626"
@@ -235,15 +240,11 @@ export interface ProductionRound {
   // Intermediate balance
   intermediateBalance?: number;
   
-  // Packing results - supports multiple SKUs per round
-  packedSkus?: Array<{
-    sku: string;
-    cases: number;
-    loose: number;
-    looseWeightKg?: number;
-    weightKg?: number;
-    reason?: string;
-  }>;
+  // Staff-entered packing results and the owner-verified snapshot used by audit.
+  packedSkus?: ProductionPackedSku[];
+  verifiedPackedSkus?: ProductionPackedSku[];
+  verifiedSkuAt?: string;
+  verifiedSkuBy?: string;
   
   // Remaining balance after cutting (kg available for packing)
   remainingBalance?: number;

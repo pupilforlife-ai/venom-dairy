@@ -276,7 +276,7 @@ export default function MilkReceiving() {
     }
     const today = new Date().toISOString();
     addCreamLot({
-      lotCode: `CREAM-${today.slice(0, 10).replaceAll('-', '')}-${Date.now().toString().slice(-4)}`,
+      lotCode: `CREAM-${today.slice(0, 10).replace(/-/g, '')}-${Date.now().toString().slice(-4)}`,
       dateReceived: today.slice(0, 10),
       receivedAt: today,
       quantity: creamReceipt.quantity,
