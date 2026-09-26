@@ -110,9 +110,10 @@ export default function ButterTab() {
   // Filter butter rounds
   const butterRounds = productionRounds.filter(r => r.type === 'Butter');
   const churningRounds = butterRounds.filter(round => !round.blendedPoolId);
+  const visibleChurningRounds = churningRounds.filter(round => round.creamSource === creamSourceTab);
   const getRoundDate = (round: typeof butterRounds[number]) => round.roundDate || round.startTime.slice(0, 10);
   const formatRoundDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString();
-  const groupedByDate = churningRounds.reduce((acc, round) => {
+  const groupedByDate = visibleChurningRounds.reduce((acc, round) => {
     const date = getRoundDate(round);
     if (!acc[date]) acc[date] = [];
     acc[date].push(round);
@@ -838,9 +839,9 @@ export default function ButterTab() {
           );
         })}
 
-        {churningRounds.length === 0 && (
+        {visibleChurningRounds.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <p className="text-slate-500">No butter rounds yet. Create a date-based round to begin.</p>
+            <p className="text-slate-500">No {creamSourceTab === 'internal' ? 'internal-cream' : 'purchased-cream'} butter rounds yet. Create a date-based round to begin.</p>
           </div>
         )}
       </div>}
