@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Plus, Package, CheckCircle2, Clock } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -62,6 +62,9 @@ interface CrumbingBatch {
     breadingAdajioKg: number;
   };
   recipeRecordedAt?: string;
+  recipeAutosavedAt?: string;
+  balanceRecordedAt?: string;
+  productionCompletedAt?: string;
   crumbingTeam?: string;
   fryingTeam?: string;
   fryTemperature?: number;
@@ -83,7 +86,6 @@ export default function CrumbingTab() {
   const [crumbingBatches, setCrumbingBatches] = useSupabaseState<CrumbingBatch[]>('vejoy_crumbingBatches', []);
 
   const [showNewBatchModal, setShowNewBatchModal] = useState(false);
-  const [showRecipeModal, setShowRecipeModal] = useState(false);
   const [showTrayModal, setShowTrayModal] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
@@ -114,6 +116,7 @@ export default function CrumbingTab() {
   const [recipeForm, setRecipeForm] = useState({
     sourceWeightKg: 0,
     balanceWeightKg: 0,
+    balanceRecorded: false,
     wastageKg: 0,
     traysCrumbed: 0,
     flavourMultiplier: 0,
@@ -149,18 +152,58 @@ export default function CrumbingTab() {
       showToast('error', 'Only the latest SPP batch can change the source balance');
       return;
     }
-    const sourceWeightKg = batch.sourceWeightKg || getSppAvailableWeight(productionRounds.find(round => round.id === batch.sourceBatchId) || productionRounds[0]);
+    const sourceRound = productionRounds.find(round => round.id === batch.sourceBatchId);
+    const sourceWeightKg = batch.sourceWeightKg || getSppAvailableWeight(sourceRound);
     setSelectedBatch(batch.id);
     setRecipeForm({
       sourceWeightKg,
       balanceWeightKg: batch.balanceWeightKg ?? sourceWeightKg,
+      balanceRecorded: batch.balanceWeightKg !== undefined,
       wastageKg: batch.wastageKg || 0,
       traysCrumbed: batch.traysCrumbed || 0,
       flavourMultiplier: batch.recipe?.flavourMultiplier || 0,
       batterMultiplier: batch.recipe?.batterMultiplier || 0,
       breadingMultiplier: batch.recipe?.breadingMultiplier || 0,
     });
-    setShowRecipeModal(true);
+  };
+
+  const buildRecipeDraftUpdates = (batch: CrumbingBatch, nextForm: typeof recipeForm): Partial<CrumbingBatch> => {
+    const sourceWeightKg = batch.sourceWeightKg || nextForm.sourceWeightKg;
+    const updates: Partial<CrumbingBatch> = {
+      status: 'crumbing',
+      sourceWeightKg,
+      traysCrumbed: nextForm.traysCrumbed,
+      traysRemaining: Math.max(0, nextForm.traysCrumbed - batch.traysFried),
+      wastageKg: Math.max(0, Number(nextForm.wastageKg) || 0),
+      recipe: {
+        flavourMultiplier: nextForm.flavourMultiplier,
+        batterMultiplier: nextForm.batterMultiplier,
+        breadingMultiplier: nextForm.breadingMultiplier,
+        flavourIyababKg: nextForm.flavourMultiplier * 0.8,
+        flavourPredustKg: nextForm.flavourMultiplier * 0.2,
+        batterIyababaKg: nextForm.batterMultiplier,
+        batterWaterL: nextForm.batterMultiplier * 2.5,
+        breadingAdajioKg: nextForm.breadingMultiplier,
+      },
+      recipeRecordedAt: new Date().toISOString(),
+      recipeAutosavedAt: new Date().toISOString(),
+    };
+    if (nextForm.balanceRecorded) {
+      const balanceWeightKg = Math.min(sourceWeightKg, Math.max(0, Number(nextForm.balanceWeightKg) || 0));
+      updates.balanceWeightKg = balanceWeightKg;
+      updates.weightCrumbedKg = Math.max(0, sourceWeightKg - balanceWeightKg);
+      updates.balanceRecordedAt = batch.balanceRecordedAt || new Date().toISOString();
+    }
+    return updates;
+  };
+
+  const updateRecipeDraft = (changes: Partial<typeof recipeForm>) => {
+    const nextForm = { ...recipeForm, ...changes };
+    setRecipeForm(nextForm);
+    if (!selectedBatch) return;
+    const batch = crumbingBatches.find(item => item.id === selectedBatch);
+    if (!batch || batch.type !== 'SPP') return;
+    updateCrumbingBatch(selectedBatch, buildRecipeDraftUpdates(batch, nextForm));
   };
 
   // Get available sources
@@ -263,7 +306,7 @@ export default function CrumbingTab() {
       createdAt: new Date().toISOString(),
     };
 
-    setCrumbingBatches([...crumbingBatches, newBatch]);
+    setCrumbingBatches(current => [...current, newBatch]);
     showToast('success', `Crumbing batch created: ${batchCode}`);
     setShowNewBatchModal(false);
     if (newBatchForm.type === 'SPP') {
@@ -271,25 +314,28 @@ export default function CrumbingTab() {
       setRecipeForm({
         sourceWeightKg: sourceWeightKg || 0,
         balanceWeightKg: sourceWeightKg || 0,
+        balanceRecorded: false,
         wastageKg: 0,
         traysCrumbed: 0,
         flavourMultiplier: 0,
         batterMultiplier: 0,
         breadingMultiplier: 0,
       });
-      setShowRecipeModal(true);
     }
     setNewBatchForm({ type: 'SPP', sourceBatchId: '', traysCrumbed: 0, crumbingTeam: '' });
   };
 
-  const handleSaveRecipe = () => {
+  const handleCompleteProduction = () => {
     if (!selectedBatch) return;
     const batch = crumbingBatches.find(item => item.id === selectedBatch);
     if (!batch || batch.type !== 'SPP') return;
     const sourceWeightKg = batch.sourceWeightKg || recipeForm.sourceWeightKg;
     const balanceWeightKg = Number(recipeForm.balanceWeightKg) || 0;
     const wastageKg = Number(recipeForm.wastageKg) || 0;
-    const weightCrumbedKg = sourceWeightKg - balanceWeightKg;
+    if (!recipeForm.balanceRecorded || batch.balanceWeightKg === undefined) {
+      showToast('error', 'Record the physically weighed balance paneer before completing production');
+      return;
+    }
     if (sourceWeightKg <= 0 || balanceWeightKg < 0 || balanceWeightKg > sourceWeightKg + 0.01) {
       showToast('error', 'Enter a balance weight from 0 up to the available source weight');
       return;
@@ -324,12 +370,18 @@ export default function CrumbingTab() {
         breadingAdajioKg: recipeForm.breadingMultiplier * 1,
       },
       recipeRecordedAt: new Date().toISOString(),
+      recipeAutosavedAt: new Date().toISOString(),
+      productionCompletedAt: new Date().toISOString(),
     });
-    setShowRecipeModal(false);
-    showToast('success', `Recipe saved · ${normalizedWeightCrumbedKg.toFixed(2)} kg crumbed · ${normalizedBalanceWeightKg.toFixed(2)} kg returned to source`);
+    showToast('success', `Production completed · ${normalizedWeightCrumbedKg.toFixed(2)} kg crumbed · ${normalizedBalanceWeightKg.toFixed(2)} kg returned to source`);
   };
 
   const handleFreeze = (batchId: string) => {
+    const batch = crumbingBatches.find(item => item.id === batchId);
+    if (batch?.type === 'SPP' && !batch.productionCompletedAt) {
+      showToast('error', 'Complete the SPP production details, including the balance paneer, first');
+      return;
+    }
     setCrumbingBatches(crumbingBatches.map(b => 
       b.id === batchId ? { ...b, status: 'frozen' } : b
     ));
@@ -424,29 +476,29 @@ export default function CrumbingTab() {
   const getActionButtons = (batch: CrumbingBatch) => {
     const buttons = [];
 
-    if (batch.type === 'SPP' && batch.status === 'scheduled') {
+    if (batch.type === 'SPP' && !batch.recipe) {
       buttons.push(
         <button
           key="recipe"
           onClick={() => openRecipeDetails(batch)}
           className="px-3 py-1.5 bg-pink-600 text-white rounded text-xs font-medium hover:bg-pink-700"
         >
-          Enter recipe details
+          Open recipe details
         </button>
       );
-    } else if (batch.type === 'SPP' && batch.status === 'crumbing') {
+    } else if (batch.type === 'SPP' && !batch.productionCompletedAt && batch.status !== 'handed_over') {
       buttons.push(
         <button
           key="recipe"
           onClick={() => openRecipeDetails(batch)}
           className="px-3 py-1.5 bg-pink-100 text-pink-700 rounded text-xs font-medium hover:bg-pink-200"
         >
-          Edit recipe
+          Continue recipe details
         </button>
       );
     }
 
-    if (batch.status === 'crumbing') {
+    if (batch.status === 'crumbing' && (batch.type !== 'SPP' || Boolean(batch.productionCompletedAt))) {
       buttons.push(
         <button
           key="freeze"
@@ -512,6 +564,77 @@ export default function CrumbingTab() {
   const jpBatches = crumbingBatches.filter(b => b.type === 'JP');
   const hcpBatches = crumbingBatches.filter(b => b.type === 'HCP');
 
+  const renderSppRecipeDetails = (batch: CrumbingBatch) => {
+    const sourceWeightKg = batch.sourceWeightKg || recipeForm.sourceWeightKg;
+    const weightCrumbedKg = Math.max(0, sourceWeightKg - recipeForm.balanceWeightKg);
+    const canComplete = recipeForm.balanceRecorded
+      && recipeForm.balanceWeightKg >= 0
+      && recipeForm.balanceWeightKg <= sourceWeightKg + 0.01
+      && recipeForm.traysCrumbed > 0
+      && recipeForm.wastageKg >= 0
+      && recipeForm.flavourMultiplier > 0
+      && recipeForm.batterMultiplier > 0
+      && recipeForm.breadingMultiplier > 0;
+
+    return (
+      <div className="rounded-xl border border-pink-200 bg-pink-50/50 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-bold text-pink-950">SPP recipe details · {batch.batchCode}</h4>
+            <p className="mt-1 text-xs text-pink-800">Source: {batch.sourceBatchCode} · {sourceWeightKg.toFixed(2)} kg available at the start of this batch.</p>
+          </div>
+          <div className="rounded-full bg-white px-3 py-1 text-[11px] font-medium text-emerald-700">
+            {batch.recipeAutosavedAt ? `Autosaved ${new Date(batch.recipeAutosavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Changes autosave'}
+          </div>
+        </div>
+
+        <p className="mt-3 text-xs text-slate-600">The form stays open under this batch so staff can leave the app and return without losing progress. Each coat has an independent +1 counter.</p>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-amber-900">Flavour coat</div>
+            <div className="mt-1 text-sm text-amber-950">800 g Iyabab + 200 g Predust</div>
+            <div className="mt-3 flex items-center justify-between gap-2"><span className="text-xs text-amber-800">× {recipeForm.flavourMultiplier}</span><button type="button" onClick={() => updateRecipeDraft({ flavourMultiplier: recipeForm.flavourMultiplier + 1 })} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">+1</button></div>
+            <div className="mt-2 text-xs text-amber-900">Total: {(recipeForm.flavourMultiplier * 0.8).toFixed(2)} kg Iyabab + {(recipeForm.flavourMultiplier * 0.2).toFixed(2)} kg Predust</div>
+          </div>
+
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-blue-900">Batter coat</div>
+            <div className="mt-1 text-sm text-blue-950">1 kg Iyababa + 2.5 L water</div>
+            <div className="mt-3 flex items-center justify-between gap-2"><span className="text-xs text-blue-800">× {recipeForm.batterMultiplier}</span><button type="button" onClick={() => updateRecipeDraft({ batterMultiplier: recipeForm.batterMultiplier + 1 })} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">+1</button></div>
+            <div className="mt-2 text-xs text-blue-900">Total: {recipeForm.batterMultiplier.toFixed(2)} kg Iyababa · {(recipeForm.batterMultiplier * 2.5).toFixed(2)} L water</div>
+          </div>
+
+          <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-purple-900">Breading coat</div>
+            <div className="mt-1 text-sm text-purple-950">1 kg Adajio</div>
+            <div className="mt-3 flex items-center justify-between gap-2"><span className="text-xs text-purple-800">× {recipeForm.breadingMultiplier}</span><button type="button" onClick={() => updateRecipeDraft({ breadingMultiplier: recipeForm.breadingMultiplier + 1 })} className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700">+1</button></div>
+            <div className="mt-2 text-xs text-purple-900">Total: {recipeForm.breadingMultiplier.toFixed(2)} kg Adajio</div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Balance paneer recorded (kg)</span><input type="number" min="0" step="0.01" value={recipeForm.balanceWeightKg} onChange={(event) => updateRecipeDraft({ balanceWeightKg: Number(event.target.value) || 0, balanceRecorded: true })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+            <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Wastage (kg)</span><input type="number" min="0" step="0.01" value={recipeForm.wastageKg} onChange={(event) => updateRecipeDraft({ wastageKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+            <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">No. of trays</span><input type="number" min="1" step="1" value={recipeForm.traysCrumbed} onChange={(event) => updateRecipeDraft({ traysCrumbed: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm"><span className="text-slate-600">Weight crumbed (auto)</span><strong className="text-emerald-700">{weightCrumbedKg.toFixed(2)} kg</strong></div>
+          <div className="mt-1 text-xs text-slate-500">Weight crumbed = source weight − recorded balance. Water is excluded from dry ingredient totals. The balance returns to the source pool for the next batch.</div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-pink-200 bg-white p-3">
+          <div className="text-xs text-slate-600">
+            {batch.productionCompletedAt ? <span className="font-semibold text-emerald-700">Production completed {new Date(batch.productionCompletedAt).toLocaleString()}</span> : <span>Complete only after the physical balance has been weighed and entered.</span>}
+          </div>
+          <button type="button" onClick={handleCompleteProduction} disabled={Boolean(batch.productionCompletedAt) || !canComplete} className="rounded-lg bg-pink-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pink-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+            {batch.productionCompletedAt ? 'Production complete' : 'Complete production'}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderBatchSection = (title: string, batches: CrumbingBatch[], type: CrumbingType) => {
     const sources = getAvailableSources(type);
 
@@ -560,7 +683,8 @@ export default function CrumbingTab() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {batches.map((batch) => (
-                  <tr key={batch.id} className="hover:bg-slate-50/50">
+                  <Fragment key={batch.id}>
+                  <tr className="hover:bg-slate-50/50">
                     <td className="px-4 py-3">
                       <div className="font-mono text-xs font-bold text-slate-900">{batch.batchCode}</div>
                     </td>
@@ -575,7 +699,7 @@ export default function CrumbingTab() {
                             <div className="font-medium text-slate-800">F {batch.recipe.flavourMultiplier} · B {batch.recipe.batterMultiplier} · A {batch.recipe.breadingMultiplier} additions</div>
                             <div>Crumbed: <span className="font-semibold text-slate-800">{(batch.weightCrumbedKg || 0).toFixed(2)} kg</span></div>
                             <div>Balance: <span className="font-semibold text-emerald-700">{(batch.balanceWeightKg || 0).toFixed(2)} kg</span> · Wastage: {(batch.wastageKg || 0).toFixed(2)} kg</div>
-                            {batch.status === 'crumbing' && <button onClick={() => openRecipeDetails(batch)} className="mt-1 rounded border border-pink-200 bg-pink-50 px-2 py-1 text-[11px] font-semibold text-pink-700 hover:bg-pink-100">Edit recipe</button>}
+                            {!batch.productionCompletedAt && <button onClick={() => openRecipeDetails(batch)} className="mt-1 rounded border border-pink-200 bg-pink-50 px-2 py-1 text-[11px] font-semibold text-pink-700 hover:bg-pink-100">Continue details</button>}
                           </div>
                         ) : <button onClick={() => openRecipeDetails(batch)} className="rounded border border-pink-200 bg-pink-50 px-2 py-1 text-[11px] font-semibold text-pink-700 hover:bg-pink-100">Recipe details required</button>
                       ) : '—'}
@@ -618,6 +742,14 @@ export default function CrumbingTab() {
                       </div>
                     </td>
                   </tr>
+                  {batch.type === 'SPP' && selectedBatch === batch.id && (
+                    <tr>
+                      <td colSpan={9} className="border-t border-pink-100 bg-pink-50/30 p-3">
+                        {renderSppRecipeDetails(batch)}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -698,7 +830,7 @@ export default function CrumbingTab() {
               min="0"
             />
           </div>}
-          {activeType === 'SPP' && <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-xs text-pink-900">After the batch is created, enter the recipe additions, physically weighed balance, wastage, and tray count on the next page.</div>}
+          {activeType === 'SPP' && <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-xs text-pink-900">After the batch is created, the recipe details open directly under the batch and autosave as they are entered.</div>}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Crumbing Team</label>
             <input
@@ -723,53 +855,6 @@ export default function CrumbingTab() {
               Cancel
             </button>
           </div>
-        </div>
-      </Modal>
-
-      {/* SPP recipe and source-balance page */}
-      <Modal isOpen={showRecipeModal} onClose={() => setShowRecipeModal(false)} title="SPP recipe and batch details">
-        <div className="space-y-4">
-          {selectedBatch && (() => {
-            const batch = crumbingBatches.find(item => item.id === selectedBatch);
-            return batch ? <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-xs text-pink-950"><div className="font-semibold">{batch.batchCode}</div><div className="mt-1">Source: {batch.sourceBatchCode} · Available source weight: <strong>{recipeForm.sourceWeightKg.toFixed(2)} kg</strong></div></div> : null;
-          })()}
-
-          <p className="text-xs text-slate-600">Each coat has its own counter because ingredients may finish at different times. The quantities below are calculated from the number of additions.</p>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-amber-900">Flavour coat</div>
-              <div className="mt-1 text-sm text-amber-950">800 g Iyabab + 200 g Predust</div>
-              <div className="mt-3 flex items-center justify-between gap-2"><span className="text-xs text-amber-800">× {recipeForm.flavourMultiplier}</span><button type="button" onClick={() => setRecipeForm(current => ({ ...current, flavourMultiplier: current.flavourMultiplier + 1 }))} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">+1</button></div>
-              <div className="mt-2 text-xs text-amber-900">Total: {(recipeForm.flavourMultiplier * 0.8).toFixed(2)} kg Iyabab + {(recipeForm.flavourMultiplier * 0.2).toFixed(2)} kg Predust</div>
-            </div>
-
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-blue-900">Batter coat</div>
-              <div className="mt-1 text-sm text-blue-950">1 kg Iyababa + 2.5 L water</div>
-              <div className="mt-3 flex items-center justify-between gap-2"><span className="text-xs text-blue-800">× {recipeForm.batterMultiplier}</span><button type="button" onClick={() => setRecipeForm(current => ({ ...current, batterMultiplier: current.batterMultiplier + 1 }))} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">+1</button></div>
-              <div className="mt-2 text-xs text-blue-900">Total: {(recipeForm.batterMultiplier * 1).toFixed(2)} kg Iyababa · {(recipeForm.batterMultiplier * 2.5).toFixed(2)} L water</div>
-            </div>
-
-            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-purple-900">Breading coat</div>
-              <div className="mt-1 text-sm text-purple-950">1 kg Adajio</div>
-              <div className="mt-3 flex items-center justify-between gap-2"><span className="text-xs text-purple-800">× {recipeForm.breadingMultiplier}</span><button type="button" onClick={() => setRecipeForm(current => ({ ...current, breadingMultiplier: current.breadingMultiplier + 1 }))} className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700">+1</button></div>
-              <div className="mt-2 text-xs text-purple-900">Total: {(recipeForm.breadingMultiplier * 1).toFixed(2)} kg Adajio</div>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Balance remaining (kg)</span><input type="number" min="0" step="0.01" value={recipeForm.balanceWeightKg} onChange={(event) => setRecipeForm(current => ({ ...current, balanceWeightKg: Number(event.target.value) || 0 }))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
-              <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Wastage (kg)</span><input type="number" min="0" step="0.01" value={recipeForm.wastageKg} onChange={(event) => setRecipeForm(current => ({ ...current, wastageKg: Number(event.target.value) || 0 }))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
-              <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">No. of trays</span><input type="number" min="1" step="1" value={recipeForm.traysCrumbed} onChange={(event) => setRecipeForm(current => ({ ...current, traysCrumbed: Number(event.target.value) || 0 }))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm"><span className="text-slate-600">Weight crumbed (auto)</span><strong className="text-emerald-700">{Math.max(0, recipeForm.sourceWeightKg - recipeForm.balanceWeightKg).toFixed(2)} kg</strong></div>
-            <div className="mt-1 text-xs text-slate-500">Water is displayed in the batter total but is excluded from the dry ingredient-weight calculation.</div>
-          </div>
-
-          <div className="flex gap-2 pt-2"><button type="button" onClick={handleSaveRecipe} className="flex-1 rounded-lg bg-pink-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-pink-700">Save SPP batch details</button><button type="button" onClick={() => setShowRecipeModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button></div>
         </div>
       </Modal>
 
