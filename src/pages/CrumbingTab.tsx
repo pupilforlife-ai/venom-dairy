@@ -342,6 +342,13 @@ export default function CrumbingTab() {
       return;
     }
 
+    const batch = crumbingBatches.find(item => item.id === selectedBatch);
+    if (!batch) return;
+    if (trayForm.traysFried > batch.traysRemaining) {
+      showToast('error', `Only ${batch.traysRemaining} tray${batch.traysRemaining === 1 ? '' : 's'} remain to fry`);
+      return;
+    }
+
     setCrumbingBatches(crumbingBatches.map(b => {
       if (b.id === selectedBatch) {
         return {
@@ -370,6 +377,11 @@ export default function CrumbingTab() {
 
     const batch = crumbingBatches.find(b => b.id === selectedBatch);
     if (!batch) return;
+    const unfriedPackedTrays = Math.max(0, batch.traysFried - batch.traysPacked);
+    if (packForm.traysPacked > unfriedPackedTrays) {
+      showToast('error', `Only ${unfriedPackedTrays} fried tray${unfriedPackedTrays === 1 ? '' : 's'} are available to pack`);
+      return;
+    }
     const definition = crumbingSkuByCode[packForm.sku];
     if (!definition || definition.crumbingType !== batch.type) {
       showToast('error', 'That SKU is not valid for this crumbing section');
@@ -380,10 +392,12 @@ export default function CrumbingTab() {
     setCrumbingBatches(crumbingBatches.map(b => {
       if (b.id === selectedBatch) {
         const existingPacked = b.packedSkus || [];
+        const nextTraysPacked = b.traysPacked + packForm.traysPacked;
+        const nextStatus = b.traysRemaining <= 0 && nextTraysPacked >= b.traysFried ? 'packed' : 'frying';
         return {
           ...b,
-          status: 'packed',
-          traysPacked: b.traysPacked + packForm.traysPacked,
+          status: nextStatus,
+          traysPacked: nextTraysPacked,
           packedSkus: [...existingPacked, {
             sku: packForm.sku,
             cases: packForm.cases,
@@ -442,7 +456,12 @@ export default function CrumbingTab() {
           Freeze
         </button>
       );
-    } else if (batch.status === 'frozen') {
+    }
+
+    const canFryMore = batch.traysRemaining > 0;
+    const canPack = batch.traysFried > batch.traysPacked;
+
+    if (batch.status === 'frozen' || ((batch.status === 'frying' || batch.status === 'packed') && canFryMore)) {
       buttons.push(
         <button
           key="fry"
@@ -452,10 +471,12 @@ export default function CrumbingTab() {
           }}
           className="px-3 py-1.5 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600"
         >
-          Fry Trays
+          {batch.status === 'frozen' ? 'Fry Trays' : 'Fry remaining'}
         </button>
       );
-    } else if (batch.status === 'frying') {
+    }
+
+    if ((batch.status === 'frying' || batch.status === 'packed') && canPack) {
       buttons.push(
         <button
           key="pack"
@@ -469,7 +490,9 @@ export default function CrumbingTab() {
           <Package className="w-3 h-3" /> Pack
         </button>
       );
-    } else if (batch.status === 'packed') {
+    }
+
+    if (batch.status === 'packed' && !canFryMore && !canPack) {
       buttons.push(
         <button
           key="handover"
