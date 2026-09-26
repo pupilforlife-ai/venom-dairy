@@ -278,6 +278,8 @@ export interface ProductionRound {
   // Amassi-specific fields
   amassiType?: 'BM' | 'SKM';
   amassiIncubationStartedAt?: string;
+  amassiPhBeforeFreezing?: number;
+  amassiFinalPh?: number;
   amassiPacked?: Array<{
     sku: 'AMASSI 1.8L' | 'AMASSI 2L';
     bottles: number;
