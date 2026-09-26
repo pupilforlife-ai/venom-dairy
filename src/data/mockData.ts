@@ -282,6 +282,8 @@ export interface ProductionRound {
   blendingExternalButterRoundId?: string;
   blendingInternalButterQuantity?: number;
   blendingExternalButterQuantity?: number;
+  butterPoolId?: string;
+  blendedPoolId?: string;
   packedButterWeight?: number; // kg taken from the common butter pool for packing
   
   // Ghee-specific fields

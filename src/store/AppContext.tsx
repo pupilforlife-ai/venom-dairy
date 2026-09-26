@@ -124,7 +124,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Production round actions
   const addProductionRound = (round: Omit<ProductionRound, 'id'>) => {
     const newRound = { ...round, id: `pr-${Date.now()}` };
-    setProductionRounds([...productionRounds, newRound]);
+    setProductionRounds(currentRounds => [...currentRounds, newRound]);
   };
 
   const createProductionRound = async (round: Omit<ProductionRound, 'id' | 'roundNumber'>) => {
