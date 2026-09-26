@@ -1163,7 +1163,7 @@ export default function ProductionBoard() {
                       <col style={{ width: '9rem' }} />
                       <col style={{ width: '10rem' }} />
                       <col style={{ width: '7rem' }} />
-                      <col style={{ width: '8rem' }} />
+                      <col style={{ width: '14rem' }} />
                       <col style={{ width: '16rem' }} />
                       <col style={{ width: '8rem' }} />
                       <col style={{ width: '16rem' }} />
@@ -1275,7 +1275,7 @@ export default function ProductionBoard() {
                         </tr>
                         <tr key={`${round.id}-pipeline`} className="border-t-2 border-b border-slate-200 bg-slate-50/80">
                           <td colSpan={11} className="px-2 py-2">
-                            <div className="grid min-w-[148rem] items-center" style={{ gridTemplateColumns: '9rem 8rem 7rem 10rem 16rem 8rem 16rem 12rem 15rem 18rem 29rem' }}>
+                            <div className="grid min-w-[154rem] items-center" style={{ gridTemplateColumns: '9rem 10rem 7rem 14rem 16rem 8rem 16rem 12rem 15rem 18rem 29rem' }}>
                               <span className="px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pipeline</span>
                               <div className="col-span-4 px-2"><StatusPipeline currentStatus={round.status} /></div>
                               <span className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span>
