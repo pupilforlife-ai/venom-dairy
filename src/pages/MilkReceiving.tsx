@@ -3,6 +3,7 @@ import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
+import { milkStorageVessels } from '../data/mockData';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, addMilkLot, updateMilkLot, addCreamLot } = useApp();
@@ -116,29 +117,44 @@ export default function MilkReceiving() {
   };
 
   const getAllocations = (lot: typeof milkLots[number]) => {
-    const fixedAllocations = [
-      { destination: 'Silo (10,000L)', capacity: 10000 },
-      { destination: 'BMC #1 (3,000L)', capacity: 3000 },
-      { destination: 'BMC #2 (3,000L)', capacity: 3000 },
-      { destination: 'Holding Tank (2,500L)', capacity: 2500 },
-      { destination: 'Direct to Production', capacity: 2000 },
-    ];
-    let remaining = Math.max(0, lot.litresRemaining);
-    const allocations: { destination: string; litres: number }[] = [];
-    fixedAllocations.forEach(({ destination, capacity }) => {
-      const litres = Math.min(capacity, remaining);
-      if (litres > 0) allocations.push({ destination, litres });
-      remaining -= litres;
+    let receiptRemainder = Math.max(0, lot.litresReceived);
+    const allocations = milkStorageVessels.map((vessel) => {
+      const litres = vessel.capacity === null ? receiptRemainder : Math.min(vessel.capacity, receiptRemainder);
+      receiptRemainder = Math.max(0, receiptRemainder - litres);
+      return { ...vessel, litres };
     });
-    for (let index = 1; index <= 10 && remaining > 0; index += 1) {
-      const litres = Math.min(1000, remaining);
-      allocations.push({ destination: `IBC #${index} (1,000L)`, litres });
-      remaining -= litres;
-    }
-    if (remaining > 0) {
-      allocations.push({ destination: 'Auxiliary storage (cans / buckets)', litres: remaining });
-    }
-    return allocations;
+
+    // New rounds identify their source vessel. Use planned input until the
+    // round has an actual input, then use the actual value.
+    const sourceDraws = new Map<string, number>();
+    productionRounds
+      .filter((round) => round.milkLotId === lot.id && round.sourceVessel)
+      .forEach((round) => {
+        const draw = round.actualInput > 0 ? round.actualInput : round.plannedInput;
+        sourceDraws.set(round.sourceVessel!, (sourceDraws.get(round.sourceVessel!) || 0) + Math.max(0, draw));
+      });
+    allocations.forEach((allocation) => {
+      const draw = sourceDraws.get(allocation.id) || 0;
+      allocation.litres = Math.max(0, allocation.litres - draw);
+    });
+
+    // Historical rounds do not have a vessel recorded. Reconcile that legacy
+    // drawdown against the receiving fill order so the displayed quantities
+    // still add up to the lot's current remaining figure.
+    const knownDraw = [...sourceDraws.values()].reduce((sum, draw) => sum + draw, 0);
+    let legacyDraw = Math.max(0, lot.litresReceived - lot.litresRemaining - knownDraw);
+    allocations.forEach((allocation) => {
+      if (legacyDraw <= 0) return;
+      const draw = Math.min(allocation.litres, legacyDraw);
+      allocation.litres -= draw;
+      legacyDraw -= draw;
+    });
+
+    const displayedTotal = allocations.reduce((sum, allocation) => sum + allocation.litres, 0);
+    const reconciliationDifference = Math.max(0, lot.litresRemaining - displayedTotal);
+    const auxiliary = allocations.find((allocation) => allocation.id === 'auxiliary');
+    if (auxiliary) auxiliary.litres += reconciliationDifference;
+    return allocations.filter((allocation) => allocation.litres > 0 || sourceDraws.has(allocation.id));
   };
 
   const packedSkuSummary = useMemo(() => {
@@ -566,15 +582,19 @@ export default function MilkReceiving() {
                                 </div>
                               </div>
                               <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
-                                <h3 className="text-sm font-bold text-slate-900 mb-3">Vessel / location allocation</h3>
+                                <h3 className="text-sm font-bold text-slate-900 mb-1">Vessel / location allocation</h3>
+                                <p className="text-xs text-slate-500 mb-3">Bars show quantity against each vessel’s capacity. New rounds reduce the selected vessel; older rounds are reconciled as legacy drawdown.</p>
                                 <div className="space-y-2">
-                                  {getAllocations(lot).length > 0 ? getAllocations(lot).map((allocation) => (
-                                    <div key={allocation.destination} className="flex items-center gap-2 text-xs">
-                                      <span className="w-36 shrink-0 text-slate-600">{allocation.destination}</span>
-                                      <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${lot.litresReceived > 0 ? (allocation.litres / lot.litresReceived) * 100 : 0}%` }} /></div>
-                                      <span className="w-16 text-right font-semibold text-slate-800">{allocation.litres.toLocaleString()} L</span>
-                                    </div>
-                                  )) : <p className="text-xs text-slate-400">No remaining milk to allocate</p>}
+                                  {getAllocations(lot).length > 0 ? getAllocations(lot).map((allocation) => {
+                                    const fillPercent = allocation.capacity ? Math.min(100, (allocation.litres / allocation.capacity) * 100) : 100;
+                                    return (
+                                      <div key={allocation.id} className="flex items-center gap-2 text-xs">
+                                        <span className="w-40 shrink-0 text-slate-600">{allocation.label}</span>
+                                        <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${fillPercent}%` }} /></div>
+                                        <span className="w-28 text-right font-semibold text-slate-800">{allocation.litres.toLocaleString()} L{allocation.capacity ? ` / ${allocation.capacity.toLocaleString()} L` : ''}</span>
+                                      </div>
+                                    );
+                                  }) : <p className="text-xs text-slate-400">No remaining milk to allocate</p>}
                                 </div>
                               </div>
                             </div>

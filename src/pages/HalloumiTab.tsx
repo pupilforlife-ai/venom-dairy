@@ -3,6 +3,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { Plus, Clock, Package, Scissors, CheckCircle2, Thermometer, Beaker, ShieldAlert } from 'lucide-react';
+import { milkStorageVessels } from '../data/mockData';
 
 // Halloumi-specific status flow
 const halloumiStatusFlow = [
@@ -183,6 +184,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
     shiftId: '',
     roundNumber: 1,
     plannedInput: 240,
+    sourceVessel: '',
     team: '',
   });
 
@@ -193,6 +195,10 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
     }
     const milkLot = milkLots.find(m => m.id === newShift.milkLotId);
     if (!milkLot) return;
+    if (milkLot.productionClosed) {
+      showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
+      return;
+    }
 
     addProductionShift({
       milkLotId: newShift.milkLotId,
@@ -208,12 +214,17 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
   };
 
   const handleCreateRound = () => {
-    if (!newRound.shiftId) {
-      showToast('error', 'Please select a shift');
+    if (!newRound.shiftId || !newRound.sourceVessel) {
+      showToast('error', 'Please select a shift and milk vessel');
       return;
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
     if (!shift) return;
+    const milkLot = milkLots.find(m => m.id === shift.milkLotId);
+    if (milkLot?.productionClosed) {
+      showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
+      return;
+    }
 
     addProductionRound({
       milkLotId: shift.milkLotId,
@@ -226,13 +237,14 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
       plannedInput: newRound.plannedInput,
       actualInput: newRound.plannedInput,
+      sourceVessel: newRound.sourceVessel,
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
     });
     showToast('success', `Halloumi round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
     setShowNewRoundModal(false);
-    setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 240, team: '' });
+    setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 240, sourceVessel: '', team: '' });
   };
 
   const handleStatusChange = (roundId: string, newStatus: HalloumiStatus) => {
@@ -655,6 +667,14 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Input Quantity (L)</label>
             <input type="number" value={newRound.plannedInput} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk taken from</label>
+            <select value={newRound.sourceVessel} onChange={(e) => setNewRound({ ...newRound, sourceVessel: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+              <option value="">Select vessel</option>
+              {milkStorageVessels.map((vessel) => <option key={vessel.id} value={vessel.id}>{vessel.label}{vessel.capacity ? ` (${vessel.capacity.toLocaleString()} L)` : ''}</option>)}
+            </select>
+            <p className="text-xs text-slate-500 mt-1">This is recorded for milk-lot vessel reconciliation.</p>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (optional)</label>

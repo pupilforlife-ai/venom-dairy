@@ -85,6 +85,28 @@ export interface MilkLot {
   creamPool?: CreamPool; // Pooled cream from all C/S rounds in this milk lot
 }
 
+export interface MilkStorageVessel {
+  id: string;
+  label: string;
+  capacity: number | null;
+}
+
+// The order is the receiving fill order used for the estimated opening
+// allocation. Future rounds record the vessel they actually draw from.
+export const milkStorageVessels: MilkStorageVessel[] = [
+  { id: 'silo', label: 'Silo', capacity: 10000 },
+  { id: 'bmc-1', label: 'BMC #1', capacity: 3000 },
+  { id: 'bmc-2', label: 'BMC #2', capacity: 3000 },
+  { id: 'holding-tank', label: 'Holding Tank', capacity: 2500 },
+  { id: 'direct-production', label: 'Direct to Production', capacity: 2000 },
+  ...Array.from({ length: 10 }, (_, index) => ({
+    id: `ibc-${index + 1}`,
+    label: `IBC #${index + 1}`,
+    capacity: 1000,
+  })),
+  { id: 'auxiliary', label: 'Auxiliary storage (cans / buckets)', capacity: null },
+];
+
 export interface ProductionShift {
   id: string;
   milkLotId: string;
@@ -110,6 +132,7 @@ export interface ProductionRound {
   team: string[];
   plannedInput: number; // litres
   actualInput: number; // litres
+  sourceVessel?: string;
   outputWeight: number; // kg gross manufactured output
   startTime: string;
   completedAt?: string;

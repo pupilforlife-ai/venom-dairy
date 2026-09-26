@@ -19,7 +19,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { statusFlow, statusLabels, statusColors } from '../data/mockData';
+import { milkStorageVessels, statusFlow, statusLabels, statusColors } from '../data/mockData';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import HalloumiTab from './HalloumiTab';
 import ButterTab from './ButterTab';
@@ -127,6 +127,7 @@ export default function ProductionBoard() {
     roundNumber: 1,
     type: 'D' as const,
     plannedInput: 500,
+    sourceVessel: '',
     team: '',
   });
 
@@ -661,14 +662,15 @@ export default function ProductionBoard() {
       roundNumber: existingRoundsInShift + 1,
       type: 'D',
       plannedInput: 500,
+      sourceVessel: '',
       team: '',
     });
     setShowNewRoundModal(true);
   };
 
   const handleCreateRound = () => {
-    if (!newRound.shiftId) {
-      showToast('error', 'Please select a shift');
+    if (!newRound.shiftId || !newRound.sourceVessel) {
+      showToast('error', 'Please select a shift and milk vessel');
       return;
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
@@ -689,6 +691,7 @@ export default function ProductionBoard() {
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
       plannedInput: newRound.plannedInput,
       actualInput: 0,
+      sourceVessel: newRound.sourceVessel,
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
@@ -1748,6 +1751,14 @@ export default function ProductionBoard() {
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Planned Input (L)</label>
             <input type="number" value={newRound.plannedInput} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk taken from</label>
+            <select value={newRound.sourceVessel} onChange={(e) => setNewRound({ ...newRound, sourceVessel: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+              <option value="">Select vessel</option>
+              {milkStorageVessels.map((vessel) => <option key={vessel.id} value={vessel.id}>{vessel.label}{vessel.capacity ? ` (${vessel.capacity.toLocaleString()} L)` : ''}</option>)}
+            </select>
+            <p className="text-xs text-slate-500 mt-1">This is recorded for milk-lot vessel reconciliation.</p>
           </div>
           <div className="flex gap-2 pt-2">
             <button onClick={handleCreateRound} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Create Round</button>
