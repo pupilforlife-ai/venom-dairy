@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Clock, Package, Plus, Thermometer } from 'lucide-react';
+import { Clock, Plus, Thermometer } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
@@ -209,6 +209,10 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
       showToast('error', 'Record pH before freezing before moving this round to Blast Freezing');
       return;
     }
+    if (nextStage === 'incubation' && (!round.amassiPacked || round.amassiPacked.length === 0)) {
+      showToast('error', 'Record the bottle SKU and bottle count before starting incubation');
+      return;
+    }
     if (nextStage === 'stored_in_chiller' && (round.amassiPhBeforeFreezing === undefined || round.amassiFinalPh === undefined)) {
       showToast('error', 'Record pH before freezing and final pH before storing this round in the chiller');
       return;
@@ -265,30 +269,33 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
     if (stage === 'heating') return <button onClick={() => advance(round, 'cooling')} className="rounded bg-cyan-500 px-2 py-1 text-xs font-medium text-white">Start Cooling</button>;
     if (stage === 'cooling') return <button onClick={() => advance(round, 'culture_added')} className="rounded bg-purple-500 px-2 py-1 text-xs font-medium text-white">Add Culture</button>;
     if (stage === 'culture_added') return <button onClick={() => advance(round, 'bottling')} className="rounded bg-pink-500 px-2 py-1 text-xs font-medium text-white">Start Bottling</button>;
-    if (stage === 'bottling') return <button onClick={() => advance(round, 'incubation')} className="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white">Incubate 9 Hours</button>;
+    if (stage === 'bottling') return <button onClick={() => { setSelectedRound(round.id); setPackSku('AMASSI 1.8L'); setPackBottles(0); setShowPackModal(true); }} className="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white">Record Bottles & Incubate</button>;
     if (stage === 'incubation') {
       const remaining = timers[round.id] ?? INCUBATION_SECONDS;
       return <div className="flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs font-mono font-bold text-amber-800"><Clock className="h-3 w-3" />{formatTime(remaining)}</span>{remaining === 0 && <button onClick={() => openPhModal(round.id, 'before_freezing')} className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white">Record pH & Blast Freeze</button>}</div>;
     }
     if (stage === 'blast_freezing') return <button onClick={() => openPhModal(round.id, 'final')} className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white">Record Final pH & Store</button>;
-    if (stage === 'stored_in_chiller') return <button onClick={() => { setSelectedRound(round.id); setPackBottles(0); setShowPackModal(true); }} className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white"><Package className="h-3 w-3" />Pack bottles</button>;
     return null;
   };
 
-  const handlePack = () => {
+  const handleRecordBottlesAndIncubate = () => {
     if (!selectedRound || packBottles <= 0) {
       showToast('error', 'Enter a valid number of bottles');
       return;
     }
     const round = amassiRounds.find(item => item.id === selectedRound);
     if (!round) return;
+    if (round.status !== 'bottling') {
+      showToast('error', 'Bottle quantity must be recorded during Bottling, immediately before incubation');
+      return;
+    }
     const existing = round.amassiPacked || [];
     const index = existing.findIndex(item => item.sku === packSku);
     const packed = index >= 0
       ? existing.map((item, itemIndex) => itemIndex === index ? { ...item, bottles: item.bottles + packBottles } : item)
       : [...existing, { sku: packSku, bottles: packBottles }];
-    updateProductionRound(round.id, { amassiPacked: packed });
-    showToast('success', `Packed ${packBottles} bottles as ${packSku}`);
+    updateProductionRound(round.id, { amassiPacked: packed, status: 'incubation', amassiIncubationStartedAt: new Date().toISOString() });
+    showToast('success', `Recorded ${packBottles} bottles as ${packSku} · 9-hour incubation started`);
     setShowPackModal(false);
     setPackBottles(0);
   };
@@ -399,7 +406,7 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
                         <td className="min-w-[370px] px-3 py-3"><div className="flex flex-wrap items-center gap-2">{canForceStage ? <select value={round.status} onChange={event => handleStageChange(round.id, event.target.value as AmassiStage)} className="w-48 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700">{stageOptions.map(stage => <option key={stage} value={stage}>{stageLabels[stage]}</option>)}</select> : <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold text-white ${stageColors[round.status as AmassiStage] || 'bg-slate-400'}`}>{stageLabels[round.status as AmassiStage] || round.status}</span>}{round.status === 'incubation' && <span className="text-xs text-slate-500">at 27°C</span>}{getAction(round)}</div></td>
                         <td className="px-3 py-3"><span className={`inline-flex rounded-lg border px-2 py-1 font-semibold ${round.amassiPhBeforeFreezing !== undefined ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>{round.amassiPhBeforeFreezing !== undefined ? round.amassiPhBeforeFreezing.toFixed(2) : '—'}</span></td>
                         <td className="px-3 py-3"><span className={`inline-flex rounded-lg border px-2 py-1 font-semibold ${round.amassiFinalPh !== undefined ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>{round.amassiFinalPh !== undefined ? round.amassiFinalPh.toFixed(2) : '—'}</span></td>
-                        <td className="min-w-[260px] px-3 py-3"><div className="space-y-1">{packed.length > 0 ? packed.map(item => <div key={item.sku} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">{item.sku}: {item.bottles} bottles</div>) : <span className="text-slate-400">—</span>}{round.status === 'stored_in_chiller' && <div><button onClick={() => { setSelectedRound(round.id); setPackBottles(0); setShowPackModal(true); }} className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700"><Package className="h-3 w-3" />Pack</button></div>}</div></td>
+                        <td className="min-w-[260px] px-3 py-3"><div className="space-y-1">{packed.length > 0 ? packed.map(item => <div key={item.sku} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">{item.sku}: {item.bottles} bottles</div>) : <span className="text-slate-400">—</span>}</div></td>
                       </tr>;
                     })}
                   </tbody>
@@ -419,8 +426,8 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
         <div className="space-y-4"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Shift</label><select value={newRound.shiftId} onChange={event => { const shiftId = event.target.value; const count = amassiRounds.filter(round => round.shiftId === shiftId).length; setNewRound({ ...newRound, shiftId, roundNumber: count + 1 }); }} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select shift</option>{amassiShifts.map(shift => <option key={shift.id} value={shift.id}>Shift {shift.shiftNumber} · {shift.milkLotCode}</option>)}</select></div><div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk quantity (L)</label><input type="number" min="0" value={newRound.plannedInput} onChange={event => setNewRound({ ...newRound, plannedInput: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk temp (°C)</label><input type="number" step="0.1" value={newRound.milkTemperature} onChange={event => setNewRound({ ...newRound, milkTemperature: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Type</label><select value={newRound.amassiType} onChange={event => setNewRound({ ...newRound, amassiType: event.target.value as AmassiType })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="BM">BM</option><option value="SKM">SKM</option></select></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk taken from</label><select value={newRound.sourceVessel} onChange={event => setNewRound({ ...newRound, sourceVessel: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select vessel</option>{milkStorageVessels.map(vessel => <option key={vessel.id} value={vessel.id}>{vessel.label}{vessel.capacity ? ` (${vessel.capacity.toLocaleString()} L)` : ''}</option>)}</select></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Team (optional)</label><input value={newRound.team} onChange={event => setNewRound({ ...newRound, team: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div><div className="flex gap-2"><button onClick={handleCreateRound} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white">Create Round</button><button onClick={() => setShowNewRoundModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700">Cancel</button></div></div>
       </Modal>
 
-      <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title="Pack Amassi bottles">
-        <div className="space-y-4"><p className="text-xs text-slate-500">Select the final SKU and record the number of bottles packed.</p><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Packed into</label><select value={packSku} onChange={event => setPackSku(event.target.value as AmassiSku)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="AMASSI 1.8L">AMASSI 1.8L</option><option value="AMASSI 2L">AMASSI 2L</option></select></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Quantity in bottles</label><input type="number" min="1" value={packBottles} onChange={event => setPackBottles(Number(event.target.value) || 0)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div><div className="flex gap-2"><button onClick={handlePack} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white">Save packing</button><button onClick={() => setShowPackModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700">Cancel</button></div></div>
+      <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title="Record bottles before incubation">
+        <div className="space-y-4"><p className="text-xs text-slate-500">Record the final bottle SKU and quantity now, immediately before incubation. These bottle details remain unchanged through blast freezing and chiller storage.</p><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Packed into</label><select value={packSku} onChange={event => setPackSku(event.target.value as AmassiSku)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="AMASSI 1.8L">AMASSI 1.8L</option><option value="AMASSI 2L">AMASSI 2L</option></select></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Quantity in bottles</label><input type="number" min="1" value={packBottles} onChange={event => setPackBottles(Number(event.target.value) || 0)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div><div className="flex gap-2"><button onClick={handleRecordBottlesAndIncubate} className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium text-white">Save bottles & start incubation</button><button onClick={() => setShowPackModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700">Cancel</button></div></div>
       </Modal>
 
       <Modal isOpen={showCreamModal} onClose={() => setShowCreamModal(false)} title="Record Cream Recovery (Amassi)">
