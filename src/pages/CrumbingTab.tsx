@@ -770,6 +770,12 @@ export default function CrumbingTab() {
     );
   };
 
+  const productTabs: Array<{ type: CrumbingType; label: string; icon: string; batches: CrumbingBatch[] }> = [
+    { type: 'SPP', label: 'SPP', icon: '🌶️', batches: sppBatches },
+    { type: 'JP', label: 'JP', icon: '🌶️', batches: jpBatches },
+    { type: 'HCP', label: 'HCP', icon: '🧀', batches: hcpBatches },
+  ];
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -795,10 +801,35 @@ export default function CrumbingTab() {
         </div>
       </div>
 
-      {/* Three Sections */}
-      {renderBatchSection('SPP - Spicy Paneer Poppers', sppBatches, 'SPP')}
-      {renderBatchSection('JP - Jalapeño Poppers', jpBatches, 'JP')}
-      {renderBatchSection('HCP - Halloumi Cheese Poppers', hcpBatches, 'HCP')}
+      {/* Product tabs keep each crumbing workflow focused, especially on small screens. */}
+      <div className="rounded-xl border border-slate-200 bg-white p-2">
+        <div className="grid grid-cols-3 gap-2" role="tablist" aria-label="Crumbing product">
+          {productTabs.map(tab => {
+            const isActive = activeType === tab.type;
+            const openCount = tab.batches.filter(batch => batch.status !== 'handed_over').length;
+            const needsAttention = tab.batches.some(batch => batch.status !== 'handed_over');
+            return (
+              <button
+                key={tab.type}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setActiveType(tab.type)}
+                className={`flex items-center justify-center gap-2 rounded-lg px-3 py-3 text-sm font-semibold transition-colors ${isActive ? 'bg-pink-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+                <span className={`rounded-full px-1.5 py-0.5 text-[11px] ${isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'}`}>{openCount}</span>
+                {needsAttention && <span className={`h-2 w-2 rounded-full ${isActive ? 'bg-amber-200' : 'bg-amber-500'}`} aria-label="Needs attention" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeType === 'SPP' && renderBatchSection('SPP - Spicy Paneer Poppers', sppBatches, 'SPP')}
+      {activeType === 'JP' && renderBatchSection('JP - Jalapeño Poppers', jpBatches, 'JP')}
+      {activeType === 'HCP' && renderBatchSection('HCP - Halloumi Cheese Poppers', hcpBatches, 'HCP')}
 
       {/* New Batch Modal */}
       <Modal isOpen={showNewBatchModal} onClose={() => setShowNewBatchModal(false)} title={`Create New ${activeType} Batch`}>
