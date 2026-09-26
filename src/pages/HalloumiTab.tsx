@@ -609,7 +609,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
                         <tr key={round.id} className="hover:bg-slate-50/50">
                           <td className="px-4 py-3">
                             <div className="font-mono text-xs font-bold text-slate-900">
-                              {round.batchCode || getHalloumiBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}
+                              HAL S{round.shiftNumber}/R{round.roundNumber}
                             </div>
                             <div className="text-xs text-slate-500">{round.plannedInput}L input</div>
                           </td>
@@ -771,7 +771,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
             <div className="bg-slate-50 rounded-lg p-3">
               <p className="text-xs text-slate-500">Batch ID will be:</p>
               <p className="font-mono text-sm font-bold text-slate-900 mt-1">
-                {productionShifts.find(s => s.id === newRound.shiftId)?.milkLotCode}/S{productionShifts.find(s => s.id === newRound.shiftId)?.shiftNumber}/R{newRound.roundNumber}/Halloumi
+                HAL S{productionShifts.find(s => s.id === newRound.shiftId)?.shiftNumber}/R{newRound.roundNumber}
               </p>
               <p className="text-xs text-slate-500 mt-1">Input: {newRound.plannedInput}L milk</p>
             </div>

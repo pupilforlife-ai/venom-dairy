@@ -28,6 +28,11 @@ import CrumbingTab from './CrumbingTab';
 
 const emptyPackForm = { sku: '', cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0, reason: '' };
 
+function roundDisplayCode(round: { type: string; shiftNumber: number; roundNumber: number }) {
+  const prefix = round.type === 'Halloumi' ? 'HAL' : 'PAN';
+  return `${prefix} S${round.shiftNumber}/R${round.roundNumber}`;
+}
+
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
   const currentIndex = statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
   return (
@@ -720,7 +725,7 @@ export default function ProductionBoard() {
       locked: false,
     }).then((createdRound) => {
       if (createdRound) {
-        showToast('success', `Round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${createdRound.roundNumber}/${createdRound.type}`);
+        showToast('success', `Round created: ${roundDisplayCode(createdRound)}`);
         setShowNewRoundModal(false);
       } else showToast('error', 'The server could not create this round');
     });
@@ -735,7 +740,7 @@ export default function ProductionBoard() {
     if (!canForceStage) return;
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.status === nextStatus) return;
-    if (!window.confirm(`Set ${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber} to ${statusLabels[nextStatus] || nextStatus}?`)) return;
+    if (!window.confirm(`Set ${roundDisplayCode(round)} to ${statusLabels[nextStatus] || nextStatus}?`)) return;
     const now = new Date().toISOString();
     const stageUpdates: any = { status: nextStatus, locked: nextStatus === 'handed_over' };
     if (nextStatus === 'pressing') stageUpdates.pressingStartedAt = now;
@@ -1184,7 +1189,7 @@ export default function ProductionBoard() {
                               className="inline-flex rounded-lg border border-slate-200 bg-white px-2 py-1 font-mono text-sm font-bold text-slate-900 hover:border-indigo-300 hover:text-indigo-600 transition-colors cursor-pointer"
                               title="Click to view round history"
                             >
-                              S{round.shiftNumber}/R{round.roundNumber}
+                              {roundDisplayCode(round)}
                             </button>
                             <button onClick={() => { setHistoryRoundId(round.id); setShowHistoryModal(true); }} className="mt-1 block text-xs font-semibold text-indigo-600 hover:text-indigo-800">History</button>
                             {round.locked && (
@@ -1272,7 +1277,7 @@ export default function ProductionBoard() {
                               <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                                 <div className="flex items-center justify-between gap-3 mb-3">
                                   <div>
-                                    <div className="text-sm font-semibold text-slate-800">S{round.shiftNumber}/R{round.roundNumber} block weights</div>
+                                    <div className="text-sm font-semibold text-slate-800">{roundDisplayCode(round)} block weights</div>
                                     <div className="text-xs text-slate-500">Review the recorded weight of every block. Owner/admin corrections remain available.</div>
                                   </div>
                                   {canForceStage && <button onClick={() => openBlockWeights(round.id)} className="px-2.5 py-1.5 rounded border border-indigo-200 text-indigo-700 text-xs font-medium hover:bg-indigo-50">Correct weights</button>}
@@ -1393,7 +1398,7 @@ export default function ProductionBoard() {
           const round = productionRounds.find(item => item.id === blockWeightsRoundId);
           const total = blockWeightsDraft.reduce((sum, weight) => sum + weight, 0);
           return <div className="space-y-4">
-            <p className="text-sm text-slate-600">{round?.milkLotCode}/S{round?.shiftNumber}/R{round?.roundNumber} · {round?.type}</p>
+            {round && <p className="text-sm text-slate-600">{roundDisplayCode(round)} · Milk lot {round.milkLotCode}</p>}
             {round?.storedBlockWeights?.length && round?.status !== 'clingwrapped' && <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 text-xs text-pink-900">Stored before final cutting: {round.storedBlockWeights.length} large blocks · {round.storedOutputWeight?.toFixed(2)} kg · by {round.storedCutBy || '—'}</div>}
             <div className="space-y-2">{blockWeightsDraft.map((weight, index) => <label key={index} className="flex items-center gap-3 text-sm"><span className="w-20">Block {index + 1}</span><input type="number" min="0" step="0.01" value={weight} onChange={(e) => { if (!canForceStage) return; const next = [...blockWeightsDraft]; next[index] = parseFloat(e.target.value) || 0; setBlockWeightsDraft(next); }} disabled={!canForceStage} className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50" /><span>kg</span></label>)}</div>
             <div className="bg-slate-50 rounded-lg p-3 text-sm font-medium">Total recorded: {total.toFixed(2)} kg{round?.sppRecordedWeight !== undefined && <div className="text-pink-600 mt-1">SPP: {round.sppRecordedWeight.toFixed(2)} kg · Balance: {Math.max(0, total - round.sppRecordedWeight).toFixed(2)} kg</div>}</div>
@@ -1724,7 +1729,7 @@ export default function ProductionBoard() {
           return (
             <div className="space-y-3">
               <div className="bg-slate-50 rounded-lg p-3 mb-4">
-                <p className="text-sm font-medium text-slate-900">S{round.shiftNumber}/R{round.roundNumber} • {round.type}</p>
+                <p className="text-sm font-medium text-slate-900">{roundDisplayCode(round)} • {round.type}</p>
                 <p className="text-xs text-slate-500 mt-1">Team: {round.team.join(', ')}</p>
               </div>
               <div className="space-y-2">
