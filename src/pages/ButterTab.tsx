@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Clock, Package, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Plus, Package, CheckCircle2 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
@@ -81,7 +81,10 @@ export default function ButterTab() {
 
   const [blendingForm, setBlendingForm] = useState({
     butterQuantity: 16.5,
-    replacerQuantity: 5,
+    internalCreamLotId: '',
+    externalCreamLotId: '',
+    internalCreamQuantity: 0,
+    externalCreamQuantity: 0,
     isSalted: false,
   });
 
@@ -112,6 +115,18 @@ export default function ButterTab() {
     ...creamLots,
     ...milkLots.flatMap(lot => lot.creamLots || []),
   ];
+
+  // Once butter output is recorded, the row is intentionally passive. These
+  // two subsections are the controlled hand-off points for blending and
+  // packing, so staff can work from the common pools without a wall of row
+  // actions.
+  const blendingCandidates = butterRounds.filter(round =>
+    ['churned', 'packed_as_pubb'].includes(round.status) && (round.remainingBalance || 0) > 0,
+  );
+  const packingCandidates = butterRounds.filter(round =>
+    ['churned', 'packed_as_pubb', 'pubbb_pool', 'psbbb_pool', 'bb05_pool'].includes(round.status)
+      && (round.remainingBalance || 0) > 0,
+  );
 
   // Handlers
   const handleCreateShift = () => {
@@ -276,12 +291,15 @@ export default function ButterTab() {
     setOutputForm({ butterOutput: 0, buttermilkOutput: 0 });
   };
 
-  const handleSendToBlending = () => {
-    if (!selectedRound) return;
-    
-    updateProductionRound(selectedRound, {
-      status: 'blending',
-      destination: 'blending',
+  const openBlending = (round: typeof butterRounds[number]) => {
+    setSelectedRound(round.id);
+    setBlendingForm({
+      butterQuantity: round.remainingBalance || round.butterOutput || 0,
+      internalCreamLotId: '',
+      externalCreamLotId: '',
+      internalCreamQuantity: 0,
+      externalCreamQuantity: 0,
+      isSalted: false,
     });
     setShowBlendingModal(true);
   };
@@ -295,6 +313,38 @@ export default function ButterTab() {
     const round = butterRounds.find(r => r.id === selectedRound);
     if (!round) return;
 
+    if (!['churned', 'packed_as_pubb'].includes(round.status)) {
+      showToast('error', 'Only unallocated butter output can be sent for blending');
+      return;
+    }
+    if (round.remainingBalance !== undefined && blendingForm.butterQuantity > round.remainingBalance) {
+      showToast('error', `Only ${round.remainingBalance.toFixed(2)} kg butter remains available from this output`);
+      return;
+    }
+
+    const internalQuantity = blendingForm.internalCreamQuantity || 0;
+    const externalQuantity = blendingForm.externalCreamQuantity || 0;
+    if (internalQuantity <= 0 && externalQuantity <= 0) {
+      showToast('error', 'Select an internal or external cream pool and enter its quantity');
+      return;
+    }
+
+    const internalPoolLot = internalQuantity > 0
+      ? milkLots.find(lot => lot.id === blendingForm.internalCreamLotId)
+      : undefined;
+    if (internalQuantity > 0 && (!internalPoolLot?.creamPool || internalQuantity > internalPoolLot.creamPool.availableBalance)) {
+      showToast('error', `Not enough cream in the selected internal pool${internalPoolLot?.creamPool ? ` (available: ${internalPoolLot.creamPool.availableBalance.toFixed(2)} kg)` : ''}`);
+      return;
+    }
+
+    const externalCreamLot = externalQuantity > 0
+      ? externalCreamLots.find(cream => cream.id === blendingForm.externalCreamLotId)
+      : undefined;
+    if (externalQuantity > 0 && (!externalCreamLot || externalQuantity > externalCreamLot.remaining)) {
+      showToast('error', `Not enough cream in the selected external lot${externalCreamLot ? ` (available: ${externalCreamLot.remaining.toFixed(2)} kg)` : ''}`);
+      return;
+    }
+
     // Auto-calculate replacer (3.3:1 ratio)
     const calculatedReplacer = blendingForm.butterQuantity / 3.3;
     const previousInput = round.blendingInput || 0;
@@ -303,35 +353,67 @@ export default function ButterTab() {
     updateProductionRound(selectedRound, {
       replacerQuantity: calculatedReplacer,
       blendingInput: blendingForm.butterQuantity,
+      blendingInternalCreamLotId: internalQuantity > 0 ? blendingForm.internalCreamLotId : undefined,
+      blendingExternalCreamLotId: externalQuantity > 0 ? blendingForm.externalCreamLotId : undefined,
+      blendingInternalCreamQuantity: internalQuantity || undefined,
+      blendingExternalCreamQuantity: externalQuantity || undefined,
       isSalted: blendingForm.isSalted,
       pool: blendingForm.isSalted ? 'PSBBB' : 'PUBBB',
       status: blendingForm.isSalted ? 'psbbb_pool' : 'pubbb_pool',
       remainingBalance: Math.max(0, (round.remainingBalance || 0) - blendingDelta),
     });
 
+    if (internalPoolLot?.creamPool && internalQuantity > 0) {
+      updateMilkLot(internalPoolLot.id, {
+        creamPool: {
+          ...internalPoolLot.creamPool,
+          usedInBlending: (internalPoolLot.creamPool.usedInBlending || 0) + internalQuantity,
+          availableBalance: internalPoolLot.creamPool.availableBalance - internalQuantity,
+        },
+      });
+    }
+
+    if (externalCreamLot && externalQuantity > 0) {
+      if (creamLots.some(cream => cream.id === externalCreamLot.id)) {
+        updateCreamLot(externalCreamLot.id, {
+          consumed: externalCreamLot.consumed + externalQuantity,
+          remaining: externalCreamLot.remaining - externalQuantity,
+        });
+      } else {
+        const embeddedLot = milkLots.find(lot => lot.creamLots?.some(cream => cream.id === externalCreamLot.id));
+        if (embeddedLot?.creamLots) {
+          updateMilkLot(embeddedLot.id, {
+            creamLots: embeddedLot.creamLots.map(cream => cream.id === externalCreamLot.id
+              ? { ...cream, consumed: cream.consumed + externalQuantity, remaining: cream.remaining - externalQuantity }
+              : cream),
+          });
+        }
+      }
+    }
+
     const milkLot = milkLots.find(lot => lot.id === round.milkLotId);
     if (milkLot?.butterPool) {
       updateMilkLot(milkLot.id, {
         butterPool: {
           ...milkLot.butterPool,
-          usedInBlending: Math.max(0, milkLot.butterPool.usedInBlending + blendingDelta),
+          usedInBlending: Math.max(0, (milkLot.butterPool.usedInBlending || 0) + blendingDelta),
           availableBalance: Math.max(0, milkLot.butterPool.availableBalance - blendingDelta),
         },
       });
     }
-    showToast('success', `Blended: ${blendingForm.butterQuantity} kg butter + ${calculatedReplacer.toFixed(2)} kg replacer`);
+    const creamSummary = [
+      internalQuantity > 0 ? `${internalQuantity.toFixed(2)} kg internal cream` : '',
+      externalQuantity > 0 ? `${externalQuantity.toFixed(2)} kg external cream` : '',
+    ].filter(Boolean).join(' + ');
+    showToast('success', `Blended ${blendingForm.butterQuantity.toFixed(2)} kg butter with ${creamSummary} + ${calculatedReplacer.toFixed(2)} kg replacer`);
     setShowBlendingModal(false);
-    setBlendingForm({ butterQuantity: 16.5, replacerQuantity: 5, isSalted: false });
+    setBlendingForm({ butterQuantity: 16.5, internalCreamLotId: '', externalCreamLotId: '', internalCreamQuantity: 0, externalCreamQuantity: 0, isSalted: false });
   };
 
-  const handleMakeBricks = () => {
-    if (!selectedRound) return;
-    
-    updateProductionRound(selectedRound, {
-      pool: 'BB05',
-      status: 'bb05_pool',
-    });
-    showToast('success', 'Converted to BB05 bricks');
+  const openPacking = (round: typeof butterRounds[number], sku: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05') => {
+    setSelectedRound(round.id);
+    setPackingForm({ sku, quantity: 0, unit: sku === 'BB05' ? 'bricks' : 'balls' });
+    setShowPackingModal(true);
   };
 
   const handlePack = () => {
@@ -342,6 +424,25 @@ export default function ButterTab() {
 
     const round = butterRounds.find(r => r.id === selectedRound);
     if (!round) return;
+
+    const directButterOutput = ['churned', 'packed_as_pubb'].includes(round.status);
+    const blendedButterPool = ['pubbb_pool', 'psbbb_pool', 'bb05_pool'].includes(round.status);
+    if (directButterOutput && packingForm.sku !== 'PUBB') {
+      showToast('error', 'Direct butter output can only be packed into PUBB');
+      return;
+    }
+    if (blendedButterPool && packingForm.sku === 'PUBB') {
+      showToast('error', 'Blended butter must be packed from its blended pool SKU');
+      return;
+    }
+    if (!directButterOutput && !blendedButterPool) {
+      showToast('error', 'Select an available butter or blended butter pool from the Packing subsection');
+      return;
+    }
+    if (round.remainingBalance !== undefined && round.remainingBalance <= 0) {
+      showToast('error', 'This butter pool has no remaining balance to pack');
+      return;
+    }
 
     // Calculate weight based on SKU
     let weightPerUnit = 0;
@@ -359,6 +460,10 @@ export default function ButterTab() {
     }
 
     const totalWeight = packingForm.quantity * weightPerUnit;
+    if (round.remainingBalance !== undefined && totalWeight > round.remainingBalance + 0.0001) {
+      showToast('error', `Only ${round.remainingBalance.toFixed(2)} kg remains available to pack from this pool`);
+      return;
+    }
     const packets = Math.floor(packingForm.quantity / unitsPerPacket);
     const cases = Math.floor(packets / packetsPerCase);
     const looseUnits = packingForm.quantity % unitsPerPacket;
@@ -420,103 +525,6 @@ export default function ButterTab() {
           className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
         >
           Record Output
-        </button>
-      );
-    } else if (round.status === 'churned') {
-      if (round.creamSource === 'internal') {
-        // Internal cream: 3 options
-        buttons.push(
-          <button
-            key="ghee"
-            onClick={() => handleStatusChange(round.id, 'sent_to_ghee')}
-            className="px-3 py-1.5 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600"
-          >
-            Send to Ghee
-          </button>,
-          <button
-            key="pubb"
-            onClick={() => handleStatusChange(round.id, 'packed_as_pubb')}
-            className="px-3 py-1.5 bg-emerald-500 text-white rounded text-xs font-medium hover:bg-emerald-600"
-          >
-            Pack as PUBB
-          </button>,
-          <button
-            key="blend"
-            onClick={handleSendToBlending}
-            className="px-3 py-1.5 bg-purple-500 text-white rounded text-xs font-medium hover:bg-purple-600"
-          >
-            Send to Blending
-          </button>
-        );
-      } else {
-        // External cream: must blend
-        buttons.push(
-          <button
-            key="blend"
-            onClick={handleSendToBlending}
-            className="px-3 py-1.5 bg-purple-500 text-white rounded text-xs font-medium hover:bg-purple-600"
-          >
-            Start Blending
-          </button>
-        );
-      }
-    } else if (round.status === 'pubbb_pool') {
-      buttons.push(
-        <button
-          key="pack"
-          onClick={() => {
-            setSelectedRound(round.id);
-            setPackingForm({ ...packingForm, sku: 'PUBBB', unit: 'balls' });
-            setShowPackingModal(true);
-          }}
-          className="flex items-center gap-1 px-3 py-1.5 bg-indigo-500 text-white rounded text-xs font-medium hover:bg-indigo-600"
-        >
-          <Package className="w-3 h-3" /> Pack as PUBBB
-        </button>,
-        <button
-          key="salt"
-          onClick={() => {
-            updateProductionRound(round.id, { pool: 'PSBBB', status: 'psbbb_pool', isSalted: true });
-            showToast('success', 'Added salt - converted to PSBBB');
-          }}
-          className="px-3 py-1.5 bg-pink-500 text-white rounded text-xs font-medium hover:bg-pink-600"
-        >
-          Add Salt → PSBBB
-        </button>
-      );
-    } else if (round.status === 'psbbb_pool') {
-      buttons.push(
-        <button
-          key="pack"
-          onClick={() => {
-            setSelectedRound(round.id);
-            setPackingForm({ ...packingForm, sku: 'PSBBB', unit: 'balls' });
-            setShowPackingModal(true);
-          }}
-          className="flex items-center gap-1 px-3 py-1.5 bg-pink-500 text-white rounded text-xs font-medium hover:bg-pink-600"
-        >
-          <Package className="w-3 h-3" /> Pack as PSBBB
-        </button>,
-        <button
-          key="bricks"
-          onClick={handleMakeBricks}
-          className="px-3 py-1.5 bg-rose-500 text-white rounded text-xs font-medium hover:bg-rose-600"
-        >
-          Make Bricks → BB05
-        </button>
-      );
-    } else if (round.status === 'bb05_pool') {
-      buttons.push(
-        <button
-          key="pack"
-          onClick={() => {
-            setSelectedRound(round.id);
-            setPackingForm({ ...packingForm, sku: 'BB05', unit: 'bricks' });
-            setShowPackingModal(true);
-          }}
-          className="flex items-center gap-1 px-3 py-1.5 bg-rose-500 text-white rounded text-xs font-medium hover:bg-rose-600"
-        >
-          <Package className="w-3 h-3" /> Pack as BB05
         </button>
       );
     } else if (round.status === 'packed') {
@@ -585,6 +593,7 @@ export default function ButterTab() {
                     <span className="text-slate-600">Used:</span>
                     <span className="font-medium text-orange-600">{lot.creamPool?.usedInButter.toFixed(2) || 0} kg</span>
                   </div>
+                  {(lot.creamPool?.usedInBlending || 0) > 0 && <div className="flex justify-between"><span className="text-slate-600">Used in blending:</span><span className="font-medium text-purple-600">{(lot.creamPool?.usedInBlending || 0).toFixed(2)} kg</span></div>}
                   <div className="flex justify-between border-t border-slate-200 pt-1">
                     <span className="text-slate-700 font-medium">Available:</span>
                     <span className="font-bold text-emerald-600">{lot.creamPool?.availableBalance.toFixed(2) || 0} kg</span>
@@ -624,6 +633,60 @@ export default function ButterTab() {
           </div>
         </div>
       )}
+
+      {/* Blending subsection */}
+      <section className="rounded-xl border border-purple-200 bg-purple-50/60 overflow-hidden">
+        <div className="px-4 py-3 border-b border-purple-200 bg-purple-100/70">
+          <h4 className="text-sm font-semibold text-purple-900">Blending</h4>
+          <p className="mt-1 text-xs text-purple-700">Select the butter output and the internal and/or external cream pools used for blending. These controls replace the post-output row actions.</p>
+        </div>
+        <div className="p-4">
+          {blendingCandidates.length > 0 ? (
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              {blendingCandidates.map(round => (
+                <div key={round.id} className="flex items-center justify-between gap-3 rounded-lg border border-purple-200 bg-white p-3">
+                  <div>
+                    <div className="font-mono text-xs font-bold text-slate-900">{round.batchCode || getButterBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}</div>
+                    <div className="mt-1 text-xs text-slate-500">Butter available: <span className="font-semibold text-slate-700">{(round.remainingBalance || 0).toFixed(2)} kg</span></div>
+                  </div>
+                  <button onClick={() => openBlending(round)} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-medium text-white hover:bg-purple-700">Record blending</button>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-sm text-purple-700">No unallocated butter output is waiting for blending.</p>}
+        </div>
+      </section>
+
+      {/* Packing subsection */}
+      <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 overflow-hidden">
+        <div className="px-4 py-3 border-b border-emerald-200 bg-emerald-100/70">
+          <h4 className="text-sm font-semibold text-emerald-900">Packing</h4>
+          <p className="mt-1 text-xs text-emerald-700">Pack direct butter output into PUBB, or pack a blended butter pool into its final SKU.</p>
+        </div>
+        <div className="p-4">
+          {packingCandidates.length > 0 ? (
+            <div className="space-y-2">
+              {packingCandidates.map(round => {
+                const poolSku = round.status === 'pubbb_pool' ? 'PUBBB' : round.status === 'psbbb_pool' ? 'PSBBB' : round.status === 'bb05_pool' ? 'BB05' : 'PUBB';
+                const isDirect = poolSku === 'PUBB';
+                return (
+                  <div key={round.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-white p-3">
+                    <div>
+                      <div className="font-mono text-xs font-bold text-slate-900">{round.batchCode || getButterBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}</div>
+                      <div className="mt-1 text-xs text-slate-500">{isDirect ? 'Butter output' : `${poolSku} blended pool`} · <span className="font-semibold text-slate-700">{(round.remainingBalance || 0).toFixed(2)} kg available</span></div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => openPacking(round, poolSku as 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05')} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"><Package className="h-3 w-3" />Pack as {poolSku}</button>
+                      {round.status === 'pubbb_pool' && <button onClick={() => { updateProductionRound(round.id, { pool: 'PSBBB', status: 'psbbb_pool', isSalted: true }); showToast('success', 'Added salt - converted to PSBBB'); }} className="rounded-lg bg-pink-500 px-3 py-2 text-xs font-medium text-white hover:bg-pink-600">Add Salt → PSBBB</button>}
+                      {round.status === 'psbbb_pool' && <button onClick={() => { updateProductionRound(round.id, { pool: 'BB05', status: 'bb05_pool' }); showToast('success', 'Converted to BB05 bricks'); }} className="rounded-lg bg-rose-500 px-3 py-2 text-xs font-medium text-white hover:bg-rose-600">Make Bricks → BB05</button>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : <p className="text-sm text-emerald-700">No butter or blended pools are waiting for packing.</p>}
+        </div>
+      </section>
 
       {/* Production Board */}
       <div className="space-y-4">
@@ -678,6 +741,7 @@ export default function ButterTab() {
                           }`}>
                             {round.creamSource === 'internal' ? 'Internal' : 'External'}
                           </span>
+                          {(round.blendingInternalCreamQuantity || round.blendingExternalCreamQuantity) && <div className="mt-1 text-[10px] text-purple-700">Blend cream: {[round.blendingInternalCreamQuantity ? `${round.blendingInternalCreamQuantity.toFixed(2)} kg internal` : '', round.blendingExternalCreamQuantity ? `${round.blendingExternalCreamQuantity.toFixed(2)} kg external` : ''].filter(Boolean).join(' + ')}</div>}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white ${butterStatusColors[round.status as ButterStatus]}`}>
@@ -967,6 +1031,32 @@ export default function ButterTab() {
               step="0.1"
               min="0"
             />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3">
+              <label className="text-xs font-medium uppercase tracking-wide text-blue-800">Internal cream pool</label>
+              <select
+                value={blendingForm.internalCreamLotId}
+                onChange={(e) => setBlendingForm({ ...blendingForm, internalCreamLotId: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-sm"
+              >
+                <option value="">Not used</option>
+                {internalCreamPools.map(lot => <option key={lot.id} value={lot.id}>{lot.creamPool?.batchId || getCreamBatchCode(lot.lotCode)} · {lot.creamPool?.availableBalance.toFixed(2)} kg</option>)}
+              </select>
+              <input type="number" min="0" step="0.01" value={blendingForm.internalCreamQuantity || ''} onChange={(e) => setBlendingForm({ ...blendingForm, internalCreamQuantity: Number(e.target.value) || 0 })} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-sm" placeholder="Quantity (kg)" />
+            </div>
+            <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3">
+              <label className="text-xs font-medium uppercase tracking-wide text-violet-800">External cream lot</label>
+              <select
+                value={blendingForm.externalCreamLotId}
+                onChange={(e) => setBlendingForm({ ...blendingForm, externalCreamLotId: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-2 py-2 text-sm"
+              >
+                <option value="">Not used</option>
+                {externalCreamLots.filter(cream => cream.remaining > 0).map(cream => <option key={cream.id} value={cream.id}>{cream.lotCode} · {cream.remaining.toFixed(2)} kg</option>)}
+              </select>
+              <input type="number" min="0" step="0.01" value={blendingForm.externalCreamQuantity || ''} onChange={(e) => setBlendingForm({ ...blendingForm, externalCreamQuantity: Number(e.target.value) || 0 })} className="mt-2 w-full rounded-lg border border-violet-200 bg-white px-2 py-2 text-sm" placeholder="Quantity (kg)" />
+            </div>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
