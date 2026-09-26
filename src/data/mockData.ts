@@ -37,6 +37,11 @@ export interface CreamLot {
   quantity: number; // kg
   invoiceNo?: string;
   supplier: string;
+  receivedFrom?: string;
+  receivingTemp?: number;
+  receivingPh?: number;
+  storageLocation?: 'container' | 'chiller' | 'coldroom';
+  receivedAt?: string;
   notes?: string;
   consumed: number; // kg
   remaining: number; // kg
@@ -66,6 +71,8 @@ export interface MilkLot {
   litresSpilled: number;
   litresSold?: number;
   status: 'active' | 'completed' | 'rejected';
+  productionClosed?: boolean;
+  productionClosedAt?: string;
   isLatest?: boolean;
   reconciliation?: ProductionReconciliation;
   packedSkus?: PackedSku[];
@@ -312,6 +319,10 @@ export const productionShifts: ProductionShift[] = [
     status: 'completed',
   },
 ];
+
+// Purchased cream is tracked independently from cream recovered during paneer
+// production. New receipts are added from the Milk Receiving page.
+export const creamLots: CreamLot[] = [];
 
 // ============================================================
 // CURRENT WEEK'S MILK LOT (Sunday 16 June 2026)

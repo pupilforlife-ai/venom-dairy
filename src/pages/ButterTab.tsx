@@ -46,7 +46,7 @@ const butterStatusColors: Record<ButterStatus, string> = {
 };
 
 export default function ButterTab() {
-  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift, updateMilkLot } = useApp();
+  const { productionRounds, productionShifts, milkLots, creamLots, updateProductionRound, addProductionRound, addProductionShift, updateMilkLot, updateCreamLot } = useApp();
   const { showToast } = useToast();
 
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
@@ -107,9 +107,10 @@ export default function ButterTab() {
     lot.creamPool && lot.creamPool.availableBalance > 0
   );
 
-  const externalCreamLots = milkLots.flatMap(lot => 
-    lot.creamLots || []
-  );
+  const externalCreamLots = [
+    ...creamLots,
+    ...milkLots.flatMap(lot => lot.creamLots || []),
+  ];
 
   // Handlers
   const handleCreateShift = () => {
@@ -119,6 +120,10 @@ export default function ButterTab() {
     }
     const milkLot = milkLots.find(m => m.id === newShift.milkLotId);
     if (!milkLot) return;
+    if (milkLot.productionClosed) {
+      showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
+      return;
+    }
 
     addProductionShift({
       milkLotId: newShift.milkLotId,
@@ -164,6 +169,22 @@ export default function ButterTab() {
         console.log(`Cream pool updated: ${previousBalance} kg → ${previousBalance - newRound.inputQuantity} kg (used ${newRound.inputQuantity} kg)`);
       } else {
         console.warn('Milk lot or cream pool not found:', { milkLotId: newRound.creamLotId, milkLot });
+      }
+    } else {
+      const creamLot = externalCreamLots.find(cream => cream.id === newRound.creamLotId);
+      if (!creamLot) {
+        showToast('error', 'Select a valid purchased cream lot');
+        return;
+      }
+      if (newRound.inputQuantity > creamLot.remaining) {
+        showToast('error', `Not enough purchased cream. Available: ${creamLot.remaining} kg`);
+        return;
+      }
+      if (creamLots.some(cream => cream.id === creamLot.id)) {
+        updateCreamLot(creamLot.id, {
+          consumed: creamLot.consumed + newRound.inputQuantity,
+          remaining: creamLot.remaining - newRound.inputQuantity,
+        });
       }
     }
 

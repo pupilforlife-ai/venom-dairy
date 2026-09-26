@@ -5,7 +5,7 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 
 export default function MilkReceiving() {
-  const { milkLots, addMilkLot } = useApp();
+  const { milkLots, creamLots, addMilkLot, updateMilkLot, addCreamLot } = useApp();
   const { showToast } = useToast();
   const newestLot = [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
@@ -15,6 +15,11 @@ export default function MilkReceiving() {
   const [selectedLot, setSelectedLot] = useState(newestLot?.id || '');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set());
   const [showNewLotModal, setShowNewLotModal] = useState(false);
+  const [showEditLotModal, setShowEditLotModal] = useState(false);
+  const [showMilkSaleModal, setShowMilkSaleModal] = useState(false);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showReceiveCreamModal, setShowReceiveCreamModal] = useState(false);
+  const [editingLotId, setEditingLotId] = useState<string | null>(null);
 
   const orderedLots = useMemo(() => [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
@@ -23,6 +28,7 @@ export default function MilkReceiving() {
   }), [milkLots]);
   const quickLots = orderedLots.slice(0, 4);
   const olderLots = orderedLots.slice(4);
+  const displayedLot = orderedLots.find((lot) => lot.id === selectedLot) || orderedLots[0];
 
   useEffect(() => {
     if (newestLot && !milkLots.some((lot) => lot.id === selectedLot)) {
@@ -39,6 +45,21 @@ export default function MilkReceiving() {
     receiptTime: new Date().toTimeString().slice(0, 5),
     invoiceNo: '',
     deliveryNoteNo: '',
+  });
+
+  const [editLot, setEditLot] = useState({ ...newLot });
+  const [milkSale, setMilkSale] = useState({
+    quantity: 0,
+    customer: '',
+    saleDate: new Date().toISOString().split('T')[0],
+  });
+  const [creamReceipt, setCreamReceipt] = useState({
+    quantity: 0,
+    receivedFrom: '',
+    receivingTemp: 0,
+    receivingPh: 0,
+    storageLocation: 'container' as 'container' | 'chiller' | 'coldroom',
+    remarks: '',
   });
 
   const handleCreateLot = () => {
@@ -94,23 +115,152 @@ export default function MilkReceiving() {
     setExpandedLots(newExpanded);
   };
 
-  const getAllocations = (lot: typeof milkLots[number]) => [
-    { destination: 'Silo (10,000L)', litres: Math.min(8500, lot.litresRemaining) },
-    { destination: 'BMC #1 (3,000L)', litres: Math.min(3000, Math.max(0, lot.litresRemaining - 8500)) },
-    { destination: 'BMC #2 (3,000L)', litres: Math.min(3000, Math.max(0, lot.litresRemaining - 11500)) },
-    { destination: 'Holding Tank (2,500L)', litres: Math.min(2500, Math.max(0, lot.litresRemaining - 14500)) },
-    { destination: 'Direct to Production', litres: Math.min(2000, Math.max(0, lot.litresRemaining - 17000)) },
-    { destination: 'IBC Storage', litres: Math.max(0, lot.litresRemaining - 19000) },
-  ].filter(a => a.litres > 0);
+  const getAllocations = (lot: typeof milkLots[number]) => {
+    const fixedAllocations = [
+      { destination: 'Silo (8,500L)', capacity: 8500 },
+      { destination: 'BMC #1 (3,000L)', capacity: 3000 },
+      { destination: 'BMC #2 (3,000L)', capacity: 3000 },
+      { destination: 'Holding Tank (2,500L)', capacity: 2500 },
+      { destination: 'Direct to Production', capacity: 2000 },
+    ];
+    let remaining = Math.max(0, lot.litresRemaining);
+    const allocations: { destination: string; litres: number }[] = [];
+    fixedAllocations.forEach(({ destination, capacity }) => {
+      const litres = Math.min(capacity, remaining);
+      if (litres > 0) allocations.push({ destination, litres });
+      remaining -= litres;
+    });
+    for (let index = 1; index <= 10 && remaining > 0; index += 1) {
+      const litres = Math.min(1000, remaining);
+      allocations.push({ destination: `IBC #${index} (1,000L)`, litres });
+      remaining -= litres;
+    }
+    if (remaining > 0) {
+      allocations.push({ destination: 'Auxiliary storage (cans / buckets)', litres: remaining });
+    }
+    return allocations;
+  };
 
-  // Calculate totals
-  const totals = milkLots.reduce((acc, lot) => {
-    acc.received += lot.litresReceived;
-    acc.consumed += lot.litresConsumed;
-    acc.sold += lot.litresSold || 0;
-    acc.remaining += lot.litresRemaining;
-    return acc;
-  }, { received: 0, consumed: 0, sold: 0, remaining: 0 });
+  const totals = displayedLot ? {
+    received: displayedLot.litresReceived,
+    consumed: displayedLot.litresConsumed,
+    sold: displayedLot.litresSold || 0,
+    remaining: displayedLot.litresRemaining,
+  } : { received: 0, consumed: 0, sold: 0, remaining: 0 };
+
+  const openEditLot = (lot: typeof milkLots[number]) => {
+    setEditingLotId(lot.id);
+    setEditLot({
+      lotCode: lot.lotCode,
+      supplier: lot.supplier,
+      litresReceived: lot.litresReceived,
+      receiptDate: lot.receiptDate,
+      receiptTime: lot.receiptTime || '',
+      invoiceNo: lot.invoiceNo || '',
+      deliveryNoteNo: lot.deliveryNoteNo || '',
+    });
+    setShowEditLotModal(true);
+  };
+
+  const handleUpdateLot = () => {
+    const lot = milkLots.find((item) => item.id === editingLotId);
+    if (!lot || !editLot.lotCode.trim() || editLot.litresReceived <= 0) {
+      showToast('error', 'Enter a lot code and a valid received quantity');
+      return;
+    }
+    const alreadyAccountedFor = lot.litresConsumed + (lot.litresSold || 0) + lot.litresRejected + lot.litresSpilled;
+    if (editLot.litresReceived < alreadyAccountedFor) {
+      showToast('error', `Received quantity cannot be below ${alreadyAccountedFor.toLocaleString()} L already accounted for`);
+      return;
+    }
+    const delta = editLot.litresReceived - lot.litresReceived;
+    updateMilkLot(lot.id, {
+      lotCode: editLot.lotCode.trim(),
+      supplier: editLot.supplier.trim(),
+      litresReceived: editLot.litresReceived,
+      litresRemaining: Math.max(0, lot.litresRemaining + delta),
+      receiptDate: editLot.receiptDate,
+      receiptTime: editLot.receiptTime || undefined,
+      invoiceNo: editLot.invoiceNo.trim() || undefined,
+      deliveryNoteNo: editLot.deliveryNoteNo.trim() || undefined,
+    });
+    showToast('success', `Milk lot ${editLot.lotCode.trim()} updated`);
+    setShowEditLotModal(false);
+  };
+
+  const openMilkSale = (lot: typeof milkLots[number]) => {
+    setSelectedLot(lot.id);
+    setMilkSale({ quantity: 0, customer: '', saleDate: new Date().toISOString().split('T')[0] });
+    setShowMilkSaleModal(true);
+  };
+
+  const handleMilkSale = () => {
+    const lot = milkLots.find((item) => item.id === selectedLot);
+    if (!lot || milkSale.quantity <= 0 || !milkSale.customer.trim() || !milkSale.saleDate) {
+      showToast('error', 'Enter sale quantity, customer, and date');
+      return;
+    }
+    if (milkSale.quantity > lot.litresRemaining) {
+      showToast('error', `Only ${lot.litresRemaining.toLocaleString()} L is available in this lot`);
+      return;
+    }
+    updateMilkLot(lot.id, {
+      litresSold: (lot.litresSold || 0) + milkSale.quantity,
+      litresRemaining: lot.litresRemaining - milkSale.quantity,
+      milkSales: [...(lot.milkSales || []), {
+        id: `ms-${Date.now()}`,
+        milkLotId: lot.id,
+        saleDate: milkSale.saleDate,
+        customer: milkSale.customer.trim(),
+        quantity: milkSale.quantity,
+      }],
+    });
+    showToast('success', `${milkSale.quantity.toLocaleString()} L sold from lot ${lot.lotCode}`);
+    setShowMilkSaleModal(false);
+  };
+
+  const openCloseLot = (lot: typeof milkLots[number]) => {
+    setSelectedLot(lot.id);
+    setShowCloseModal(true);
+  };
+
+  const handleCloseLot = () => {
+    const lot = milkLots.find((item) => item.id === selectedLot);
+    if (!lot) return;
+    updateMilkLot(lot.id, {
+      productionClosed: true,
+      productionClosedAt: new Date().toISOString(),
+      status: 'completed',
+      isLatest: false,
+    });
+    showToast('success', `Production for lot ${lot.lotCode} is closed`);
+    setShowCloseModal(false);
+  };
+
+  const handleReceiveCream = () => {
+    if (creamReceipt.quantity <= 0 || !creamReceipt.receivedFrom.trim() || creamReceipt.receivingTemp === 0 || creamReceipt.receivingPh === 0) {
+      showToast('error', 'Enter quantity, received from, temperature, and pH');
+      return;
+    }
+    const today = new Date().toISOString();
+    addCreamLot({
+      lotCode: `CREAM-${today.slice(0, 10).replaceAll('-', '')}-${Date.now().toString().slice(-4)}`,
+      dateReceived: today.slice(0, 10),
+      receivedAt: today,
+      quantity: creamReceipt.quantity,
+      supplier: creamReceipt.receivedFrom.trim(),
+      receivedFrom: creamReceipt.receivedFrom.trim(),
+      receivingTemp: creamReceipt.receivingTemp,
+      receivingPh: creamReceipt.receivingPh,
+      storageLocation: creamReceipt.storageLocation,
+      notes: creamReceipt.remarks.trim() || undefined,
+      consumed: 0,
+      remaining: creamReceipt.quantity,
+    });
+    showToast('success', `Received ${creamReceipt.quantity.toLocaleString()} kg cream`);
+    setShowReceiveCreamModal(false);
+    setCreamReceipt({ quantity: 0, receivedFrom: '', receivingTemp: 0, receivingPh: 0, storageLocation: 'container', remarks: '' });
+  };
 
   // Format date
   const formatDate = (dateStr: string, timeStr?: string) => {
@@ -127,13 +277,22 @@ export default function MilkReceiving() {
           <h1 className="text-2xl font-bold text-slate-900">Milk and cream lots</h1>
           <p className="text-sm text-slate-500 mt-1">Record each receipt as a traceable source lot.</p>
         </div>
-        <button 
-          onClick={() => setShowNewLotModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Receive source lot
-        </button>
+        <div className="flex flex-wrap gap-2 justify-end">
+          <button
+            onClick={() => setShowReceiveCreamModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Receive cream
+          </button>
+          <button
+            onClick={() => setShowNewLotModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Receive source lot
+          </button>
+        </div>
       </div>
 
       {/* Lot selector: four newest lots plus an older-lots dropdown */}
@@ -182,7 +341,7 @@ export default function MilkReceiving() {
         <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
           <h2 className="text-lg font-semibold text-slate-900">Recent receipts</h2>
           <p className="text-xs text-slate-500 mt-1">
-            Accepted milk totals exclude rejected receipts. Expand a row for its production detail.
+            Showing the selected lot only. Expand the row for production detail and sale history.
           </p>
         </div>
 
@@ -201,7 +360,7 @@ export default function MilkReceiving() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {orderedLots.map((lot) => {
+              {(displayedLot ? [displayedLot] : []).map((lot) => {
                 const isExpanded = expandedLots.has(lot.id);
                 const milkLeft = lot.litresRemaining;
                 
@@ -251,11 +410,12 @@ export default function MilkReceiving() {
                       </td>
                       <td className="px-4 py-4 text-center">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+                          lot.productionClosed ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' :
                           lot.status === 'active' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
                           lot.status === 'completed' ? 'bg-slate-100 text-slate-700 border border-slate-200' :
                           'bg-red-100 text-red-800 border border-red-200'
                         }`}>
-                          {lot.status === 'active' ? 'Accepted' : lot.status === 'completed' ? 'Completed' : 'Rejected'}
+                          {lot.productionClosed ? 'Closed' : lot.status === 'active' ? 'Accepted' : lot.status === 'completed' ? 'Completed' : 'Rejected'}
                         </span>
                       </td>
                       <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
@@ -263,13 +423,13 @@ export default function MilkReceiving() {
                           <button onClick={() => toggleExpand(lot.id)} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
                             {isExpanded ? '− Hide' : '+ Show'}
                           </button>
-                          <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                          <button onClick={() => openEditLot(lot)} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
                             Edit
                           </button>
-                          <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                          <button onClick={() => openMilkSale(lot)} disabled={lot.productionClosed} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             + Milk sale
                           </button>
-                          <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                          <button onClick={() => openCloseLot(lot)} disabled={Boolean(lot.productionClosed)} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             Close
                           </button>
                         </div>
@@ -437,7 +597,7 @@ export default function MilkReceiving() {
             <tfoot>
               <tr className="bg-slate-100 border-t-4 border-slate-400">
                 <td className="px-4 py-4 font-bold text-slate-900 text-base" colSpan={2}>
-                  Accepted milk totals
+                  Lot totals · {displayedLot?.lotCode || '—'}
                 </td>
                 <td className="px-4 py-4 text-right">
                   <span className="font-bold text-slate-900 text-base">{totals.received.toLocaleString()} L</span>
@@ -544,6 +704,66 @@ export default function MilkReceiving() {
           </div>
         </div>
       </Modal>
+
+      <Modal isOpen={showEditLotModal} onClose={() => setShowEditLotModal(false)} title="Edit original milk receipt">
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">This edits the original receipt fields. Recorded production, sales, rejected, and spilled quantities are preserved.</p>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Lot Code</label>
+            <input value={editLot.lotCode} onChange={(e) => setEditLot({ ...editLot, lotCode: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt Date</label><input type="date" value={editLot.receiptDate} onChange={(e) => setEditLot({ ...editLot, receiptDate: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt Time</label><input type="time" value={editLot.receiptTime} onChange={(e) => setEditLot({ ...editLot, receiptTime: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          </div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Supplier</label><input value={editLot.supplier} onChange={(e) => setEditLot({ ...editLot, supplier: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Litres Received</label><input type="number" min="1" value={editLot.litresReceived} onChange={(e) => setEditLot({ ...editLot, litresReceived: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Invoice No</label><input value={editLot.invoiceNo} onChange={(e) => setEditLot({ ...editLot, invoiceNo: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Delivery Note No</label><input value={editLot.deliveryNoteNo} onChange={(e) => setEditLot({ ...editLot, deliveryNoteNo: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          </div>
+          <div className="flex gap-2 pt-2"><button onClick={handleUpdateLot} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium">Save changes</button><button onClick={() => setShowEditLotModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showMilkSaleModal} onClose={() => setShowMilkSaleModal(false)} title={`Log milk sale · ${displayedLot?.lotCode || ''}`}>
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">Only the selected lot’s remaining milk can be sold. Available: <strong>{displayedLot?.litresRemaining.toLocaleString() || 0} L</strong>.</p>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of milk (L)</label><input type="number" min="1" value={milkSale.quantity} onChange={(e) => setMilkSale({ ...milkSale, quantity: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Sold to customer</label><input value={milkSale.customer} onChange={(e) => setMilkSale({ ...milkSale, customer: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Customer name" /></div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Date of sale</label><input type="date" value={milkSale.saleDate} onChange={(e) => setMilkSale({ ...milkSale, saleDate: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div className="flex gap-2 pt-2"><button onClick={handleMilkSale} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium">Save milk sale</button><button onClick={() => setShowMilkSaleModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showCloseModal} onClose={() => setShowCloseModal(false)} title="Close milk-lot production">
+        <div className="space-y-4">
+          <p className="text-sm text-slate-700">Are you sure the production for this lot of milk is closed?</p>
+          <p className="text-xs text-slate-500">Closing prevents new production shifts and rounds from being created for this lot. Existing records remain available.</p>
+          <div className="flex gap-2 pt-2"><button onClick={handleCloseLot} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium">Yes, close production</button><button onClick={() => setShowCloseModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showReceiveCreamModal} onClose={() => setShowReceiveCreamModal(false)} title="Receive purchased cream">
+        <div className="space-y-4">
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of cream (kg)</label><input type="number" min="0" step="0.01" value={creamReceipt.quantity} onChange={(e) => setCreamReceipt({ ...creamReceipt, quantity: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Received from</label><input value={creamReceipt.receivedFrom} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivedFrom: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receiving temp (°C)</label><input type="number" step="0.1" value={creamReceipt.receivingTemp} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivingTemp: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receiving pH</label><input type="number" step="0.01" value={creamReceipt.receivingPh} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivingPh: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          </div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Storage location</label><select value={creamReceipt.storageLocation} onChange={(e) => setCreamReceipt({ ...creamReceipt, storageLocation: e.target.value as typeof creamReceipt.storageLocation })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"><option value="container">Container</option><option value="chiller">Chiller</option><option value="coldroom">Coldroom</option></select></div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Comments / remarks</label><textarea value={creamReceipt.remarks} onChange={(e) => setCreamReceipt({ ...creamReceipt, remarks: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={3} /></div>
+          <div className="flex gap-2 pt-2"><button onClick={handleReceiveCream} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium">Save cream receipt</button><button onClick={() => setShowReceiveCreamModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
+        </div>
+      </Modal>
+
+      {creamLots.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50"><h2 className="text-lg font-semibold text-slate-900">Purchased cream lots</h2><p className="text-xs text-slate-500 mt-1">Available for selection in the Butter production tab.</p></div>
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-slate-200"><th className="px-4 py-3 text-left text-xs uppercase tracking-wider">Lot</th><th className="px-4 py-3 text-left text-xs uppercase tracking-wider">Received from</th><th className="px-4 py-3 text-right text-xs uppercase tracking-wider">Quantity</th><th className="px-4 py-3 text-right text-xs uppercase tracking-wider">Temp / pH</th><th className="px-4 py-3 text-left text-xs uppercase tracking-wider">Storage</th><th className="px-4 py-3 text-right text-xs uppercase tracking-wider">Remaining</th></tr></thead><tbody className="divide-y divide-slate-100">{creamLots.map((cream) => <tr key={cream.id}><td className="px-4 py-3 font-mono font-semibold">{cream.lotCode}</td><td className="px-4 py-3">{cream.receivedFrom || cream.supplier}</td><td className="px-4 py-3 text-right">{cream.quantity.toLocaleString()} kg</td><td className="px-4 py-3 text-right">{cream.receivingTemp ?? '—'}°C / {cream.receivingPh ?? '—'}</td><td className="px-4 py-3 capitalize">{cream.storageLocation || '—'}</td><td className="px-4 py-3 text-right font-semibold text-emerald-700">{cream.remaining.toLocaleString()} kg</td></tr>)}</tbody></table></div>
+        </div>
+      )}
     </div>
   );
 }

@@ -614,6 +614,10 @@ export default function ProductionBoard() {
     }
     const milkLot = milkLots.find(m => m.id === milkLotId);
     if (!milkLot) return;
+    if (milkLot.productionClosed) {
+      showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
+      return;
+    }
 
     addProductionShift({
       milkLotId,
@@ -669,6 +673,11 @@ export default function ProductionBoard() {
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
     if (!shift) return;
+    const milkLot = milkLots.find(m => m.id === shift.milkLotId);
+    if (milkLot?.productionClosed) {
+      showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
+      return;
+    }
 
     void createProductionRound({
       milkLotId: shift.milkLotId,

@@ -11,6 +11,7 @@ import {
   wasteEvents as initialWaste,
   utilityLogs as initialUtilities,
   MilkLot,
+  CreamLot,
   ProductionShift,
   ProductionRound,
   IntermediateLot,
@@ -23,6 +24,7 @@ import {
 
 interface AppState {
   milkLots: MilkLot[];
+  creamLots: CreamLot[];
   productionShifts: ProductionShift[];
   productionRounds: ProductionRound[];
   intermediateLots: IntermediateLot[];
@@ -36,6 +38,8 @@ interface AppContextType extends AppState {
   // Milk lot actions
   addMilkLot: (lot: Omit<MilkLot, 'id'>) => void;
   updateMilkLot: (id: string, updates: Partial<MilkLot>) => void;
+  addCreamLot: (lot: Omit<CreamLot, 'id'>) => void;
+  updateCreamLot: (id: string, updates: Partial<CreamLot>) => void;
   
   // Shift actions
   addProductionShift: (shift: Omit<ProductionShift, 'id'>) => void;
@@ -71,6 +75,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [milkLots, setMilkLots] = useSupabaseState<MilkLot[]>('vejoy_milkLots', initialMilkLots);
+  const [creamLots, setCreamLots] = useSupabaseState<CreamLot[]>('vejoy_creamLots', []);
   const [productionShifts, setProductionShifts] = useSupabaseState<ProductionShift[]>('vejoy_productionShifts', initialShifts);
   const [productionRounds, setProductionRounds] = useSupabaseState<ProductionRound[]>('vejoy_productionRounds', initialRounds);
   const [intermediateLots, setIntermediateLots] = useSupabaseState<IntermediateLot[]>('vejoy_intermediateLots', initialIntermediate);
@@ -93,7 +98,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateMilkLot = (id: string, updates: Partial<MilkLot>) => {
-    setMilkLots(milkLots.map(lot => lot.id === id ? { ...lot, ...updates } : lot));
+    setMilkLots(currentLots => currentLots.map(lot => lot.id === id ? { ...lot, ...updates } : lot));
+  };
+
+  const addCreamLot = (lot: Omit<CreamLot, 'id'>) => {
+    setCreamLots(currentLots => [...currentLots, { ...lot, id: `cream-${Date.now()}` }]);
+  };
+
+  const updateCreamLot = (id: string, updates: Partial<CreamLot>) => {
+    setCreamLots(currentLots => currentLots.map(lot => lot.id === id ? { ...lot, ...updates } : lot));
   };
 
   // Shift actions
@@ -204,6 +217,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value: AppContextType = {
     milkLots,
+    creamLots,
     productionShifts,
     productionRounds,
     intermediateLots,
@@ -213,6 +227,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     utilityLogs,
     addMilkLot,
     updateMilkLot,
+    addCreamLot,
+    updateCreamLot,
     addProductionShift,
     updateProductionShift,
     addProductionRound,
