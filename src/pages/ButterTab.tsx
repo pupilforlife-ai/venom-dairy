@@ -3,7 +3,7 @@ import { Plus, Package, CheckCircle2 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getButterBatchCode, getCreamBatchCode } from '../data/mockData';
+import { getButterBatchCode, getCreamBatchCode, getDateBatchCode } from '../data/mockData';
 
 type ButterStatus = 
   | 'scheduled'
@@ -47,10 +47,9 @@ const butterStatusColors: Record<ButterStatus, string> = {
 };
 
 export default function ButterTab() {
-  const { productionRounds, productionShifts, milkLots, creamLots, updateProductionRound, addProductionRound, addProductionShift, updateMilkLot, updateCreamLot } = useApp();
+  const { productionRounds, milkLots, creamLots, updateProductionRound, addProductionRound, updateMilkLot, updateCreamLot } = useApp();
   const { showToast } = useToast();
 
-  const [showNewShiftModal, setShowNewShiftModal] = useState(false);
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showOutputModal, setShowOutputModal] = useState(false);
   const [showBlendingModal, setShowBlendingModal] = useState(false);
@@ -58,15 +57,9 @@ export default function ButterTab() {
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
 
   // Forms
-  const [newShift, setNewShift] = useState({
-    milkLotId: '',
-    shiftNumber: 1,
-    team: '',
-    startedAt: new Date().toISOString().slice(0, 16),
-  });
-
   const [newRound, setNewRound] = useState({
-    shiftId: '',
+    roundDate: new Date().toISOString().slice(0, 10),
+    milkLotId: '',
     roundNumber: 1,
     creamSource: 'internal' as 'internal' | 'external',
     creamLotId: '',
@@ -96,13 +89,12 @@ export default function ButterTab() {
 
   // Filter butter rounds
   const butterRounds = productionRounds.filter(r => r.type === 'Butter');
-  // Show ALL active shifts, not just those with butter rounds
-  const butterShifts = productionShifts.filter(s => s.status === 'active');
-
-  // Group by shift
-  const groupedByShift = butterRounds.reduce((acc, round) => {
-    if (!acc[round.shiftId]) acc[round.shiftId] = [];
-    acc[round.shiftId].push(round);
+  const getRoundDate = (round: typeof butterRounds[number]) => round.roundDate || round.startTime.slice(0, 10);
+  const formatRoundDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString();
+  const groupedByDate = butterRounds.reduce((acc, round) => {
+    const date = getRoundDate(round);
+    if (!acc[date]) acc[date] = [];
+    acc[date].push(round);
     return acc;
   }, {} as Record<string, typeof butterRounds>);
 
@@ -131,39 +123,16 @@ export default function ButterTab() {
   );
 
   // Handlers
-  const handleCreateShift = () => {
-    if (!newShift.milkLotId) {
-      showToast('error', 'Please select a milk lot');
-      return;
-    }
-    const milkLot = milkLots.find(m => m.id === newShift.milkLotId);
-    if (!milkLot) return;
-    if (milkLot.productionClosed) {
-      showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
-      return;
-    }
-
-    addProductionShift({
-      milkLotId: newShift.milkLotId,
-      milkLotCode: milkLot.lotCode,
-      shiftNumber: newShift.shiftNumber,
-      startedAt: new Date(newShift.startedAt).toISOString(),
-      team: newShift.team.split(',').map(t => t.trim()).filter(Boolean),
-      status: 'active',
-    });
-    showToast('success', `Butter Shift ${newShift.shiftNumber} created`);
-    setShowNewShiftModal(false);
-    setNewShift({ milkLotId: '', shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16) });
-  };
-
   const handleCreateRound = () => {
-    if (!newRound.shiftId || !newRound.creamLotId || newRound.inputQuantity <= 0) {
+    if (!newRound.roundDate || !newRound.milkLotId || !newRound.creamLotId || newRound.inputQuantity <= 0) {
       showToast('error', 'Please fill all required fields');
       return;
     }
-    const shift = productionShifts.find(s => s.id === newRound.shiftId);
-    if (!shift) return;
-    const sourceMilkLot = milkLots.find(milkLot => milkLot.id === shift.milkLotId);
+    const sourceMilkLot = milkLots.find(milkLot => milkLot.id === newRound.milkLotId);
+    if (!sourceMilkLot) {
+      showToast('error', 'Milk lot not found');
+      return;
+    }
     if (sourceMilkLot?.productionClosed) {
       showToast('error', `Production for milk lot ${sourceMilkLot.lotCode} is closed`);
       return;
@@ -212,23 +181,29 @@ export default function ButterTab() {
     }
 
     const sourceCream = newRound.creamSource === 'internal'
-      ? getCreamBatchCode(sourceMilkLot?.lotCode || shift.milkLotCode)
+      ? getCreamBatchCode(sourceMilkLot.lotCode)
       : externalCreamLots.find(cream => cream.id === newRound.creamLotId)?.lotCode || newRound.creamLotId;
+    const roundNumber = butterRounds
+      .filter(round => getRoundDate(round) === newRound.roundDate)
+      .reduce((max, round) => Math.max(max, round.roundNumber), 0) + 1;
+    const batchCode = getDateBatchCode('BUT', newRound.roundDate);
+    const dateRoundId = `butter-${newRound.roundDate}`;
     addProductionRound({
-      milkLotId: shift.milkLotId,
-      milkLotCode: shift.milkLotCode,
-      shiftId: shift.id,
-      shiftNumber: shift.shiftNumber,
-      roundNumber: newRound.roundNumber,
+      milkLotId: sourceMilkLot.id,
+      milkLotCode: sourceMilkLot.lotCode,
+      roundDate: newRound.roundDate,
+      shiftId: dateRoundId,
+      shiftNumber: 0,
+      roundNumber,
       type: 'Butter',
       status: 'scheduled',
-      team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
+      team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : [],
       plannedInput: newRound.inputQuantity,
       actualInput: newRound.inputQuantity,
       outputWeight: 0,
-      startTime: new Date().toISOString(),
+      startTime: new Date(`${newRound.roundDate}T12:00:00`).toISOString(),
       locked: false,
-      batchCode: getButterBatchCode(shift.milkLotCode),
+      batchCode,
       sourceBatchCode: sourceCream,
       creamSource: newRound.creamSource,
       creamLotId: newRound.creamLotId,
@@ -237,9 +212,9 @@ export default function ButterTab() {
     const creamMessage = newRound.creamSource === 'internal' 
       ? ` (cream pool: -${newRound.inputQuantity} kg)` 
       : '';
-    showToast('success', `Butter round created: ${getButterBatchCode(shift.milkLotCode)}/S${shift.shiftNumber}/R${newRound.roundNumber}${creamMessage}`);
+    showToast('success', `Butter round created: ${batchCode}/R${roundNumber}${creamMessage}`);
     setShowNewRoundModal(false);
-    setNewRound({ shiftId: '', roundNumber: 1, creamSource: 'internal', creamLotId: '', inputQuantity: 0, team: '' });
+    setNewRound({ roundDate: new Date().toISOString().slice(0, 10), milkLotId: '', roundNumber: 1, creamSource: 'internal', creamLotId: '', inputQuantity: 0, team: '' });
   };
 
   const handleStatusChange = (roundId: string, newStatus: ButterStatus) => {
@@ -538,12 +513,6 @@ export default function ButterTab() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowNewShiftModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700"
-          >
-            <Plus className="w-4 h-4" /> New Shift
-          </button>
-          <button
             onClick={() => setShowNewRoundModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700"
           >
@@ -629,7 +598,7 @@ export default function ButterTab() {
               {blendingCandidates.map(round => (
                 <div key={round.id} className="flex items-center justify-between gap-3 rounded-lg border border-purple-200 bg-white p-3">
                   <div>
-                    <div className="font-mono text-xs font-bold text-slate-900">{round.batchCode || getButterBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}</div>
+                    <div className="font-mono text-xs font-bold text-slate-900">{round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber}</div>
                     <div className="mt-1 text-xs text-slate-500">Butter available: <span className="font-semibold text-slate-700">{(round.remainingBalance || 0).toFixed(2)} kg</span></div>
                   </div>
                   <button onClick={() => openBlending(round)} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-medium text-white hover:bg-purple-700">Record blending</button>
@@ -655,7 +624,7 @@ export default function ButterTab() {
                 return (
                   <div key={round.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-white p-3">
                     <div>
-                      <div className="font-mono text-xs font-bold text-slate-900">{round.batchCode || getButterBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}</div>
+                      <div className="font-mono text-xs font-bold text-slate-900">{round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber}</div>
                       <div className="mt-1 text-xs text-slate-500">{isDirect ? 'Butter output' : `${poolSku} blended pool`} · <span className="font-semibold text-slate-700">{(round.remainingBalance || 0).toFixed(2)} kg available</span></div>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -672,22 +641,19 @@ export default function ButterTab() {
 
       {/* Production Board */}
       <div className="space-y-4">
-        {Object.entries(groupedByShift).map(([shiftId, rounds]) => {
-          const shift = productionShifts.find(s => s.id === shiftId);
-          if (!shift) return null;
-
+        {Object.entries(groupedByDate).map(([roundDate, rounds]) => {
           return (
-            <div key={shiftId} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              {/* Shift Header */}
+            <div key={roundDate} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              {/* Date Header */}
               <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-200">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className="w-8 h-8 rounded-full bg-indigo-600 text-white text-sm font-bold flex items-center justify-center">
-                      {shift.shiftNumber}
+                      {rounds.length}
                     </span>
                     <div>
-                      <div className="text-sm font-semibold text-slate-900">Shift {shift.shiftNumber}</div>
-                      <div className="text-xs text-slate-500">Team: {shift.team.join(', ')}</div>
+                      <div className="text-sm font-semibold text-slate-900">Butter rounds · {formatRoundDate(roundDate)}</div>
+                      <div className="text-xs text-slate-500">Date-based production record</div>
                     </div>
                   </div>
                   <span className="text-xs text-slate-500">{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>
@@ -714,7 +680,7 @@ export default function ButterTab() {
                       <tr key={round.id} className="hover:bg-slate-50/50">
                         <td className="px-4 py-3">
                           <div className="font-mono text-xs font-bold text-slate-900">
-                            {round.batchCode || getButterBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}
+                            {round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber}
                           </div>
                         </td>
                         <td className="px-4 py-3">
@@ -750,20 +716,43 @@ export default function ButterTab() {
 
         {butterRounds.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <p className="text-slate-500">No butter rounds yet. Create a shift and round to begin.</p>
+            <p className="text-slate-500">No butter rounds yet. Create a date-based round to begin.</p>
           </div>
         )}
       </div>
 
       {/* Modals */}
-      {/* New Shift Modal */}
-      <Modal isOpen={showNewShiftModal} onClose={() => setShowNewShiftModal(false)} title="Create New Butter Shift">
+      {/* New Round Modal */}
+      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Butter Round">
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk Lot</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Production date</label>
+            <input
+              type="date"
+              value={newRound.roundDate}
+              onChange={(e) => {
+                const roundDate = e.target.value;
+                const existingRounds = butterRounds.filter(r => getRoundDate(r) === roundDate);
+                const nextRoundNumber = existingRounds.reduce((max, round) => Math.max(max, round.roundNumber), 0) + 1;
+                setNewRound({ ...newRound, roundDate, roundNumber: nextRoundNumber });
+              }}
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Round number for this date</label>
+            <input
+              type="number"
+              value={newRound.roundNumber}
+              readOnly
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk lot context</label>
             <select
-              value={newShift.milkLotId}
-              onChange={(e) => setNewShift({ ...newShift, milkLotId: e.target.value })}
+              value={newRound.milkLotId}
+              onChange={(e) => setNewRound({ ...newRound, milkLotId: e.target.value, creamLotId: newRound.creamSource === 'internal' ? e.target.value : newRound.creamLotId })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
               <option value="">Select milk lot</option>
@@ -773,77 +762,10 @@ export default function ButterTab() {
             </select>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift Number</label>
-            <input
-              type="number"
-              value={newShift.shiftNumber}
-              onChange={(e) => setNewShift({ ...newShift, shiftNumber: parseInt(e.target.value) })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              min="1"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (comma-separated)</label>
-            <input
-              type="text"
-              value={newShift.team}
-              onChange={(e) => setNewShift({ ...newShift, team: e.target.value })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              placeholder="e.g. Rajesh, Amit, Suresh"
-            />
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={handleCreateShift}
-              className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
-            >
-              Create Shift
-            </button>
-            <button
-              onClick={() => setShowNewShiftModal(false)}
-              className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* New Round Modal */}
-      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Butter Round">
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift</label>
-            <select
-              value={newRound.shiftId}
-              onChange={(e) => {
-                const shiftId = e.target.value;
-                const existingRounds = butterRounds.filter(r => r.shiftId === shiftId).length;
-                setNewRound({ ...newRound, shiftId, roundNumber: existingRounds + 1 });
-              }}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
-            >
-              <option value="">Select shift</option>
-              {butterShifts.filter(s => s.status === 'active').map(s => (
-                <option key={s.id} value={s.id}>Shift {s.shiftNumber} - {s.milkLotCode}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Round Number</label>
-            <input
-              type="number"
-              value={newRound.roundNumber}
-              onChange={(e) => setNewRound({ ...newRound, roundNumber: parseInt(e.target.value) })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              min="1"
-            />
-          </div>
-          <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Source</label>
             <div className="mt-1 flex gap-2">
               <button
-                onClick={() => setNewRound({ ...newRound, creamSource: 'internal', creamLotId: '' })}
+                onClick={() => setNewRound({ ...newRound, creamSource: 'internal', creamLotId: newRound.milkLotId })}
                 className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium ${
                   newRound.creamSource === 'internal' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'
                 }`}
@@ -862,11 +784,11 @@ export default function ButterTab() {
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
-              {newRound.creamSource === 'internal' ? 'Milk Lot (Cream Pool)' : 'Cream Lot'}
+              {newRound.creamSource === 'internal' ? 'Internal cream pool' : 'External cream lot'}
             </label>
             <select
               value={newRound.creamLotId}
-              onChange={(e) => setNewRound({ ...newRound, creamLotId: e.target.value })}
+              onChange={(e) => setNewRound({ ...newRound, creamLotId: e.target.value, milkLotId: newRound.creamSource === 'internal' ? e.target.value : newRound.milkLotId })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
               <option value="">Select {newRound.creamSource === 'internal' ? 'milk lot' : 'cream lot'}</option>
@@ -1021,7 +943,7 @@ export default function ButterTab() {
                 className="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-sm"
               >
                 <option value="">Not used</option>
-                {internalButterPools.map(round => <option key={round.id} value={round.id}>{round.batchCode || getButterBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber} · {(round.remainingBalance || 0).toFixed(2)} kg</option>)}
+                {internalButterPools.map(round => <option key={round.id} value={round.id}>{round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber} · {(round.remainingBalance || 0).toFixed(2)} kg</option>)}
               </select>
               <input type="number" min="0" step="0.01" value={blendingForm.internalButterQuantity || ''} onChange={(e) => setBlendingForm({ ...blendingForm, internalButterQuantity: Number(e.target.value) || 0 })} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-sm" placeholder="Quantity (kg)" />
             </div>
@@ -1033,7 +955,7 @@ export default function ButterTab() {
                 className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-2 py-2 text-sm"
               >
                 <option value="">Not used</option>
-                {externalButterPools.map(round => <option key={round.id} value={round.id}>{round.batchCode || getButterBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber} · {(round.remainingBalance || 0).toFixed(2)} kg</option>)}
+                {externalButterPools.map(round => <option key={round.id} value={round.id}>{round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber} · {(round.remainingBalance || 0).toFixed(2)} kg</option>)}
               </select>
               <input type="number" min="0" step="0.01" value={blendingForm.externalButterQuantity || ''} onChange={(e) => setBlendingForm({ ...blendingForm, externalButterQuantity: Number(e.target.value) || 0 })} className="mt-2 w-full rounded-lg border border-violet-200 bg-white px-2 py-2 text-sm" placeholder="Quantity (kg)" />
             </div>

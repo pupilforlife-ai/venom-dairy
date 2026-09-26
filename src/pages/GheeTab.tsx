@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Plus, Package, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getButterBatchCode, getGheeBatchCode } from '../data/mockData';
+import { getButterBatchCode, getDateBatchCode, getGheeBatchCode } from '../data/mockData';
 
 type GheeStatus = 
   | 'scheduled'
@@ -41,34 +41,17 @@ const gheeStatusColors: Record<GheeStatus, string> = {
 };
 
 export default function GheeTab() {
-  const { productionRounds, productionShifts, milkLots, updateProductionRound, updateMilkLot, addProductionRound, addProductionShift } = useApp();
+  const { productionRounds, milkLots, updateProductionRound, updateMilkLot, addProductionRound } = useApp();
   const { showToast } = useToast();
 
-  const [showNewShiftModal, setShowNewShiftModal] = useState(false);
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
 
-  // Debug logging
-  useEffect(() => {
-    console.log('=== GHEE TAB STATE ===');
-    console.log('Total productionRounds:', productionRounds.length);
-    console.log('Ghee rounds:', productionRounds.filter(r => r.type === 'Ghee'));
-    console.log('Total productionShifts:', productionShifts.length);
-    console.log('Active shifts:', productionShifts.filter(s => s.status === 'active'));
-  }, [productionRounds, productionShifts]);
-
   // Forms
-  const [newShift, setNewShift] = useState({
-    milkLotId: '',
-    shiftNumber: 1,
-    team: '',
-    startedAt: new Date().toISOString().slice(0, 16),
-  });
-
   const [newRound, setNewRound] = useState({
-    shiftId: '',
+    roundDate: new Date().toISOString().slice(0, 10),
     roundNumber: 1,
     milkLotId: '', // Select specific milk lot
     butterInput: 0,
@@ -87,13 +70,12 @@ export default function GheeTab() {
 
   // Filter ghee rounds
   const gheeRounds = productionRounds.filter(r => r.type === 'Ghee');
-  // Show ALL active shifts, not just those with ghee rounds
-  const gheeShifts = productionShifts.filter(s => s.status === 'active');
-
-  // Group by shift
-  const groupedByShift = gheeRounds.reduce((acc, round) => {
-    if (!acc[round.shiftId]) acc[round.shiftId] = [];
-    acc[round.shiftId].push(round);
+  const getRoundDate = (round: typeof gheeRounds[number]) => round.roundDate || round.startTime.slice(0, 10);
+  const formatRoundDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString();
+  const groupedByDate = gheeRounds.reduce((acc, round) => {
+    const date = getRoundDate(round);
+    if (!acc[date]) acc[date] = [];
+    acc[date].push(round);
     return acc;
   }, {} as Record<string, typeof gheeRounds>);
 
@@ -140,40 +122,9 @@ export default function GheeTab() {
   };
 
   // Handlers
-  const handleCreateShift = () => {
-    if (!newShift.milkLotId) {
-      showToast('error', 'Please select a milk lot');
-      return;
-    }
-    const milkLot = milkLots.find(m => m.id === newShift.milkLotId);
-    if (!milkLot) return;
-
-    const newShiftData = {
-      milkLotId: newShift.milkLotId,
-      milkLotCode: milkLot.lotCode,
-      shiftNumber: newShift.shiftNumber,
-      startedAt: new Date(newShift.startedAt).toISOString(),
-      team: newShift.team.split(',').map(t => t.trim()).filter(Boolean),
-      status: 'active' as const,
-    };
-
-    console.log('Creating shift with data:', newShiftData);
-    addProductionShift(newShiftData);
-    console.log('Shift added to context');
-    showToast('success', `Ghee Shift ${newShift.shiftNumber} created`);
-    setShowNewShiftModal(false);
-    setNewShift({ milkLotId: '', shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16) });
-  };
-
   const handleCreateRound = () => {
-    if (!newRound.shiftId || !newRound.milkLotId || newRound.butterInput <= 0) {
+    if (!newRound.roundDate || !newRound.milkLotId || newRound.butterInput <= 0) {
       showToast('error', 'Please fill all required fields');
-      return;
-    }
-
-    const shift = productionShifts.find(s => s.id === newRound.shiftId);
-    if (!shift) {
-      showToast('error', 'Shift not found');
       return;
     }
 
@@ -193,17 +144,22 @@ export default function GheeTab() {
     const totalInput = newRound.butterInput + afOilInput;
     const expectedYield = calculateExpectedYield(totalInput);
 
-    console.log('Creating ghee round with shiftId:', shift.id, 'type: Ghee');
+    const roundNumber = gheeRounds
+      .filter(round => getRoundDate(round) === newRound.roundDate)
+      .reduce((max, round) => Math.max(max, round.roundNumber), 0) + 1;
+    const batchCode = getDateBatchCode('GHEE', newRound.roundDate);
+    const dateRoundId = `ghee-${newRound.roundDate}-${newRound.milkLotId}`;
 
     const newRoundData = {
-      milkLotId: shift.milkLotId,
-      milkLotCode: shift.milkLotCode,
-      shiftId: shift.id,
-      shiftNumber: shift.shiftNumber,
-      roundNumber: newRound.roundNumber,
+      milkLotId: milkLot.id,
+      milkLotCode: milkLot.lotCode,
+      roundDate: newRound.roundDate,
+      shiftId: dateRoundId,
+      shiftNumber: 0,
+      roundNumber,
       type: 'Ghee' as const,
       status: 'butter_selected',
-      team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
+      team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : [],
       plannedInput: newRound.butterInput,
       actualInput: newRound.butterInput,
       outputWeight: 0,
@@ -213,13 +169,11 @@ export default function GheeTab() {
       afOilInput: afOilInput,
       expectedYield: expectedYield,
       remainingBalance: 0,
-      batchCode: getGheeBatchCode(shift.milkLotCode),
-      sourceBatchCode: getButterBatchCode(shift.milkLotCode),
+      batchCode,
+      sourceBatchCode: getButterBatchCode(milkLot.lotCode),
     };
 
-    console.log('Creating round with data:', newRoundData);
     addProductionRound(newRoundData);
-    console.log('Round added to context');
 
     // Update butter rounds to mark as used in ghee
     const butterRounds = productionRounds.filter(r => 
@@ -274,9 +228,9 @@ export default function GheeTab() {
       updateMilkLot(milkLot.id, { gheePool: existingPool });
     }
 
-    showToast('success', `Ghee round created: ${getGheeBatchCode(shift.milkLotCode)}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
+    showToast('success', `Ghee round created: ${batchCode}/R${roundNumber}`);
     setShowNewRoundModal(false);
-    setNewRound({ shiftId: '', roundNumber: 1, milkLotId: '', butterInput: 0, team: '' });
+    setNewRound({ roundDate: new Date().toISOString().slice(0, 10), roundNumber: 1, milkLotId: '', butterInput: 0, team: '' });
   };
 
   const handleStatusChange = (roundId: string, newStatus: GheeStatus) => {
@@ -511,12 +465,6 @@ export default function GheeTab() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowNewShiftModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700"
-          >
-            <Plus className="w-4 h-4" /> New Shift
-          </button>
-          <button
             onClick={() => setShowNewRoundModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700"
           >
@@ -552,45 +500,21 @@ export default function GheeTab() {
         </div>
       )}
 
-      {/* Debug Panel */}
-      <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4 mb-4">
-        <h3 className="text-sm font-bold text-yellow-900 mb-2">🐛 Debug Info</h3>
-        <div className="text-xs space-y-1">
-          <p><strong>Total Rounds:</strong> {productionRounds.length}</p>
-          <p><strong>Ghee Rounds:</strong> {gheeRounds.length}</p>
-          <p><strong>Active Shifts:</strong> {gheeShifts.length}</p>
-          <p><strong>Grouped By Shift:</strong> {Object.keys(groupedByShift).length} shifts</p>
-          {gheeRounds.length > 0 && (
-            <div className="mt-2 p-2 bg-white rounded border">
-              <p className="font-bold mb-1">Ghee Rounds Details:</p>
-              {gheeRounds.map(r => (
-                <p key={r.id} className="ml-2">
-                  ID: {r.id}, Shift: {r.shiftId}, Type: {r.type}, Status: {r.status}
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Production Board */}
       <div className="space-y-4">
-        {gheeShifts.map((shift) => {
-          const rounds = groupedByShift[shift.id] || [];
-          console.log(`Rendering shift ${shift.shiftNumber}: ${rounds.length} rounds`);
-
+        {Object.entries(groupedByDate).map(([roundDate, rounds]) => {
           return (
-            <div key={shift.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              {/* Shift Header */}
+            <div key={roundDate} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              {/* Date Header */}
               <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-200">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className="w-8 h-8 rounded-full bg-indigo-600 text-white text-sm font-bold flex items-center justify-center">
-                      {shift.shiftNumber}
+                      {rounds.length}
                     </span>
                     <div>
-                      <div className="text-sm font-semibold text-slate-900">Shift {shift.shiftNumber}</div>
-                      <div className="text-xs text-slate-500">Team: {shift.team.join(', ')}</div>
+                      <div className="text-sm font-semibold text-slate-900">Ghee rounds · {formatRoundDate(roundDate)}</div>
+                      <div className="text-xs text-slate-500">Date-based production record</div>
                     </div>
                   </div>
                   <span className="text-xs text-slate-500">{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>
@@ -618,7 +542,7 @@ export default function GheeTab() {
                       <tr key={round.id} className="hover:bg-slate-50/50">
                         <td className="px-4 py-3">
                           <div className="font-mono text-xs font-bold text-slate-900">
-                            {round.batchCode || getGheeBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}
+                            {round.batchCode || getGheeBatchCode(round.milkLotCode)}/R{round.roundNumber}
                           </div>
                         </td>
                         <td className="px-4 py-3">
@@ -653,102 +577,45 @@ export default function GheeTab() {
               </div>
               ) : (
                 <div className="p-6 text-center text-slate-400 text-sm">
-                  No rounds in this shift yet. <button onClick={() => setShowNewRoundModal(true)} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
+                  No rounds on this date yet. <button onClick={() => setShowNewRoundModal(true)} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
                 </div>
               )}
             </div>
           );
         })}
 
-        {gheeShifts.length === 0 && (
+        {gheeRounds.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <p className="text-slate-500">No ghee shifts yet. Create a shift to begin.</p>
+            <p className="text-slate-500">No ghee rounds yet. Create a date-based round to begin.</p>
           </div>
         )}
       </div>
 
       {/* Modals */}
-      {/* New Shift Modal */}
-      <Modal isOpen={showNewShiftModal} onClose={() => setShowNewShiftModal(false)} title="Create New Ghee Shift">
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk Lot</label>
-            <select
-              value={newShift.milkLotId}
-              onChange={(e) => setNewShift({ ...newShift, milkLotId: e.target.value })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
-            >
-              <option value="">Select milk lot</option>
-              {milkLots.filter(l => l.status === 'active').map(lot => (
-                <option key={lot.id} value={lot.id}>{lot.lotCode}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift Number</label>
-            <input
-              type="number"
-              value={newShift.shiftNumber}
-              onChange={(e) => setNewShift({ ...newShift, shiftNumber: parseInt(e.target.value) })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              min="1"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (comma-separated)</label>
-            <input
-              type="text"
-              value={newShift.team}
-              onChange={(e) => setNewShift({ ...newShift, team: e.target.value })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              placeholder="e.g. Rajesh, Amit, Suresh"
-            />
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={handleCreateShift}
-              className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
-            >
-              Create Shift
-            </button>
-            <button
-              onClick={() => setShowNewShiftModal(false)}
-              className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </Modal>
-
       {/* New Round Modal */}
       <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Ghee Round">
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Shift</label>
-            <select
-              value={newRound.shiftId}
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Production date</label>
+            <input
+              type="date"
+              value={newRound.roundDate}
               onChange={(e) => {
-                const shiftId = e.target.value;
-                const existingRounds = gheeRounds.filter(r => r.shiftId === shiftId).length;
-                setNewRound({ ...newRound, shiftId, roundNumber: existingRounds + 1 });
+                const roundDate = e.target.value;
+                const existingRounds = gheeRounds.filter(r => getRoundDate(r) === roundDate);
+                const nextRoundNumber = existingRounds.reduce((max, round) => Math.max(max, round.roundNumber), 0) + 1;
+                setNewRound({ ...newRound, roundDate, roundNumber: nextRoundNumber });
               }}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
-            >
-              <option value="">Select shift</option>
-              {gheeShifts.filter(s => s.status === 'active').map(s => (
-                <option key={s.id} value={s.id}>Shift {s.shiftNumber} - {s.milkLotCode}</option>
-              ))}
-            </select>
+            />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Round Number</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Round number for this date</label>
             <input
               type="number"
               value={newRound.roundNumber}
-              onChange={(e) => setNewRound({ ...newRound, roundNumber: parseInt(e.target.value) })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              min="1"
+              readOnly
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
             />
           </div>
           <div>
@@ -816,7 +683,7 @@ export default function GheeTab() {
               value={newRound.team}
               onChange={(e) => setNewRound({ ...newRound, team: e.target.value })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              placeholder="Leave empty to use shift team"
+              placeholder="Optional team or operator names"
             />
           </div>
           <div className="flex gap-2 pt-2">

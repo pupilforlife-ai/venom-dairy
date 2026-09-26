@@ -104,6 +104,12 @@ export function getGheeBatchCode(milkLotCode: string) {
   return `GHEE-${milkLotCode.replace(/^GHEE-/, '')}`;
 }
 
+export function getDateBatchCode(prefix: string, date: string) {
+  const [year, month, day] = date.split('-');
+  if (!year || !month || !day) return `${prefix}-${date}`;
+  return `${prefix}-${day}${month}${year.slice(-2)}`;
+}
+
 export function getHalloumiBatchCode(milkLotCode: string) {
   return `HAL-${milkLotCode.replace(/^HAL-/, '')}`;
 }
@@ -178,6 +184,8 @@ export interface ProductionRound {
   id: string;
   milkLotId: string;
   milkLotCode: string;
+  // Butter and ghee are date-based processes; these rounds do not use dairy shifts.
+  roundDate?: string;
   shiftId: string;
   shiftNumber: number;
   roundNumber: number;
