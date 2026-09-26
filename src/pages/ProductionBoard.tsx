@@ -22,6 +22,7 @@ import { Modal } from '../components/Modal';
 import { getCreamBatchCode, milkStorageVessels, statusFlow, statusLabels, statusColors } from '../data/mockData';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import HalloumiTab from './HalloumiTab';
+import AmassiTab from './AmassiTab';
 import ButterTab from './ButterTab';
 import GheeTab from './GheeTab';
 import CrumbingTab from './CrumbingTab';
@@ -60,7 +61,7 @@ export default function ProductionBoard() {
   const isOwner = currentRole === 'owner';
   const editableStageOptions = [...statusFlow, 'spp_pending', 'pan111_pending'] as string[];
   
-  const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
+  const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'amassi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all', balance: 'all', workflow: 'all', query: '' });
   const [showFilters, setShowFilters] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
@@ -931,6 +932,16 @@ export default function ProductionBoard() {
             🥙 Halloumi
           </button>
           <button
+            onClick={() => setActiveTab('amassi')}
+            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'amassi'
+                ? 'bg-cyan-600 text-white shadow-sm'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            🥛 Amassi
+          </button>
+          <button
             onClick={() => setActiveTab('butter')}
             className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               activeTab === 'butter'
@@ -1320,6 +1331,10 @@ export default function ProductionBoard() {
       {/* Halloumi Tab Content */}
       {activeTab === 'halloumi' && (
         <HalloumiTab selectedMilkLotId={selectedMilkLotId} canForceStage={canForceStage} />
+      )}
+
+      {activeTab === 'amassi' && (
+        <AmassiTab selectedMilkLotId={selectedMilkLotId} canForceStage={canForceStage} />
       )}
 
       {/* Butter Tab Content */}

@@ -108,6 +108,10 @@ export function getHalloumiBatchCode(milkLotCode: string) {
   return `HAL-${milkLotCode.replace(/^HAL-/, '')}`;
 }
 
+export function getAmassiBatchCode(milkLotCode: string) {
+  return `AMASSI-${milkLotCode.replace(/^AMASSI-/, '')}`;
+}
+
 export interface MilkLot {
   id: string;
   lotCode: string; // e.g. "160626" (date-based)
@@ -177,7 +181,7 @@ export interface ProductionRound {
   shiftId: string;
   shiftNumber: number;
   roundNumber: number;
-  type: 'D' | 'C/S' | 'Halloumi' | 'Butter' | 'Ghee';
+  type: 'D' | 'C/S' | 'Halloumi' | 'Butter' | 'Ghee' | 'Amassi';
   // Status flow varies by product type - using string for flexibility
   status: string;
   team: string[];
@@ -270,6 +274,14 @@ export interface ProductionRound {
   butterInput?: number; // kg
   afOilInput?: number; // kg
   expectedYield?: number; // kg
+
+  // Amassi-specific fields
+  amassiType?: 'BM' | 'SKM';
+  amassiIncubationStartedAt?: string;
+  amassiPacked?: Array<{
+    sku: 'AMASSI 1.8L' | 'AMASSI 2L';
+    bottles: number;
+  }>;
   
   notes?: string;
   locked: boolean;
