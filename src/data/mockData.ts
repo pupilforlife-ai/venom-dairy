@@ -57,7 +57,6 @@ export interface CreamPool {
   batchId?: string;
   totalCream: number; // kg - total cream recovered from all C/S rounds
   usedInButter: number; // kg - cream used in butter production
-  usedInBlending?: number; // kg - cream later added during butter blending
   availableBalance: number; // kg - remaining cream available
   roundsContributed: string[]; // round IDs that contributed cream
 }
@@ -265,14 +264,15 @@ export interface ProductionRound {
   buttermilkOutput?: number; // kg
   destination?: 'ghee' | 'pubb' | 'blending';
   isSalted?: boolean;
+  saltQuantity?: number; // kg, recorded when a blended pool is salted
   replacerQuantity?: number; // kg
   pool?: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05';
   usedInGhee?: number; // kg
   blendingInput?: number; // kg taken from the common butter pool for blending
-  blendingInternalCreamLotId?: string;
-  blendingExternalCreamLotId?: string;
-  blendingInternalCreamQuantity?: number;
-  blendingExternalCreamQuantity?: number;
+  blendingInternalButterRoundId?: string;
+  blendingExternalButterRoundId?: string;
+  blendingInternalButterQuantity?: number;
+  blendingExternalButterQuantity?: number;
   packedButterWeight?: number; // kg taken from the common butter pool for packing
   
   // Ghee-specific fields

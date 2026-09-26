@@ -136,7 +136,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProductionRound = (id: string, updates: Partial<ProductionRound>) => {
-    setProductionRounds(productionRounds.map(round => 
+    setProductionRounds(currentRounds => currentRounds.map(round =>
       round.id === id ? { ...round, ...updates } : round
     ));
   };
