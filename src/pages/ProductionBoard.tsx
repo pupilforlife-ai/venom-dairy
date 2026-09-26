@@ -56,7 +56,7 @@ export default function ProductionBoard() {
   const editableStageOptions = [...statusFlow, 'spp_pending', 'pan111_pending'] as string[];
   
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
-  const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all' });
+  const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all', balance: 'all', workflow: 'all', query: '' });
   const [showFilters, setShowFilters] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
@@ -182,6 +182,26 @@ export default function ProductionBoard() {
     if (filters.status !== 'all' && round.status !== filters.status) return false;
     if (filters.type !== 'all' && round.type !== filters.type) return false;
     if (filters.shift !== 'all' && round.shiftId !== filters.shift) return false;
+    if (filters.balance !== 'all') {
+      const balance = round.remainingBalance;
+      if (filters.balance === 'balance_left' && !(balance !== undefined && balance > 0.01)) return false;
+      if (filters.balance === 'overpacked' && !(balance !== undefined && balance < -0.01)) return false;
+      if (filters.balance === 'fully_packed' && !((balance !== undefined && Math.abs(balance) <= 0.01) || (balance === undefined && round.status === 'packed'))) return false;
+      if (filters.balance === 'no_balance' && !(balance === undefined && round.status !== 'packed')) return false;
+    }
+    if (filters.workflow !== 'all') {
+      const isSpp = round.cuttingType === 'SPP pieces' || round.status === 'spp_pending' || round.sppRecordedWeight !== undefined;
+      const isPan111 = round.status === 'pan111_pending' || round.pan111ApprovalStatus !== undefined || round.packedSkus?.some((pack) => pack.sku === 'PAN111');
+      const isClingwrapped = round.cuttingType === 'Clingwrapped / Stored' || round.status === 'clingwrapped';
+      if (filters.workflow === 'spp' && !isSpp) return false;
+      if (filters.workflow === 'pan111' && !isPan111) return false;
+      if (filters.workflow === 'clingwrapped' && !isClingwrapped) return false;
+    }
+    const query = filters.query.trim().toLowerCase();
+    if (query) {
+      const searchable = `${round.milkLotCode} s${round.shiftNumber}/r${round.roundNumber} ${round.type} ${round.status} ${(round.cutBy || '')} ${(round.team || []).join(' ')}`.toLowerCase();
+      if (!searchable.includes(query)) return false;
+    }
     return true;
   });
 
@@ -197,8 +217,9 @@ export default function ProductionBoard() {
   }, {} as Record<string, typeof productionRounds>);
 
   // Get active shifts (latest first)
+  const hasRoundFilters = filters.status !== 'all' || filters.type !== 'all' || filters.shift !== 'all' || filters.balance !== 'all' || filters.workflow !== 'all' || filters.query.trim() !== '';
   const activeShifts = productionShifts
-    .filter(s => s.milkLotId === selectedMilkLotId && (groupedByShift[s.id] || s.status !== 'completed'))
+    .filter(s => s.milkLotId === selectedMilkLotId && (groupedByShift[s.id] || (!hasRoundFilters && s.status !== 'completed')))
     .sort((a, b) => b.shiftNumber - a.shiftNumber);
   const hasSelectedLotBoard = activeShifts.length > 0;
 
@@ -863,7 +884,7 @@ export default function ProductionBoard() {
           )}
           {activeTab === 'paneer' && (
             <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${showFilters ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}>
-              <Filter className="w-4 h-4" /> Filters
+              <Filter className="w-4 h-4" /> Filters{(filters.status !== 'all' || filters.type !== 'all' || filters.shift !== 'all' || filters.balance !== 'all' || filters.workflow !== 'all' || filters.query) ? ` · ${[filters.status !== 'all', filters.type !== 'all', filters.shift !== 'all', filters.balance !== 'all', filters.workflow !== 'all', Boolean(filters.query)].filter(Boolean).length}` : ''}
             </button>
           )}
           {activeTab === 'paneer' && (
@@ -966,7 +987,12 @@ export default function ProductionBoard() {
 
       {/* Filters */}
       {showFilters && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+          <div className="sm:col-span-2">
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Search rounds</label>
+            <input value={filters.query} onChange={(e) => setFilters({ ...filters, query: e.target.value })} placeholder="Batch, S5/R2, cutter, team..." className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          </div>
           <div>
             <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Milk Lot</label>
             <select value={selectedMilkLotId} onChange={(e) => setFilters({ ...filters, milkLot: e.target.value, shift: 'all' })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
@@ -977,7 +1003,7 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Status</label>
             <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="all">All Statuses</option>
-              {statusFlow.map((s) => <option key={s} value={s}>{statusLabels[s]}</option>)}
+              {[...statusFlow, 'spp_pending', 'pan111_pending'].map((s) => <option key={s} value={s}>{statusLabels[s] || s}</option>)}
             </select>
           </div>
           <div>
@@ -986,7 +1012,6 @@ export default function ProductionBoard() {
               <option value="all">All Types</option>
               <option value="D">D (Malai)</option>
               <option value="C/S">C/S (Rozana)</option>
-              <option value="Halloumi">Halloumi</option>
             </select>
           </div>
           <div>
@@ -995,6 +1020,30 @@ export default function ProductionBoard() {
               <option value="all">All Shifts</option>
               {productionShifts.map(s => <option key={s.id} value={s.id}>Shift {s.shiftNumber}</option>)}
             </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Packing balance</label>
+            <select value={filters.balance} onChange={(e) => setFilters({ ...filters, balance: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+              <option value="all">All balances</option>
+              <option value="balance_left">Balance left</option>
+              <option value="overpacked">Over-packed</option>
+              <option value="fully_packed">Fully packed</option>
+              <option value="no_balance">No balance recorded</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Workflow</label>
+            <select value={filters.workflow} onChange={(e) => setFilters({ ...filters, workflow: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+              <option value="all">All workflows</option>
+              <option value="spp">SPP pieces</option>
+              <option value="pan111">PAN111</option>
+              <option value="clingwrapped">Clingwrapped</option>
+            </select>
+          </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
+            <p className="text-xs text-slate-500">Showing {paneerRounds.length} matching Paneer round{paneerRounds.length === 1 ? '' : 's'}.</p>
+            <button onClick={() => setFilters({ milkLot: selectedMilkLotId, status: 'all', type: 'all', shift: 'all', balance: 'all', workflow: 'all', query: '' })} className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50">Clear filters</button>
           </div>
         </div>
       )}
