@@ -20,10 +20,13 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { statusFlow, statusLabels, statusColors } from '../data/mockData';
+import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import HalloumiTab from './HalloumiTab';
 import ButterTab from './ButterTab';
 import GheeTab from './GheeTab';
 import CrumbingTab from './CrumbingTab';
+
+const emptyPackForm = { sku: '', cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0, reason: '' };
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
   const currentIndex = statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
@@ -50,7 +53,7 @@ export default function ProductionBoard() {
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
   const isOwner = currentRole === 'owner';
-  const editableStageOptions = [...statusFlow, 'spp_pending'] as string[];
+  const editableStageOptions = [...statusFlow, 'spp_pending', 'pan111_pending'] as string[];
   
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all' });
@@ -90,6 +93,9 @@ export default function ProductionBoard() {
     sku: '',
     cases: 0,
     loose: 0,
+    looseWeightKg: 0,
+    weightKg: 0,
+    reason: '',
   });
   const [editingPackIndex, setEditingPackIndex] = useState<number | null>(null);
   
@@ -374,38 +380,60 @@ export default function ProductionBoard() {
     showToast('success', 'Moved to freezer');
   };
 
-  // SKU weight configurations (kg per case)
-  const skuWeightPerCase: Record<string, number> = {
-    'MPAN100': 15,    // 1kg × 15 packets/case
-    'MPAN400': 9.6,   // 400g × 24 packets/case
-    'MPAN200': 4.8,   // 200g × 24 packets/case
-    'RPAN100': 15,    // 1kg × 15 packets/case
-    'RPAN400': 9.6,   // 400g × 24 packets/case
-    'RPAN200': 4.8,   // 200g × 24 packets/case
-    'SPP-200': 1.32,  // 8 pieces × ~165g per 8 pieces × 12 packets/case
-  };
-
   const handlePack = (roundId: string) => {
     const round = productionRounds.find(r => r.id === roundId);
     if (!round) return;
-
-    // Calculate weight packed
-    const weightPerCase = skuWeightPerCase[packForm.sku] || 0;
-    const weightPerPacket = weightPerCase / 24; // Assuming 24 packets per case for most SKUs
-    const totalWeightPacked = (packForm.cases * weightPerCase) + (packForm.loose * weightPerPacket);
+    const definition = paneerSkuByCode[packForm.sku];
+    if (!definition || !getAllowedPaneerSkus(round.type as 'D' | 'C/S', round.cuttingType).some(item => item.sku === packForm.sku)) {
+      showToast('error', 'That SKU is not permitted for this paneer type or cutting option');
+      return;
+    }
+    if (definition.packMode === 'weight_only' && packForm.reason.trim().length < 3) {
+      showToast('error', 'Enter a reason before recording PAN111');
+      return;
+    }
+    const totalWeightPacked = getPaneerPackWeight(definition, packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg);
+    if (totalWeightPacked <= 0) {
+      showToast('error', definition.packMode === 'weight_only' ? 'Enter a PAN111 weight' : 'Enter cases, loose packets, or loose weight');
+      return;
+    }
 
     // When correcting an existing packing entry, return its old weight to the
     // balance before applying the corrected values.
     const existingPacked = round.packedSkus || [];
     const previousPack = editingPackIndex !== null ? existingPacked[editingPackIndex] : undefined;
-    const previousWeight = previousPack
-      ? ((skuWeightPerCase[previousPack.sku] || 0) * previousPack.cases) + ((skuWeightPerCase[previousPack.sku] || 0) / 24 * previousPack.loose)
-      : 0;
+    const previousWeight = previousPack ? getPaneerPackWeight(paneerSkuByCode[previousPack.sku], previousPack.cases, previousPack.loose, previousPack.looseWeightKg || 0, previousPack.weightKg || 0) : 0;
     const currentBalance = (round.remainingBalance ?? round.outputWeight ?? 0) + previousWeight;
     const newBalance = currentBalance - totalWeightPacked;
 
+    if (definition.packMode === 'weight_only' && editingPackIndex === null) {
+      if (totalWeightPacked > currentBalance + 0.01) {
+        showToast('error', `PAN111 weight cannot exceed the available balance of ${currentBalance.toFixed(2)} kg`);
+        return;
+      }
+      updateProductionRound(roundId, {
+        status: 'pan111_pending',
+        locked: false,
+        pan111ApprovalStatus: 'pending',
+        pan111ApprovalReason: packForm.reason.trim(),
+        pan111RequestedWeight: totalWeightPacked,
+        pan111PreviousStatus: round.status,
+        pan111ApprovalRequestedAt: new Date().toISOString(),
+      });
+      setShowPackModal(false);
+      setPackForm(emptyPackForm);
+      showToast('success', `PAN111 request submitted: ${totalWeightPacked.toFixed(2)} kg. Awaiting owner/admin approval.`);
+      return;
+    }
+
     // Add to packed SKUs array
-    const replacement = { sku: packForm.sku, cases: packForm.cases, loose: packForm.loose };
+    const replacement = {
+      sku: packForm.sku,
+      cases: definition.packMode === 'weight_only' ? 0 : packForm.cases,
+      loose: definition.packMode === 'weight_only' ? 0 : packForm.loose,
+      ...(definition.packMode === 'weight_loose' ? { looseWeightKg: packForm.looseWeightKg } : {}),
+      ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightPacked, reason: packForm.reason.trim() } : {}),
+    };
     const newPackedSkus = editingPackIndex !== null
       ? existingPacked.map((pack, index) => index === editingPackIndex ? replacement : pack)
       : [...existingPacked, replacement];
@@ -428,8 +456,42 @@ export default function ProductionBoard() {
     }
     
     setShowPackModal(false);
-    setPackForm({ sku: '', cases: 0, loose: 0 });
+    setPackForm(emptyPackForm);
     setEditingPackIndex(null);
+  };
+
+  const handleApprovePan111 = (roundId: string) => {
+    const round = productionRounds.find(item => item.id === roundId);
+    const weight = round?.pan111RequestedWeight || 0;
+    if (!round || round.pan111ApprovalStatus !== 'pending' || weight <= 0) return;
+    const now = new Date();
+    const useByDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const packedSkus = [...(round.packedSkus || []), { sku: 'PAN111', cases: 0, loose: 0, weightKg: weight, reason: round.pan111ApprovalReason }];
+    addIntermediateLot({
+      lotCode: `PAN111-${round.milkLotCode}-S${round.shiftNumber}-R${round.roundNumber}`,
+      productId: 'pan111', productName: 'PAN111 (Round Recovered)', productClass: 'intermediate',
+      sourceBatchId: round.id, sourceBatchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`,
+      producedQuantity: weight, currentQuantity: weight, uom: 'kg', storageLocation: 'Chiller', status: 'available', producedAt: now.toISOString(),
+      sourceMilkLotCode: round.milkLotCode, sourceShift: round.shiftNumber, sourceRound: round.roundNumber,
+      qualityClass: 'round_recovered', shelfLifeDays: 7, useByDate: useByDate.toISOString(), priorityUse: true,
+    });
+    updateProductionRound(roundId, {
+      status: 'packed', locked: true, packedSkus, remainingBalance: 0,
+      pan111ApprovalStatus: 'approved', pan111ApprovedAt: now.toISOString(), pan111ApprovedBy: currentRole,
+      pan111RequestedWeight: undefined, pan111PreviousStatus: undefined,
+    });
+    showToast('success', `PAN111 approved: ${weight.toFixed(2)} kg is now available for priority use`);
+  };
+
+  const handleRejectPan111 = (roundId: string) => {
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round || round.pan111ApprovalStatus !== 'pending') return;
+    updateProductionRound(roundId, {
+      status: round.pan111PreviousStatus || 'cut', locked: false, pan111ApprovalStatus: 'rejected',
+      pan111RejectedAt: new Date().toISOString(), pan111RejectedBy: currentRole,
+      pan111RequestedWeight: undefined, pan111PreviousStatus: undefined,
+    });
+    showToast('success', 'PAN111 request rejected. The balance is available for normal paneer packing or SPP routing.');
   };
 
   const handleHandover = (roundId: string) => {
@@ -444,6 +506,11 @@ export default function ProductionBoard() {
   const handleRecordPan111 = () => {
     if (!activeMilkLot) return;
     
+    if (pan111Form.weight <= 0) {
+      showToast('error', 'Enter a PAN111 weight');
+      return;
+    }
+    const useByDate = new Date(Date.now() + 730 * 24 * 60 * 60 * 1000);
     addIntermediateLot({
       lotCode: `PAN111-${activeMilkLot.lotCode}`,
       productId: 'pan111',
@@ -460,6 +527,10 @@ export default function ProductionBoard() {
       sourceMilkLotCode: activeMilkLot.lotCode,
       sourceShift: 0,
       sourceRound: 0,
+      qualityClass: 'standard',
+      shelfLifeDays: 730,
+      useByDate: useByDate.toISOString(),
+      priorityUse: false,
     });
 
     showToast('success', `PAN111 recorded: ${pan111Form.weight} kg`);
@@ -733,9 +804,17 @@ export default function ProductionBoard() {
   };
 
   const getActionButtons = (round: any) => {
+    if (round.pan111ApprovalStatus === 'pending') {
+      return canForceStage ? <div className="flex flex-wrap items-center gap-1"><span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 {round.pan111RequestedWeight?.toFixed(2)} kg · {round.pan111ApprovalReason}</span><button onClick={() => handleApprovePan111(round.id)} className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-700">Approve</button><button onClick={() => handleRejectPan111(round.id)} className="rounded bg-red-600 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700">Reject</button></div> : <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Awaiting PAN111 approval</span>;
+    }
     if (!isOwner || round.status !== 'packed') return null;
     return <button onClick={() => handleHandover(round.id)} className="flex w-fit items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-800"><CheckCircle2 className="h-3 w-3" /> Hand Over</button>;
   };
+
+  const selectedPackRound = selectedRound ? productionRounds.find(r => r.id === selectedRound) : undefined;
+  const allowedPackSkus = selectedPackRound && (selectedPackRound.type === 'D' || selectedPackRound.type === 'C/S')
+    ? getAllowedPaneerSkus(selectedPackRound.type, selectedPackRound.cuttingType)
+    : [];
 
   return (
     <div className="space-y-4">
@@ -1099,12 +1178,13 @@ export default function ProductionBoard() {
                           <td className="px-2 py-1.5 text-sm">
                             {round.packedSkus && round.packedSkus.length > 0 ? (
                               <div className="space-y-1">
-                                {round.packedSkus.map((p, i) => <div key={i} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">{p.sku}: {p.cases}c + {p.loose}l</div>)}
+                                {round.packedSkus.map((p, i) => <div key={i} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}</div>)}
                               </div>
                             ) : <span className="text-slate-400">—</span>}
+                            {round.pan111ApprovalStatus === 'pending' && <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
                             {round.remainingBalance !== undefined && <div className={`mt-1 inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold ${round.remainingBalance > 0 ? 'border-amber-200 bg-amber-50 text-amber-600' : round.remainingBalance < 0 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>Balance {round.remainingBalance.toFixed(2)} kg</div>}
-                            {['cut', 'frozen', 'packed'].includes(round.status) && !round.locked && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm({ sku: '', cases: 0, loose: 0 }); setShowPackModal(true); }} className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"><Package className="h-3 w-3" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
-                            {isOwner && round.packedSkus && round.packedSkus.length > 0 && <button onClick={() => { const index = round.packedSkus!.length - 1; const pack = round.packedSkus![index]; setSelectedRound(round.id); setEditingPackIndex(index); setPackForm({ sku: pack.sku, cases: pack.cases, loose: pack.loose }); setShowPackModal(true); }} className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
+                            {['cut', 'frozen', 'packed'].includes(round.status) && !round.locked && round.pan111ApprovalStatus !== 'pending' && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm(emptyPackForm); setShowPackModal(true); }} className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"><Package className="h-3 w-3" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
+                            {isOwner && round.packedSkus && round.packedSkus.length > 0 && <button onClick={() => { const index = round.packedSkus!.length - 1; const pack = round.packedSkus![index]; setSelectedRound(round.id); setEditingPackIndex(index); setPackForm({ sku: pack.sku, cases: pack.cases, loose: pack.loose, looseWeightKg: pack.looseWeightKg || 0, weightKg: pack.weightKg || 0, reason: pack.reason || '' }); setShowPackModal(true); }} className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             {!round.locked && (
@@ -1299,7 +1379,7 @@ export default function ProductionBoard() {
                     <div className="space-y-1">
                       {existingPacking.map((pack, idx) => (
                         <div key={idx} className="text-xs text-blue-700">
-                          Session {idx + 1}: {pack.sku} - {pack.cases} cases + {pack.loose} loose
+                        Session {idx + 1}: {pack.sku} - {pack.weightKg !== undefined ? `${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.cases} cases + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.cases} cases + ${pack.loose} loose`}
                         </div>
                       ))}
                     </div>
@@ -1312,31 +1392,27 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">SKU</label>
             <select value={packForm.sku} onChange={(e) => setPackForm({ ...packForm, sku: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select SKU</option>
-              <option value="MPAN100">MPAN100 - Malai Paneer 1kg (15 kg/case)</option>
-              <option value="MPAN400">MPAN400 - Malai Paneer 400g (9.6 kg/case)</option>
-              <option value="MPAN200">MPAN200 - Malai Paneer 200g (4.8 kg/case)</option>
-              <option value="RPAN100">RPAN100 - Rozana Paneer 1kg (15 kg/case)</option>
-              <option value="RPAN400">RPAN400 - Rozana Paneer 400g (9.6 kg/case)</option>
-              <option value="RPAN200">RPAN200 - Rozana Paneer 200g (4.8 kg/case)</option>
-              <option value="SPP-200">SPP-200 - Spicy Paneer Poppers (1.32 kg/case)</option>
+              {allowedPackSkus.map(definition => <option key={definition.sku} value={definition.sku}>{definition.sku} - {definition.productName}{definition.packMode === 'weight_only' ? ' (weight only)' : definition.packMode === 'weight_loose' ? ' (loose by weight)' : ` (${(definition.unitsPerCase || 0) * definition.unitWeightKg} kg/case)`}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode !== 'weight_only' && <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cases</label>
               <input type="number" value={packForm.cases} onChange={(e) => setPackForm({ ...packForm, cases: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
             </div>
-            <div>
+            {paneerSkuByCode[packForm.sku]?.packMode === 'weight_loose' ? <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Loose weight (kg)</label>
+              <input type="number" value={packForm.looseWeightKg} onChange={(e) => setPackForm({ ...packForm, looseWeightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" />
+            </div> : <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Loose Packets</label>
               <input type="number" value={packForm.loose} onChange={(e) => setPackForm({ ...packForm, loose: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
-            </div>
-          </div>
+            </div>}
+          </div>}
+          {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode === 'weight_only' && <div className="space-y-3"><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">PAN111 weight (kg)</span><input type="number" value={packForm.weightKg} onChange={(e) => setPackForm({ ...packForm, weightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" /></label><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Reason (required for approval)</span><textarea value={packForm.reason} onChange={(e) => setPackForm({ ...packForm, reason: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={2} placeholder="Explain why this paneer is being recorded as PAN111" /></label></div>}
           {packForm.sku && selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
             const balance = round?.remainingBalance ?? round?.outputWeight ?? 0;
-            const weightPerCase = skuWeightPerCase[packForm.sku] || 0;
-            const weightPerPacket = weightPerCase / 24;
-            const totalWeightPacked = (packForm.cases * weightPerCase) + (packForm.loose * weightPerPacket);
+            const totalWeightPacked = getPaneerPackWeight(paneerSkuByCode[packForm.sku], packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg);
             const newBalance = balance - totalWeightPacked;
             
             return (

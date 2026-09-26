@@ -126,6 +126,7 @@ export interface ProductionRound {
   storedNumberOfBlocks?: number;
   storedCutBy?: string;
   storedOutputWeight?: number;
+  clingwrappedAt?: string;
   sppRecordedWeight?: number; // kg routed into SPP production
   balancePaneerWeight?: number;
   balanceDisposition?: string;
@@ -139,10 +140,25 @@ export interface ProductionRound {
     sku: string;
     cases: number;
     loose: number;
+    looseWeightKg?: number;
+    weightKg?: number;
+    reason?: string;
   }>;
   
   // Remaining balance after cutting (kg available for packing)
   remainingBalance?: number;
+
+  // Round-level PAN111 approval. The requested weight remains in the round
+  // balance until an approved admin/owner verifies it.
+  pan111ApprovalStatus?: 'pending' | 'approved' | 'rejected';
+  pan111ApprovalReason?: string;
+  pan111RequestedWeight?: number;
+  pan111PreviousStatus?: string;
+  pan111ApprovalRequestedAt?: string;
+  pan111ApprovedAt?: string;
+  pan111ApprovedBy?: string;
+  pan111RejectedAt?: string;
+  pan111RejectedBy?: string;
   
   // Cream recovery (C/S rounds only)
   creamRecovered?: number; // kg
@@ -187,6 +203,10 @@ export interface IntermediateLot {
   sourceMilkLotCode: string;
   sourceShift: number;
   sourceRound: number;
+  qualityClass?: 'standard' | 'round_recovered';
+  shelfLifeDays?: number;
+  useByDate?: string;
+  priorityUse?: boolean;
 }
 
 export interface FinishedStockLot {
@@ -201,6 +221,8 @@ export interface FinishedStockLot {
   status: 'awaiting_handover' | 'handed_over' | 'returned';
   createdAt: string;
   sourceBatchCodes: string[]; // genealogy: which rounds fed this
+  weightKg?: number;
+  looseWeightKg?: number;
 }
 
 export interface TemperatureReading {
@@ -992,6 +1014,7 @@ export const statusFlow = [
 ] as const;
 
 export const statusLabels: Record<string, string> = {
+  pan111_pending: 'PAN111 Approval Pending',
   spp_pending: 'SPP Weight Pending',
   scheduled: 'Scheduled',
   in_production: 'In Production',
@@ -1008,6 +1031,7 @@ export const statusLabels: Record<string, string> = {
 };
 
 export const statusColors: Record<string, string> = {
+  pan111_pending: 'bg-amber-500',
   spp_pending: 'bg-pink-500',
   scheduled: 'bg-slate-400',
   in_production: 'bg-blue-500',

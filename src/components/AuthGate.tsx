@@ -12,19 +12,20 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (localDemoMode) return <>{children}</>;
 
   useEffect(() => {
-    if (!supabase) {
+    const client = supabase;
+    if (!client) {
       setLoading(false);
       return;
     }
 
     let mounted = true;
-    void supabase.auth.getSession().then(async ({ data }) => {
+    void client.auth.getSession().then(async ({ data }) => {
       if (mounted) {
         let nextSession = data.session;
         if (nextSession) {
-          const { data: profile } = await supabase.from('profiles').select('status, role').eq('id', nextSession.user.id).maybeSingle<{ status: string; role: string }>();
+          const { data: profile } = await client.from('profiles').select('status, role').eq('id', nextSession.user.id).maybeSingle<{ status: string; role: string }>();
           if (!profile || profile.status !== 'approved') {
-            await supabase.auth.signOut();
+            await client.auth.signOut();
             nextSession = null;
             setAuthMessage('Your account is awaiting owner approval.');
           } else {
@@ -36,14 +37,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       }
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+    const { data: listener } = client.auth.onAuthStateChange(async (_event, nextSession) => {
       if (nextSession) {
-        const { data: profile } = await supabase.from('profiles').select('status, role').eq('id', nextSession.user.id).maybeSingle<{ status: string; role: string }>();
+        const { data: profile } = await client.from('profiles').select('status, role').eq('id', nextSession.user.id).maybeSingle<{ status: string; role: string }>();
         if (profile?.status === 'approved') {
           window.localStorage.setItem('vejoy_user_role', profile.role);
           setSession(nextSession);
         } else {
-          await supabase.auth.signOut();
+          await client.auth.signOut();
           setAuthMessage('Your account is awaiting owner approval.');
           setSession(null);
         }

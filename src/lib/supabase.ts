@@ -7,5 +7,5 @@ const localDemoMode = import.meta.env.VITE_LOCAL_DEMO_MODE === 'true';
 export const supabaseEnabled = !localDemoMode && Boolean(supabaseUrl && supabasePublishableKey);
 
 export const supabase = supabaseEnabled
-  ? createClient(supabaseUrl, supabasePublishableKey)
+  ? createClient(supabaseUrl!, supabasePublishableKey!)
   : null;

@@ -46,12 +46,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   useEffect(() => {
-    if (!supabase) return;
-    void supabase.auth.getUser().then(async ({ data }) => {
+    const client = supabase;
+    if (!client) return;
+    void client.auth.getUser().then(async ({ data }) => {
       const user = data.user;
       if (!user) return;
       setUsername(user.user_metadata?.username || user.email?.split('@')[0] || 'User');
-      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle<{ role: string }>();
+      const { data: profile } = await client.from('profiles').select('role').eq('id', user.id).maybeSingle<{ role: string }>();
       if (profile?.role) setRole(profile.role);
     });
   }, []);

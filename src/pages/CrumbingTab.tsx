@@ -4,6 +4,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { useSupabaseState } from '../hooks/useSupabaseState';
+import { crumbingSkuDefinitions, crumbingSkuByCode, getCrumbingPackWeight } from '../data/skuConfig';
 
 type CrumbingStatus = 
   | 'scheduled'
@@ -49,8 +50,10 @@ interface CrumbingBatch {
   fryTemperature?: number;
   fryTime?: number;
   packedSkus?: Array<{
+    sku: string;
     cases: number;
     loose: number;
+    weightKg?: number;
   }>;
   notes?: string;
   createdAt: string;
@@ -85,6 +88,7 @@ export default function CrumbingTab() {
 
   const [packForm, setPackForm] = useState({
     traysPacked: 0,
+    sku: '',
     cases: 0,
     loose: 0,
   });
@@ -94,16 +98,19 @@ export default function CrumbingTab() {
     if (type === 'SPP') {
       // Paneer rounds cut as SPP pieces
       return productionRounds.filter(r => 
-        r.type === 'C/S' && 
+        (r.type === 'C/S' || r.type === 'D') &&
         r.cuttingType === 'SPP pieces' &&
         r.status === 'cut'
       );
     } else if (type === 'JP') {
       // PAN111 from intermediate lots
-      return intermediateLots.filter(lot => 
+      return [...intermediateLots.filter(lot =>
         lot.productId === 'pan111' &&
         lot.status === 'available'
-      );
+      )].sort((a, b) => {
+        if (Boolean(a.priorityUse) !== Boolean(b.priorityUse)) return a.priorityUse ? -1 : 1;
+        return new Date(a.useByDate || a.producedAt).getTime() - new Date(b.useByDate || b.producedAt).getTime();
+      });
     } else if (type === 'HCP') {
       // Halloumi rounds sent to HCP
       return productionRounds.filter(r => 
@@ -137,7 +144,7 @@ export default function CrumbingTab() {
     if (newBatchForm.type === 'SPP') {
       const source = productionRounds.find(r => r.id === newBatchForm.sourceBatchId);
       if (source) {
-        sourceBatchCode = `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/C/S`;
+        sourceBatchCode = `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/${source.type}`;
         milkLotCode = source.milkLotCode;
       }
     } else if (newBatchForm.type === 'JP') {
@@ -211,13 +218,19 @@ export default function CrumbingTab() {
   };
 
   const handlePack = () => {
-    if (!selectedBatch || packForm.traysPacked <= 0) {
-      showToast('error', 'Please enter valid tray count');
+    if (!selectedBatch || packForm.traysPacked <= 0 || !packForm.sku || packForm.cases < 0 || packForm.loose < 0) {
+      showToast('error', 'Select a SKU and enter valid tray and pack quantities');
       return;
     }
 
     const batch = crumbingBatches.find(b => b.id === selectedBatch);
     if (!batch) return;
+    const definition = crumbingSkuByCode[packForm.sku];
+    if (!definition || definition.crumbingType !== batch.type) {
+      showToast('error', 'That SKU is not valid for this crumbing section');
+      return;
+    }
+    const weightKg = getCrumbingPackWeight(definition, packForm.cases, packForm.loose);
 
     setCrumbingBatches(crumbingBatches.map(b => {
       if (b.id === selectedBatch) {
@@ -227,8 +240,10 @@ export default function CrumbingTab() {
           status: 'packed',
           traysPacked: b.traysPacked + packForm.traysPacked,
           packedSkus: [...existingPacked, {
+            sku: packForm.sku,
             cases: packForm.cases,
             loose: packForm.loose,
+            weightKg,
           }],
         };
       }
@@ -237,7 +252,7 @@ export default function CrumbingTab() {
 
     showToast('success', `Packed ${packForm.traysPacked} trays (${packForm.cases} cases + ${packForm.loose} loose)`);
     setShowPackModal(false);
-    setPackForm({ traysPacked: 0, cases: 0, loose: 0 });
+    setPackForm({ traysPacked: 0, sku: '', cases: 0, loose: 0 });
   };
 
   const handleHandOver = (batchId: string) => {
@@ -279,6 +294,7 @@ export default function CrumbingTab() {
           key="pack"
           onClick={() => {
             setSelectedBatch(batch.id);
+            setPackForm({ traysPacked: 0, sku: '', cases: 0, loose: 0 });
             setShowPackModal(true);
           }}
           className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-white rounded text-xs font-medium hover:bg-emerald-600"
@@ -317,9 +333,9 @@ export default function CrumbingTab() {
             <div>
               <h3 className="text-lg font-bold text-slate-900">{title}</h3>
               <p className="text-sm text-slate-600">
-                {type === 'SPP' && 'Spicy Paneer Poppers - 8 pieces/packet, 12 packets/case'}
-                {type === 'JP' && 'Jalapeño Poppers - 6 pieces/packet, 12 packets/case'}
-                {type === 'HCP' && 'Halloumi Cheese Poppers - 8 pieces/packet, 12 packets/case'}
+                {type === 'SPP' && 'Spicy Paneer Poppers - 250g packets, 12 packets/case'}
+                {type === 'JP' && 'Jalapeño Poppers - 250g packets, 12 packets/case'}
+                {type === 'HCP' && 'Halloumi Cheese Poppers - 250g packets, 12 packets/case'}
               </p>
             </div>
             <button
@@ -387,7 +403,7 @@ export default function CrumbingTab() {
                       {batch.packedSkus && batch.packedSkus.length > 0 ? (
                         <div className="text-xs">
                           {batch.packedSkus.map((p, i) => (
-                            <div key={i}>{p.cases} cases + {p.loose} loose</div>
+                            <div key={i}>{p.sku}: {p.cases} cases + {p.loose} loose{p.weightKg !== undefined ? ` (${p.weightKg.toFixed(2)} kg)` : ''}</div>
                           ))}
                         </div>
                       ) : '—'}
@@ -461,7 +477,7 @@ export default function CrumbingTab() {
               <option value="">Select source...</option>
               {getAvailableSources(activeType).map((source: any) => (
                 <option key={source.id} value={source.id}>
-                  {activeType === 'SPP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/C/S - ${(source.sppRecordedWeight ?? source.outputWeight ?? 0)} kg SPP`}
+                  {activeType === 'SPP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/${source.type} - ${(source.sppRecordedWeight ?? source.outputWeight ?? 0)} kg SPP`}
                   {activeType === 'JP' && `${source.lotCode} - ${source.currentQuantity} kg PAN111`}
                   {activeType === 'HCP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/Halloumi - ${source.outputWeight} kg`}
                 </option>
@@ -575,6 +591,13 @@ export default function CrumbingTab() {
       {/* Pack Modal */}
       <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title="Pack Fried Trays">
         <div className="space-y-4">
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Final SKU</label>
+            <select value={packForm.sku} onChange={(e) => setPackForm({ ...packForm, sku: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+              <option value="">Select SKU...</option>
+              {crumbingSkuDefinitions.filter(definition => definition.crumbingType === (selectedBatch ? crumbingBatches.find(batch => batch.id === selectedBatch)?.type : activeType)).map(definition => <option key={definition.sku} value={definition.sku}>{definition.sku} - {definition.productName} (250g, 12/case)</option>)}
+            </select>
+          </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Trays to Pack</label>
             <input
