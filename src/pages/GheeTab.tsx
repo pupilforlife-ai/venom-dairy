@@ -3,6 +3,7 @@ import { Plus, Package, CheckCircle2, AlertTriangle, XCircle } from 'lucide-reac
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
+import { getButterBatchCode, getGheeBatchCode } from '../data/mockData';
 
 type GheeStatus = 
   | 'scheduled'
@@ -40,7 +41,7 @@ const gheeStatusColors: Record<GheeStatus, string> = {
 };
 
 export default function GheeTab() {
-  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift } = useApp();
+  const { productionRounds, productionShifts, milkLots, updateProductionRound, updateMilkLot, addProductionRound, addProductionShift } = useApp();
   const { showToast } = useToast();
 
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
@@ -212,6 +213,8 @@ export default function GheeTab() {
       afOilInput: afOilInput,
       expectedYield: expectedYield,
       remainingBalance: 0,
+      batchCode: getGheeBatchCode(shift.milkLotCode),
+      sourceBatchCode: getButterBatchCode(shift.milkLotCode),
     };
 
     console.log('Creating round with data:', newRoundData);
@@ -227,6 +230,7 @@ export default function GheeTab() {
     );
 
     let remainingButterNeeded = newRound.butterInput;
+    let butterUsed = 0;
     butterRounds.forEach(round => {
       if (remainingButterNeeded <= 0) return;
       
@@ -239,10 +243,38 @@ export default function GheeTab() {
         destination: 'ghee',
       });
       
+      butterUsed += toUse;
       remainingButterNeeded -= toUse;
     });
 
-    showToast('success', `Ghee round created: 04-${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
+    const existingPool = milkLot.gheePool || {
+      batchId: getGheeBatchCode(milkLot.lotCode),
+      sourceButterBatchId: getButterBatchCode(milkLot.lotCode),
+      milkLotId: milkLot.id,
+      totalGheeProduced: 0,
+      packedWeight: 0,
+      availableBalance: 0,
+      roundsContributed: [],
+    };
+    if (milkLot.butterPool && butterUsed > 0) {
+      updateMilkLot(milkLot.id, {
+        butterPool: {
+          ...milkLot.butterPool,
+          usedInGhee: milkLot.butterPool.usedInGhee + butterUsed,
+          availableBalance: Math.max(0, milkLot.butterPool.availableBalance - butterUsed),
+        },
+        gheePool: {
+          ...existingPool,
+          batchId: existingPool.batchId || getGheeBatchCode(milkLot.lotCode),
+          sourceButterBatchId: existingPool.sourceButterBatchId || getButterBatchCode(milkLot.lotCode),
+          roundsContributed: existingPool.roundsContributed,
+        },
+      });
+    } else {
+      updateMilkLot(milkLot.id, { gheePool: existingPool });
+    }
+
+    showToast('success', `Ghee round created: ${getGheeBatchCode(shift.milkLotCode)}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
     setShowNewRoundModal(false);
     setNewRound({ shiftId: '', roundNumber: 1, milkLotId: '', butterInput: 0, team: '' });
   };
@@ -311,13 +343,41 @@ export default function GheeTab() {
       loose: looseBuckets,
     }];
 
+    const previousYield = calculateActualYield(round);
     const actualYield = calculateActualYield({ ...round, packedSkus: newPacking });
+    const yieldDelta = actualYield - previousYield;
 
     updateProductionRound(selectedRound, {
       packedSkus: newPacking,
       outputWeight: actualYield,
       status: 'packed',
     });
+
+    const milkLot = milkLots.find(lot => lot.id === round.milkLotId);
+    if (milkLot && yieldDelta !== 0) {
+      const existingPool = milkLot.gheePool || {
+        batchId: getGheeBatchCode(milkLot.lotCode),
+        sourceButterBatchId: getButterBatchCode(milkLot.lotCode),
+        milkLotId: milkLot.id,
+        totalGheeProduced: 0,
+        packedWeight: 0,
+        availableBalance: 0,
+        roundsContributed: [],
+      };
+      updateMilkLot(milkLot.id, {
+        gheePool: {
+          ...existingPool,
+          batchId: existingPool.batchId || getGheeBatchCode(milkLot.lotCode),
+          sourceButterBatchId: existingPool.sourceButterBatchId || getButterBatchCode(milkLot.lotCode),
+          totalGheeProduced: Math.max(0, existingPool.totalGheeProduced + yieldDelta),
+          packedWeight: Math.max(0, existingPool.packedWeight + yieldDelta),
+          availableBalance: Math.max(0, existingPool.availableBalance),
+          roundsContributed: existingPool.roundsContributed.includes(round.id)
+            ? existingPool.roundsContributed
+            : [...existingPool.roundsContributed, round.id],
+        },
+      });
+    }
 
     showToast('success', `Packed: ${cases} cases + ${looseBuckets} loose buckets`);
     setShowPackingModal(false);
@@ -465,6 +525,33 @@ export default function GheeTab() {
         </div>
       </div>
 
+      {milkLots.some(lot => lot.gheePool) && (
+        <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-4">
+          <h4 className="text-sm font-semibold text-amber-900 mb-3">🫙 Common Ghee Pools</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {milkLots.filter(lot => lot.gheePool).map(lot => {
+              const pool = lot.gheePool!;
+              return (
+                <div key={lot.id} className="bg-white rounded-lg p-3 border border-amber-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="text-sm font-bold text-slate-900">{pool.batchId}</span>
+                      <span className="block text-[11px] text-slate-500">From {pool.sourceButterBatchId}</span>
+                    </div>
+                    <span className="text-xs text-amber-700">{pool.roundsContributed.length} rounds</span>
+                  </div>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-slate-600">Produced:</span><span className="font-medium text-slate-900">{pool.totalGheeProduced.toFixed(2)} kg</span></div>
+                    <div className="flex justify-between"><span className="text-slate-600">Packed:</span><span className="font-medium text-orange-600">{pool.packedWeight.toFixed(2)} kg</span></div>
+                    <div className="flex justify-between border-t border-slate-200 pt-1"><span className="text-slate-700 font-medium">Available:</span><span className="font-bold text-emerald-600">{pool.availableBalance.toFixed(2)} kg</span></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Debug Panel */}
       <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4 mb-4">
         <h3 className="text-sm font-bold text-yellow-900 mb-2">🐛 Debug Info</h3>
@@ -531,7 +618,7 @@ export default function GheeTab() {
                       <tr key={round.id} className="hover:bg-slate-50/50">
                         <td className="px-4 py-3">
                           <div className="font-mono text-xs font-bold text-slate-900">
-                            04-{round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
+                            {round.batchCode || getGheeBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}
                           </div>
                         </td>
                         <td className="px-4 py-3">

@@ -112,11 +112,9 @@ export default function CrumbingTab() {
         return new Date(a.useByDate || a.producedAt).getTime() - new Date(b.useByDate || b.producedAt).getTime();
       });
     } else if (type === 'HCP') {
-      // Halloumi rounds sent to HCP
-      return productionRounds.filter(r => 
-        r.type === 'Halloumi' &&
-        r.status === 'sent_to_hcp'
-      );
+      // All weighed Halloumi from a milk lot is pooled as HAL-<lot>. The
+      // remaining pool, rather than an individual round, is the crumbing source.
+      return milkLots.filter(lot => (lot.halloumiPool?.availableForCrumbing || 0) > 0);
     }
     return [];
   };
@@ -154,10 +152,10 @@ export default function CrumbingTab() {
         milkLotCode = source.sourceMilkLotCode;
       }
     } else if (newBatchForm.type === 'HCP') {
-      const source = productionRounds.find(r => r.id === newBatchForm.sourceBatchId);
+      const source = milkLots.find(lot => lot.id === newBatchForm.sourceBatchId);
       if (source) {
-        sourceBatchCode = `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/Halloumi`;
-        milkLotCode = source.milkLotCode;
+        sourceBatchCode = source.halloumiPool?.batchId || `HAL-${source.lotCode}`;
+        milkLotCode = source.lotCode;
       }
     }
 
@@ -479,7 +477,7 @@ export default function CrumbingTab() {
                 <option key={source.id} value={source.id}>
                   {activeType === 'SPP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/${source.type} - ${(source.sppRecordedWeight ?? source.outputWeight ?? 0)} kg SPP`}
                   {activeType === 'JP' && `${source.lotCode} - ${source.currentQuantity} kg PAN111`}
-                  {activeType === 'HCP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/Halloumi - ${source.outputWeight} kg`}
+                  {activeType === 'HCP' && `${source.halloumiPool?.batchId || `HAL-${source.lotCode}`} - ${(source.halloumiPool?.availableForCrumbing || 0).toFixed(2)} kg available`}
                 </option>
               ))}
             </select>

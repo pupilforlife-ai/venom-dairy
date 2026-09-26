@@ -3,7 +3,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { Plus, Clock, Package, Scissors, CheckCircle2, Thermometer, Beaker, ShieldAlert } from 'lucide-react';
-import { milkStorageVessels } from '../data/mockData';
+import { getHalloumiBatchCode, milkStorageVessels } from '../data/mockData';
 
 // Halloumi-specific status flow
 const halloumiStatusFlow = [
@@ -118,14 +118,16 @@ const stageRecipes: Record<string, { title: string; details: string[] }> = {
 };
 
 export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { selectedMilkLotId: string; canForceStage: boolean }) {
-  const { productionRounds, productionShifts, milkLots, updateProductionRound, addProductionRound, addProductionShift, forceAdvanceRoundStatus } = useApp();
+  const { productionRounds, productionShifts, milkLots, updateProductionRound, updateMilkLot, addProductionRound, addProductionShift, forceAdvanceRoundStatus } = useApp();
   const { showToast } = useToast();
 
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
+  const [showVacuumPackModal, setShowVacuumPackModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
   const [weightInput, setWeightInput] = useState(0);
+  const [vacuumPackInput, setVacuumPackInput] = useState(0);
 
   // Timer state
   const [timers, setTimers] = useState<Record<string, number>>({});
@@ -241,8 +243,10 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
+      batchCode: getHalloumiBatchCode(shift.milkLotCode),
+      sourceBatchCode: shift.milkLotCode,
     });
-    showToast('success', `Halloumi round created: ${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
+    showToast('success', `Halloumi round created: ${getHalloumiBatchCode(shift.milkLotCode)}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
     setShowNewRoundModal(false);
     setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 240, sourceVessel: '', team: '' });
   };
@@ -266,13 +270,73 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       return;
     }
 
+    const round = halloumiRounds.find(item => item.id === selectedRound);
+    const milkLot = round ? milkLots.find(lot => lot.id === round.milkLotId) : undefined;
+    if (!round || !milkLot) return;
+    const weightDelta = weightInput - (round.outputWeight || 0);
+    const existingPool = milkLot.halloumiPool || {
+      batchId: getHalloumiBatchCode(milkLot.lotCode),
+      milkLotId: milkLot.id,
+      totalProduced: 0,
+      vacuumPacked: 0,
+      availableForCrumbing: 0,
+      roundsContributed: [],
+    };
+
     updateProductionRound(selectedRound, {
       outputWeight: weightInput,
       status: 'weighed',
     });
+    updateMilkLot(milkLot.id, {
+      halloumiPool: {
+        ...existingPool,
+        batchId: existingPool.batchId || getHalloumiBatchCode(milkLot.lotCode),
+        totalProduced: Math.max(0, existingPool.totalProduced + weightDelta),
+        availableForCrumbing: Math.max(0, existingPool.availableForCrumbing + weightDelta),
+        roundsContributed: existingPool.roundsContributed.includes(round.id)
+          ? existingPool.roundsContributed
+          : [...existingPool.roundsContributed, round.id],
+      },
+    });
     showToast('success', `Weight recorded: ${weightInput} kg`);
     setShowWeightModal(false);
     setWeightInput(0);
+  };
+
+  const handleVacuumPack = () => {
+    if (!selectedRound || vacuumPackInput <= 0) {
+      showToast('error', 'Please enter a valid vacuum-packed quantity');
+      return;
+    }
+    const round = halloumiRounds.find(item => item.id === selectedRound);
+    const milkLot = round ? milkLots.find(lot => lot.id === round.milkLotId) : undefined;
+    if (!round || !milkLot) return;
+    const alreadyPacked = round.vacuumPackedWeight || 0;
+    const remainingFromRound = Math.max(0, (round.outputWeight || 0) - alreadyPacked);
+    if (vacuumPackInput > remainingFromRound) {
+      showToast('error', `Only ${remainingFromRound.toFixed(2)} kg remains available from this round`);
+      return;
+    }
+    const existingPool = milkLot.halloumiPool;
+    if (!existingPool) {
+      showToast('error', 'Record the Halloumi output weight before vacuum packing');
+      return;
+    }
+
+    updateProductionRound(selectedRound, {
+      status: 'vacuum_packed',
+      vacuumPackedWeight: alreadyPacked + vacuumPackInput,
+    });
+    updateMilkLot(milkLot.id, {
+      halloumiPool: {
+        ...existingPool,
+        vacuumPacked: existingPool.vacuumPacked + vacuumPackInput,
+        availableForCrumbing: Math.max(0, existingPool.availableForCrumbing - vacuumPackInput),
+      },
+    });
+    showToast('success', `${vacuumPackInput.toFixed(2)} kg allocated to vacuum-packed Halloumi`);
+    setShowVacuumPackModal(false);
+    setVacuumPackInput(0);
   };
 
   const getActionButtons = (round: any) => {
@@ -427,7 +491,11 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       buttons.push(
         <div key="final" className="flex gap-2">
           <button
-            onClick={() => handleStatusChange(round.id, 'vacuum_packed')}
+            onClick={() => {
+              setSelectedRound(round.id);
+              setVacuumPackInput(0);
+              setShowVacuumPackModal(true);
+            }}
             className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-medium hover:bg-emerald-700"
           >
             <Package className="w-3 h-3" /> Vacuum Pack
@@ -485,6 +553,19 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
         </div>
       </div>
 
+      {activeMilkLot?.halloumiPool && (
+        <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border border-cyan-200 rounded-xl p-4">
+          <h4 className="text-sm font-semibold text-cyan-900 mb-3">🧀 Common Halloumi Pool</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Pool batch</p><p className="font-bold text-slate-900">{activeMilkLot.halloumiPool.batchId}</p><p className="text-[11px] text-slate-500">Milk lot {activeMilkLot.lotCode}</p></div>
+            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Total produced</p><p className="font-bold text-slate-900">{activeMilkLot.halloumiPool.totalProduced.toFixed(2)} kg</p></div>
+            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Vacuum packed / sold</p><p className="font-bold text-emerald-700">{activeMilkLot.halloumiPool.vacuumPacked.toFixed(2)} kg</p></div>
+            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Available for crumbing</p><p className="font-bold text-blue-700">{activeMilkLot.halloumiPool.availableForCrumbing.toFixed(2)} kg</p></div>
+          </div>
+          <p className="text-xs text-cyan-800 mt-3">All weighed Halloumi rounds for this milk lot feed the single {activeMilkLot.halloumiPool.batchId} pool. Quantities chosen for vacuum sale and later crumbing remain traceable separately.</p>
+        </div>
+      )}
+
       {/* Production Board */}
       <div className="space-y-4">
         {Object.entries(groupedByShift).map(([shiftId, rounds]) => {
@@ -528,7 +609,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
                         <tr key={round.id} className="hover:bg-slate-50/50">
                           <td className="px-4 py-3">
                             <div className="font-mono text-xs font-bold text-slate-900">
-                              {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
+                              {round.batchCode || getHalloumiBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}
                             </div>
                             <div className="text-xs text-slate-500">{round.plannedInput}L input</div>
                           </td>
@@ -745,6 +826,23 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
             >
               Cancel
             </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showVacuumPackModal} onClose={() => setShowVacuumPackModal(false)} title="Allocate Halloumi for vacuum sale">
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">Enter only the quantity being vacuumed and sold now. The remaining Halloumi stays in the common <strong>{activeMilkLot?.halloumiPool?.batchId || 'HAL pool'}</strong> pool for later crumbing.</p>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Vacuum-packed quantity (kg)</label>
+            <input type="number" value={vacuumPackInput} onChange={(e) => setVacuumPackInput(parseFloat(e.target.value) || 0)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" step="0.1" min="0" placeholder="e.g., 18.5" />
+          </div>
+          <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 text-xs text-cyan-800">
+            The unselected balance remains available for crumbing and is not lost.
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button onClick={handleVacuumPack} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Save vacuum allocation</button>
+            <button onClick={() => setShowVacuumPackModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button>
           </div>
         </div>
       </Modal>

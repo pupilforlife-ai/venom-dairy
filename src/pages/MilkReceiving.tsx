@@ -3,7 +3,7 @@ import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { milkStorageVessels } from '../data/mockData';
+import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, milkStorageVessels } from '../data/mockData';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, addMilkLot, updateMilkLot, addCreamLot } = useApp();
@@ -561,6 +561,32 @@ export default function MilkReceiving() {
                                 ) : (
                                   <p className="text-sm text-slate-400 text-center py-8">No SKUs packed yet</p>
                                 )}
+                              </div>
+                            </div>
+
+                            <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
+                              <h3 className="text-sm font-bold text-slate-900 mb-3">Common product pools · {lot.lotCode}</h3>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                                <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                                  <p className="text-xs text-blue-700 font-semibold">Cream</p>
+                                  <p className="font-mono font-bold text-slate-900">{lot.creamPool?.batchId || getCreamBatchCode(lot.lotCode)}</p>
+                                  <p className="text-xs text-slate-600 mt-1">{(lot.creamPool?.availableBalance || 0).toFixed(2)} kg available</p>
+                                </div>
+                                <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
+                                  <p className="text-xs text-amber-700 font-semibold">Butter</p>
+                                  <p className="font-mono font-bold text-slate-900">{lot.butterPool?.batchId || getButterBatchCode(lot.lotCode)}</p>
+                                  <p className="text-xs text-slate-600 mt-1">{(lot.butterPool?.availableBalance || 0).toFixed(2)} kg available</p>
+                                </div>
+                                <div className="rounded-lg border border-yellow-100 bg-yellow-50 p-3">
+                                  <p className="text-xs text-yellow-700 font-semibold">Ghee</p>
+                                  <p className="font-mono font-bold text-slate-900">{lot.gheePool?.batchId || getGheeBatchCode(lot.lotCode)}</p>
+                                  <p className="text-xs text-slate-600 mt-1">{(lot.gheePool?.availableBalance || 0).toFixed(2)} kg available</p>
+                                </div>
+                                <div className="rounded-lg border border-cyan-100 bg-cyan-50 p-3">
+                                  <p className="text-xs text-cyan-700 font-semibold">Halloumi</p>
+                                  <p className="font-mono font-bold text-slate-900">{lot.halloumiPool?.batchId || getHalloumiBatchCode(lot.lotCode)}</p>
+                                  <p className="text-xs text-slate-600 mt-1">{(lot.halloumiPool?.availableForCrumbing || 0).toFixed(2)} kg for crumbing</p>
+                                </div>
                               </div>
                             </div>
 

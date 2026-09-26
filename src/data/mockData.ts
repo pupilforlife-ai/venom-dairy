@@ -54,10 +54,58 @@ export interface CreamLot {
 export interface CreamPool {
   milkLotId: string;
   milkLotCode: string;
+  batchId?: string;
   totalCream: number; // kg - total cream recovered from all C/S rounds
   usedInButter: number; // kg - cream used in butter production
   availableBalance: number; // kg - remaining cream available
   roundsContributed: string[]; // round IDs that contributed cream
+}
+
+export interface ButterPool {
+  batchId: string;
+  sourceCreamBatchId: string;
+  milkLotId: string;
+  totalButterProduced: number;
+  usedInGhee: number;
+  usedInBlending: number;
+  packedAsPubb: number;
+  availableBalance: number;
+  roundsContributed: string[];
+}
+
+export interface GheePool {
+  batchId: string;
+  sourceButterBatchId: string;
+  milkLotId: string;
+  totalGheeProduced: number;
+  packedWeight: number;
+  availableBalance: number;
+  roundsContributed: string[];
+}
+
+export interface HalloumiPool {
+  batchId: string;
+  milkLotId: string;
+  totalProduced: number;
+  vacuumPacked: number;
+  availableForCrumbing: number;
+  roundsContributed: string[];
+}
+
+export function getCreamBatchCode(milkLotCode: string) {
+  return `CRM-${milkLotCode.replace(/^CRM-/, '')}`;
+}
+
+export function getButterBatchCode(milkLotCode: string) {
+  return `BUT-${milkLotCode.replace(/^BUT-/, '')}`;
+}
+
+export function getGheeBatchCode(milkLotCode: string) {
+  return `GHEE-${milkLotCode.replace(/^GHEE-/, '')}`;
+}
+
+export function getHalloumiBatchCode(milkLotCode: string) {
+  return `HAL-${milkLotCode.replace(/^HAL-/, '')}`;
 }
 
 export interface MilkLot {
@@ -83,6 +131,9 @@ export interface MilkLot {
   milkSales?: MilkSale[];
   creamLots?: CreamLot[];
   creamPool?: CreamPool; // Pooled cream from all C/S rounds in this milk lot
+  butterPool?: ButterPool;
+  gheePool?: GheePool;
+  halloumiPool?: HalloumiPool;
 }
 
 export interface MilkStorageVessel {
@@ -133,7 +184,10 @@ export interface ProductionRound {
   plannedInput: number; // litres
   actualInput: number; // litres
   sourceVessel?: string;
+  batchCode?: string;
+  sourceBatchCode?: string;
   outputWeight: number; // kg gross manufactured output
+  vacuumPackedWeight?: number; // kg allocated from a Halloumi pool for vacuum sale
   startTime: string;
   completedAt?: string;
   
@@ -209,6 +263,8 @@ export interface ProductionRound {
   replacerQuantity?: number; // kg
   pool?: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05';
   usedInGhee?: number; // kg
+  blendingInput?: number; // kg taken from the common butter pool for blending
+  packedButterWeight?: number; // kg taken from the common butter pool for packing
   
   // Ghee-specific fields
   butterInput?: number; // kg

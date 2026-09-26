@@ -19,7 +19,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { milkStorageVessels, statusFlow, statusLabels, statusColors } from '../data/mockData';
+import { getCreamBatchCode, milkStorageVessels, statusFlow, statusLabels, statusColors } from '../data/mockData';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import HalloumiTab from './HalloumiTab';
 import ButterTab from './ButterTab';
@@ -588,6 +588,7 @@ export default function ProductionBoard() {
       const existingPool = milkLot.creamPool || {
         milkLotId: milkLot.id,
         milkLotCode: milkLot.lotCode,
+        batchId: getCreamBatchCode(milkLot.lotCode),
         totalCream: 0,
         usedInButter: 0,
         availableBalance: 0,
@@ -597,6 +598,7 @@ export default function ProductionBoard() {
       updateMilkLot(milkLot.id, {
         creamPool: {
           ...existingPool,
+          batchId: existingPool.batchId || getCreamBatchCode(milkLot.lotCode),
           totalCream: existingPool.totalCream + totalWeight,
           availableBalance: existingPool.availableBalance + totalWeight,
           roundsContributed: [...existingPool.roundsContributed, round.id],

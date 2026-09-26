@@ -3,6 +3,7 @@ import { Plus, Clock, Package, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
+import { getButterBatchCode, getCreamBatchCode } from '../data/mockData';
 
 type ButterStatus = 
   | 'scheduled'
@@ -145,6 +146,11 @@ export default function ButterTab() {
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
     if (!shift) return;
+    const sourceMilkLot = milkLots.find(milkLot => milkLot.id === shift.milkLotId);
+    if (sourceMilkLot?.productionClosed) {
+      showToast('error', `Production for milk lot ${sourceMilkLot.lotCode} is closed`);
+      return;
+    }
 
     // For internal cream, deduct from the cream pool
     if (newRound.creamSource === 'internal') {
@@ -188,6 +194,9 @@ export default function ButterTab() {
       }
     }
 
+    const sourceCream = newRound.creamSource === 'internal'
+      ? getCreamBatchCode(sourceMilkLot?.lotCode || shift.milkLotCode)
+      : externalCreamLots.find(cream => cream.id === newRound.creamLotId)?.lotCode || newRound.creamLotId;
     addProductionRound({
       milkLotId: shift.milkLotId,
       milkLotCode: shift.milkLotCode,
@@ -202,6 +211,8 @@ export default function ButterTab() {
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
+      batchCode: getButterBatchCode(shift.milkLotCode),
+      sourceBatchCode: sourceCream,
       creamSource: newRound.creamSource,
       creamLotId: newRound.creamLotId,
     });
@@ -209,7 +220,7 @@ export default function ButterTab() {
     const creamMessage = newRound.creamSource === 'internal' 
       ? ` (cream pool: -${newRound.inputQuantity} kg)` 
       : '';
-    showToast('success', `Butter round created: 03-${shift.milkLotCode}/S${shift.shiftNumber}/R${newRound.roundNumber}${creamMessage}`);
+    showToast('success', `Butter round created: ${getButterBatchCode(shift.milkLotCode)}/S${shift.shiftNumber}/R${newRound.roundNumber}${creamMessage}`);
     setShowNewRoundModal(false);
     setNewRound({ shiftId: '', roundNumber: 1, creamSource: 'internal', creamLotId: '', inputQuantity: 0, team: '' });
   };
@@ -225,11 +236,40 @@ export default function ButterTab() {
       return;
     }
 
+    const round = butterRounds.find(r => r.id === selectedRound);
+    const milkLot = round ? milkLots.find(lot => lot.id === round.milkLotId) : undefined;
+    if (!round || !milkLot) return;
+    const outputDelta = outputForm.butterOutput - (round.butterOutput || 0);
+
     updateProductionRound(selectedRound, {
       butterOutput: outputForm.butterOutput,
       buttermilkOutput: outputForm.buttermilkOutput,
       remainingBalance: outputForm.butterOutput,
       status: 'churned',
+    });
+
+    const existingPool = milkLot.butterPool || {
+      batchId: getButterBatchCode(milkLot.lotCode),
+      sourceCreamBatchId: getCreamBatchCode(milkLot.lotCode),
+      milkLotId: milkLot.id,
+      totalButterProduced: 0,
+      usedInGhee: 0,
+      usedInBlending: 0,
+      packedAsPubb: 0,
+      availableBalance: 0,
+      roundsContributed: [],
+    };
+    updateMilkLot(milkLot.id, {
+      butterPool: {
+        ...existingPool,
+        batchId: existingPool.batchId || getButterBatchCode(milkLot.lotCode),
+        sourceCreamBatchId: existingPool.sourceCreamBatchId || getCreamBatchCode(milkLot.lotCode),
+        totalButterProduced: Math.max(0, existingPool.totalButterProduced + outputDelta),
+        availableBalance: Math.max(0, existingPool.availableBalance + outputDelta),
+        roundsContributed: existingPool.roundsContributed.includes(round.id)
+          ? existingPool.roundsContributed
+          : [...existingPool.roundsContributed, round.id],
+      },
     });
     showToast('success', `Output recorded: ${outputForm.butterOutput} kg butter, ${outputForm.buttermilkOutput} kg buttermilk`);
     setShowOutputModal(false);
@@ -257,14 +297,28 @@ export default function ButterTab() {
 
     // Auto-calculate replacer (3.3:1 ratio)
     const calculatedReplacer = blendingForm.butterQuantity / 3.3;
+    const previousInput = round.blendingInput || 0;
+    const blendingDelta = blendingForm.butterQuantity - previousInput;
 
     updateProductionRound(selectedRound, {
       replacerQuantity: calculatedReplacer,
+      blendingInput: blendingForm.butterQuantity,
       isSalted: blendingForm.isSalted,
       pool: blendingForm.isSalted ? 'PSBBB' : 'PUBBB',
       status: blendingForm.isSalted ? 'psbbb_pool' : 'pubbb_pool',
-      remainingBalance: (round.remainingBalance || 0) - blendingForm.butterQuantity,
+      remainingBalance: Math.max(0, (round.remainingBalance || 0) - blendingDelta),
     });
+
+    const milkLot = milkLots.find(lot => lot.id === round.milkLotId);
+    if (milkLot?.butterPool) {
+      updateMilkLot(milkLot.id, {
+        butterPool: {
+          ...milkLot.butterPool,
+          usedInBlending: Math.max(0, milkLot.butterPool.usedInBlending + blendingDelta),
+          availableBalance: Math.max(0, milkLot.butterPool.availableBalance - blendingDelta),
+        },
+      });
+    }
     showToast('success', `Blended: ${blendingForm.butterQuantity} kg butter + ${calculatedReplacer.toFixed(2)} kg replacer`);
     setShowBlendingModal(false);
     setBlendingForm({ butterQuantity: 16.5, replacerQuantity: 5, isSalted: false });
@@ -316,12 +370,26 @@ export default function ButterTab() {
       cases,
       loose: looseUnits,
     }];
+    const previousPackedWeight = round.packedButterWeight || 0;
+    const packingDelta = totalWeight;
 
     updateProductionRound(selectedRound, {
       packedSkus: newPacking,
-      remainingBalance: (round.remainingBalance || 0) - totalWeight,
+      packedButterWeight: previousPackedWeight + totalWeight,
+      remainingBalance: Math.max(0, (round.remainingBalance || 0) - packingDelta),
       status: 'packed',
     });
+
+    const milkLot = milkLots.find(lot => lot.id === round.milkLotId);
+    if (milkLot?.butterPool) {
+      updateMilkLot(milkLot.id, {
+        butterPool: {
+          ...milkLot.butterPool,
+          packedAsPubb: Math.max(0, milkLot.butterPool.packedAsPubb + packingDelta),
+          availableBalance: Math.max(0, milkLot.butterPool.availableBalance - packingDelta),
+        },
+      });
+    }
 
     showToast('success', `Packed: ${cases} cases + ${looseUnits} loose ${packingForm.unit}`);
     setShowPackingModal(false);
@@ -502,7 +570,10 @@ export default function ButterTab() {
             {internalCreamPools.map(lot => (
               <div key={lot.id} className="bg-white rounded-lg p-3 border border-blue-100">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-bold text-slate-900">{lot.lotCode}</span>
+                  <div>
+                    <span className="text-sm font-bold text-slate-900">{lot.creamPool?.batchId || getCreamBatchCode(lot.lotCode)}</span>
+                    <span className="block text-[11px] text-slate-500">Milk lot {lot.lotCode}</span>
+                  </div>
                   <span className="text-xs text-blue-600">{lot.creamPool?.roundsContributed.length || 0} rounds</span>
                 </div>
                 <div className="space-y-1 text-xs">
@@ -521,6 +592,35 @@ export default function ButterTab() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {milkLots.some(lot => lot.butterPool) && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4">
+          <h4 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+            <span>🧈</span> Common Butter Pools
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {milkLots.filter(lot => lot.butterPool).map(lot => {
+              const pool = lot.butterPool!;
+              return (
+                <div key={lot.id} className="bg-white rounded-lg p-3 border border-amber-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="text-sm font-bold text-slate-900">{pool.batchId}</span>
+                      <span className="block text-[11px] text-slate-500">From {pool.sourceCreamBatchId}</span>
+                    </div>
+                    <span className="text-xs text-amber-700">{pool.roundsContributed.length} rounds</span>
+                  </div>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-slate-600">Produced:</span><span className="font-medium text-slate-900">{pool.totalButterProduced.toFixed(2)} kg</span></div>
+                    <div className="flex justify-between"><span className="text-slate-600">Used / packed:</span><span className="font-medium text-orange-600">{(pool.usedInGhee + pool.usedInBlending + pool.packedAsPubb).toFixed(2)} kg</span></div>
+                    <div className="flex justify-between border-t border-slate-200 pt-1"><span className="text-slate-700 font-medium">Available:</span><span className="font-bold text-emerald-600">{pool.availableBalance.toFixed(2)} kg</span></div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -569,7 +669,7 @@ export default function ButterTab() {
                       <tr key={round.id} className="hover:bg-slate-50/50">
                         <td className="px-4 py-3">
                           <div className="font-mono text-xs font-bold text-slate-900">
-                            03-{round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
+                            {round.batchCode || getButterBatchCode(round.milkLotCode)}/S{round.shiftNumber}/R{round.roundNumber}
                           </div>
                         </td>
                         <td className="px-4 py-3">
