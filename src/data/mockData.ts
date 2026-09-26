@@ -28,6 +28,10 @@ export interface ProductionReconciliation {
 export interface PackedSku {
   sku: string;
   cases: number;
+  loose?: number;
+  looseWeightKg?: number;
+  weightKg?: number;
+  reason?: string;
 }
 
 export interface CreamLot {

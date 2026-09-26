@@ -5,7 +5,7 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 
 export default function MilkReceiving() {
-  const { milkLots, creamLots, addMilkLot, updateMilkLot, addCreamLot } = useApp();
+  const { milkLots, creamLots, productionRounds, addMilkLot, updateMilkLot, addCreamLot } = useApp();
   const { showToast } = useToast();
   const newestLot = [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
@@ -117,7 +117,7 @@ export default function MilkReceiving() {
 
   const getAllocations = (lot: typeof milkLots[number]) => {
     const fixedAllocations = [
-      { destination: 'Silo (8,500L)', capacity: 8500 },
+      { destination: 'Silo (10,000L)', capacity: 10000 },
       { destination: 'BMC #1 (3,000L)', capacity: 3000 },
       { destination: 'BMC #2 (3,000L)', capacity: 3000 },
       { destination: 'Holding Tank (2,500L)', capacity: 2500 },
@@ -140,6 +140,22 @@ export default function MilkReceiving() {
     }
     return allocations;
   };
+
+  const packedSkuSummary = useMemo(() => {
+    if (!displayedLot) return [];
+    const boardEntries = productionRounds
+      .filter((round) => round.milkLotId === displayedLot.id)
+      .flatMap((round) => round.packedSkus || []);
+    const entries = boardEntries.length > 0 ? boardEntries : (displayedLot.packedSkus || []);
+    const summary = new Map<string, { sku: string; cases: number; loose: number }>();
+    entries.forEach((entry) => {
+      const existing = summary.get(entry.sku) || { sku: entry.sku, cases: 0, loose: 0 };
+      existing.cases += entry.cases || 0;
+      existing.loose += entry.loose || 0;
+      summary.set(entry.sku, existing);
+    });
+    return [...summary.values()];
+  }, [displayedLot, productionRounds]);
 
   const totals = displayedLot ? {
     received: displayedLot.litresReceived,
@@ -505,18 +521,30 @@ export default function MilkReceiving() {
                                 <h3 className="text-sm font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200">
                                   SKU Packed on Board
                                 </h3>
-                                <div className="space-y-0">
-                                  {lot.packedSkus && lot.packedSkus.length > 0 ? (
-                                    lot.packedSkus.map((sku, idx) => (
-                                      <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50 px-2 -mx-2 rounded transition-colors">
-                                        <span className="font-mono text-sm font-semibold text-slate-900">{sku.sku}</span>
-                                        <span className="text-sm font-bold text-slate-900 bg-slate-100 px-3 py-1 rounded">{sku.cases}</span>
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <p className="text-sm text-slate-400 text-center py-8">No SKUs packed yet</p>
-                                  )}
-                                </div>
+                                {packedSkuSummary.length > 0 ? (
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                      <thead>
+                                        <tr className="border-b border-slate-200">
+                                          <th className="px-2 py-2 text-left text-[10px] uppercase tracking-wider text-slate-500">SKU</th>
+                                          <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Quantity in cases</th>
+                                          <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Quantity in packets</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {packedSkuSummary.map((sku) => (
+                                          <tr key={sku.sku}>
+                                            <td className="px-2 py-3 font-mono font-semibold text-slate-900">{sku.sku}</td>
+                                            <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.cases.toLocaleString()}</td>
+                                            <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.loose.toLocaleString()}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-slate-400 text-center py-8">No SKUs packed yet</p>
+                                )}
                               </div>
                             </div>
 
