@@ -1,16 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Plus,
-  ChevronDown,
-  ChevronRight,
-  Edit,
-  Milk,
-  ArrowDownToLine,
-  Beaker,
-  XCircle,
-  TrendingDown,
-  Database,
-} from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
@@ -41,8 +30,6 @@ export default function MilkReceiving() {
     }
   }, [milkLots, newestLot, selectedLot]);
   
-  const activeLot = milkLots.find((l) => l.id === selectedLot);
-
   // New lot form
   const [newLot, setNewLot] = useState({
     lotCode: '',
@@ -107,15 +94,14 @@ export default function MilkReceiving() {
     setExpandedLots(newExpanded);
   };
 
-  // Vessel allocations for selected lot
-  const allocations = activeLot ? [
-    { destination: 'Silo (10,000L)', litres: Math.min(8500, activeLot.litresRemaining) },
-    { destination: 'BMC #1 (3,000L)', litres: Math.min(3000, Math.max(0, activeLot.litresRemaining - 8500)) },
-    { destination: 'BMC #2 (3,000L)', litres: Math.min(3000, Math.max(0, activeLot.litresRemaining - 11500)) },
-    { destination: 'Holding Tank (2,500L)', litres: Math.min(2500, Math.max(0, activeLot.litresRemaining - 14500)) },
-    { destination: 'Direct to Production', litres: Math.min(2000, Math.max(0, activeLot.litresRemaining - 17000)) },
-    { destination: 'IBC Storage', litres: Math.max(0, activeLot.litresRemaining - 19000) },
-  ].filter(a => a.litres > 0) : [];
+  const getAllocations = (lot: typeof milkLots[number]) => [
+    { destination: 'Silo (10,000L)', litres: Math.min(8500, lot.litresRemaining) },
+    { destination: 'BMC #1 (3,000L)', litres: Math.min(3000, Math.max(0, lot.litresRemaining - 8500)) },
+    { destination: 'BMC #2 (3,000L)', litres: Math.min(3000, Math.max(0, lot.litresRemaining - 11500)) },
+    { destination: 'Holding Tank (2,500L)', litres: Math.min(2500, Math.max(0, lot.litresRemaining - 14500)) },
+    { destination: 'Direct to Production', litres: Math.min(2000, Math.max(0, lot.litresRemaining - 17000)) },
+    { destination: 'IBC Storage', litres: Math.max(0, lot.litresRemaining - 19000) },
+  ].filter(a => a.litres > 0);
 
   // Calculate totals
   const totals = milkLots.reduce((acc, lot) => {
@@ -158,7 +144,7 @@ export default function MilkReceiving() {
           {quickLots.map((lot) => (
             <button
               key={lot.id}
-              onClick={() => setSelectedLot(lot.id)}
+              onClick={() => { setSelectedLot(lot.id); setExpandedLots(current => new Set(current).add(lot.id)); }}
               className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium whitespace-nowrap transition-all ${
                 selectedLot === lot.id 
                   ? 'bg-slate-900 text-white border-slate-900 shadow-md' 
@@ -178,7 +164,7 @@ export default function MilkReceiving() {
           {olderLots.length > 0 && (
             <select
               value={olderLots.some((lot) => lot.id === selectedLot) ? selectedLot : ''}
-              onChange={(event) => event.target.value && setSelectedLot(event.target.value)}
+              onChange={(event) => { if (event.target.value) { setSelectedLot(event.target.value); setExpandedLots(current => new Set(current).add(event.target.value)); } }}
               className="w-full sm:w-auto min-w-48 px-3 py-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700"
               aria-label="Select an older milk lot"
             >
@@ -190,146 +176,6 @@ export default function MilkReceiving() {
           )}
         </div>
       </div>
-
-      {/* Selected Lot Summary */}
-      {activeLot && (
-        <>
-          {/* Lot Summary Table */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
-              <Milk className="w-4 h-4 text-slate-500" />
-              <h3 className="text-sm font-semibold text-slate-900">Lot Summary — {activeLot.lotCode}</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <tbody className="divide-y divide-slate-100">
-                  <tr className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-700 w-48">Receipt</td>
-                    <td className="px-4 py-3 text-slate-900">
-                      <span className="font-mono font-bold">Lot {activeLot.lotCode}</span>
-                      <span className="text-slate-500 ml-3">
-                        {formatDate(activeLot.receiptDate, activeLot.receiptTime)}
-                      </span>
-                    </td>
-                  </tr>
-                  <tr className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-700">Origin / Invoice</td>
-                    <td className="px-4 py-3 text-slate-900">
-                      <div>{activeLot.supplier}</div>
-                      {(activeLot.invoiceNo || activeLot.deliveryNoteNo) && (
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          {activeLot.invoiceNo && <span>Invoice: <span className="font-mono">{activeLot.invoiceNo}</span></span>}
-                          {activeLot.invoiceNo && activeLot.deliveryNoteNo && <span className="mx-2">•</span>}
-                          {activeLot.deliveryNoteNo && <span>Delivery Note: <span className="font-mono">{activeLot.deliveryNoteNo}</span></span>}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                  <tr className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-700">Quantity Received</td>
-                    <td className="px-4 py-3 text-slate-900 font-bold">{activeLot.litresReceived.toLocaleString()} L</td>
-                  </tr>
-                  <tr className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-700">Milk Used in Production</td>
-                    <td className="px-4 py-3 text-blue-600 font-bold">{activeLot.litresConsumed.toLocaleString()} L</td>
-                  </tr>
-                  <tr className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-700">Milk Sold</td>
-                    <td className="px-4 py-3 text-emerald-600 font-bold">{(activeLot.litresSold || 0).toLocaleString()} L</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Metric Tiles */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center gap-2 text-slate-500 mb-1">
-                <ArrowDownToLine className="w-4 h-4" />
-                <span className="text-xs font-medium uppercase tracking-wide">Received</span>
-              </div>
-              <p className="text-2xl font-bold text-slate-900">{activeLot.litresReceived.toLocaleString()}</p>
-              <p className="text-xs text-slate-400">litres</p>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center gap-2 text-slate-500 mb-1">
-                <Beaker className="w-4 h-4" />
-                <span className="text-xs font-medium uppercase tracking-wide">Consumed</span>
-              </div>
-              <p className="text-2xl font-bold text-blue-600">{activeLot.litresConsumed.toLocaleString()}</p>
-              <p className="text-xs text-slate-400">litres</p>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center gap-2 text-slate-500 mb-1">
-                <Milk className="w-4 h-4" />
-                <span className="text-xs font-medium uppercase tracking-wide">Remaining</span>
-              </div>
-              <p className="text-2xl font-bold text-emerald-600">{activeLot.litresRemaining.toLocaleString()}</p>
-              <p className="text-xs text-slate-400">litres</p>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center gap-2 text-slate-500 mb-1">
-                <XCircle className="w-4 h-4" />
-                <span className="text-xs font-medium uppercase tracking-wide">Rejected</span>
-              </div>
-              <p className="text-2xl font-bold text-red-600">{activeLot.litresRejected}</p>
-              <p className="text-xs text-slate-400">litres</p>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center gap-2 text-slate-500 mb-1">
-                <TrendingDown className="w-4 h-4" />
-                <span className="text-xs font-medium uppercase tracking-wide">Spilled</span>
-              </div>
-              <p className="text-2xl font-bold text-amber-600">{activeLot.litresSpilled}</p>
-              <p className="text-xs text-slate-400">litres</p>
-            </div>
-          </div>
-
-          {/* Progress bar */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-slate-900">Lot Consumption Progress</h3>
-              <span className="text-xs text-slate-500">
-                {((activeLot.litresConsumed / activeLot.litresReceived) * 100).toFixed(0)}% utilized
-              </span>
-            </div>
-            <div className="w-full bg-slate-100 rounded-full h-4 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-all"
-                style={{ width: `${(activeLot.litresConsumed / activeLot.litresReceived) * 100}%` }}
-              />
-            </div>
-            <div className="flex justify-between mt-2 text-xs text-slate-500">
-              <span>Received: {formatDate(activeLot.receiptDate, activeLot.receiptTime)}</span>
-              <span>Supplier: {activeLot.supplier}</span>
-              <span>Status: <span className={`font-medium ${activeLot.status === 'active' ? 'text-emerald-600' : 'text-slate-500'}`}>{activeLot.status}</span></span>
-            </div>
-          </div>
-
-          {/* Vessel allocation */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
-              <Database className="w-4 h-4 text-slate-500" />
-              <h3 className="text-sm font-semibold text-slate-900">Vessel / Location Allocation</h3>
-            </div>
-            <div className="p-4 space-y-3">
-              {allocations.length > 0 ? allocations.map((alloc) => (
-                <div key={alloc.destination} className="flex items-center gap-3">
-                  <span className="text-sm text-slate-700 w-44 shrink-0">{alloc.destination}</span>
-                  <div className="flex-1 bg-slate-100 rounded-full h-3 relative overflow-hidden">
-                    <div className="bg-blue-500 h-3 rounded-full" style={{ width: `${(alloc.litres / activeLot.litresReceived) * 100}%` }} />
-                  </div>
-                  <span className="text-sm font-medium text-slate-900 w-20 text-right">{alloc.litres.toLocaleString()}L</span>
-                  <span className="text-xs text-slate-400 w-10 text-right">{((alloc.litres / activeLot.litresReceived) * 100).toFixed(0)}%</span>
-                </div>
-              )) : (
-                <p className="text-sm text-slate-400 text-center py-4">No remaining milk to allocate</p>
-              )}
-            </div>
-          </div>
-        </>
-      )}
 
       {/* Recent Receipts Table - MAIN FOCUS */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -414,8 +260,8 @@ export default function MilkReceiving() {
                       </td>
                       <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1">
-                          <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
-                            - Hide
+                          <button onClick={() => toggleExpand(lot.id)} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
+                            {isExpanded ? '− Hide' : '+ Show'}
                           </button>
                           <button className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
                             Edit
@@ -510,6 +356,37 @@ export default function MilkReceiving() {
                                   ) : (
                                     <p className="text-sm text-slate-400 text-center py-8">No SKUs packed yet</p>
                                   )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Operational detail retained from the previous page, shown once inside the expanded row. */}
+                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                              <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h3 className="text-sm font-bold text-slate-900">Lot consumption progress</h3>
+                                  <span className="text-xs text-slate-500">{lot.litresReceived > 0 ? ((lot.litresConsumed / lot.litresReceived) * 100).toFixed(0) : 0}% utilized</span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                                  <div className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full" style={{ width: `${lot.litresReceived > 0 ? Math.min(100, (lot.litresConsumed / lot.litresReceived) * 100) : 0}%` }} />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
+                                  <div><span className="text-slate-500">Rejected</span><div className="font-bold text-red-600">{lot.litresRejected.toLocaleString()} L</div></div>
+                                  <div><span className="text-slate-500">Spilled</span><div className="font-bold text-amber-600">{lot.litresSpilled.toLocaleString()} L</div></div>
+                                  <div><span className="text-slate-500">Received</span><div className="font-bold text-slate-900">{lot.litresReceived.toLocaleString()} L</div></div>
+                                  <div><span className="text-slate-500">Unallocated</span><div className="font-bold text-emerald-600">{lot.litresRemaining.toLocaleString()} L</div></div>
+                                </div>
+                              </div>
+                              <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
+                                <h3 className="text-sm font-bold text-slate-900 mb-3">Vessel / location allocation</h3>
+                                <div className="space-y-2">
+                                  {getAllocations(lot).length > 0 ? getAllocations(lot).map((allocation) => (
+                                    <div key={allocation.destination} className="flex items-center gap-2 text-xs">
+                                      <span className="w-36 shrink-0 text-slate-600">{allocation.destination}</span>
+                                      <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${lot.litresReceived > 0 ? (allocation.litres / lot.litresReceived) * 100 : 0}%` }} /></div>
+                                      <span className="w-16 text-right font-semibold text-slate-800">{allocation.litres.toLocaleString()} L</span>
+                                    </div>
+                                  )) : <p className="text-xs text-slate-400">No remaining milk to allocate</p>}
                                 </div>
                               </div>
                             </div>
