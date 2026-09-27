@@ -1,4 +1,5 @@
 interface ImportMetaEnv {
+  readonly PROD: boolean;
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
   readonly VITE_LOCAL_DEMO_MODE?: string;

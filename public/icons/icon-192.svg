@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-labelledby="title">
+  <title id="title">Vejoy</title>
+  <rect width="192" height="192" rx="40" fill="#00b879"/>
+  <path d="M42 137V66l27 18 27-18 27 18 27-18v71H42Z" fill="#fff" opacity=".96"/>
+  <path d="M55 128h82M62 103v25m24-25v25m24-25v25" fill="none" stroke="#00b879" stroke-width="7" stroke-linecap="round"/>
+</svg>

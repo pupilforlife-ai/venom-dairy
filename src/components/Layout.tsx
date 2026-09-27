@@ -14,8 +14,14 @@ import {
   ChevronRight,
   Factory,
   LogOut,
+  Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -38,6 +44,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState('');
   const [role, setRole] = useState('');
   const [theme, setTheme] = useState(() => window.localStorage.getItem('vejoy_theme') || 'light');
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -56,6 +64,33 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       if (profile?.role) setRole(profile.role);
     });
   }, []);
+
+  useEffect(() => {
+    const standaloneMedia = window.matchMedia('(display-mode: standalone)');
+    const updateInstalledState = () => {
+      const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+      setIsInstalled(standaloneMedia.matches || iosStandalone);
+    };
+    const handleInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+
+    updateInstalledState();
+    window.addEventListener('beforeinstallprompt', handleInstallPrompt);
+    standaloneMedia.addEventListener?.('change', updateInstalledState);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleInstallPrompt);
+      standaloneMedia.removeEventListener?.('change', updateInstalledState);
+    };
+  }, []);
+
+  const installApp = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -145,6 +180,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </h2>
           </div>
           <div className="flex items-center gap-3">
+            {installPrompt && !isInstalled && (
+              <button
+                type="button"
+                onClick={() => void installApp()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                title="Install Vejoy on this device"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Install
+              </button>
+            )}
             <select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value)} className="hidden sm:block rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">
               <option value="light">Light</option>
               <option value="dark">Dark</option>
