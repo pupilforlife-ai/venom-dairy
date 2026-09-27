@@ -163,10 +163,12 @@ export default function ProductionBoard() {
           if (round.status === 'pressing' && round.pressingStartedAt) {
             const elapsed = Math.floor((Date.now() - new Date(round.pressingStartedAt).getTime()) / 1000);
             updated[round.id] = Math.max(0, 1800 - elapsed); // 30 minutes
-          } else if (round.status === 'cooling' && round.coolingStartedAt) {
+          } else if (round.status === 'cooling' && round.coolingStartedAt && round.coolingLocation) {
             const elapsed = Math.floor((Date.now() - new Date(round.coolingStartedAt).getTime()) / 1000);
             const duration = round.coolingLocation === 'tank' ? 5400 : 7200; // 90min or 120min
             updated[round.id] = Math.max(0, duration - elapsed);
+          } else if (round.status === 'cooling') {
+            updated[round.id] = 0;
           } else if (round.status === 'resting' && round.restingStartedAt) {
             const elapsed = Math.floor((Date.now() - new Date(round.restingStartedAt).getTime()) / 1000);
             updated[round.id] = Math.max(0, 5400 - elapsed); // 90 minutes
@@ -780,7 +782,12 @@ export default function ProductionBoard() {
     const now = new Date().toISOString();
     const stageUpdates: any = { status: nextStatus, locked: nextStatus === 'handed_over' };
     if (nextStatus === 'pressing') stageUpdates.pressingStartedAt = now;
-    if (nextStatus === 'cooling') stageUpdates.coolingStartedAt = now;
+    if (nextStatus === 'cooling') {
+      // Entering Cooling from the dropdown only opens the location choice.
+      // The timer starts after Tank or Chiller is explicitly selected.
+      stageUpdates.coolingLocation = undefined;
+      stageUpdates.coolingStartedAt = undefined;
+    }
     if (nextStatus === 'resting') stageUpdates.restingStartedAt = now;
     updateProductionRound(roundId, stageUpdates);
     showToast('success', `Stage changed to ${statusLabels[nextStatus] || nextStatus}`);
@@ -844,9 +851,16 @@ export default function ProductionBoard() {
         <span className="font-mono text-xs font-bold">{formatTime(timer)}</span>
         {timer === 0 && <>
           <span className="text-xs font-bold text-emerald-600">✓ Ready for Cooling</span>
-          <button onClick={() => handleStartCooling(round.id, 'tank')} className="rounded bg-cyan-500 px-2 py-1 text-xs text-white hover:bg-cyan-600">Tank</button>
-          <button onClick={() => handleStartCooling(round.id, 'chiller')} className="rounded bg-cyan-500 px-2 py-1 text-xs text-white hover:bg-cyan-600">Chiller</button>
+          <button onClick={() => handleStartCooling(round.id, 'tank')} className="rounded bg-cyan-600 px-2 py-1 text-xs text-white hover:bg-cyan-700">Cooling Tank (90 min)</button>
+          <button onClick={() => handleStartCooling(round.id, 'chiller')} className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700">Chiller (120 min)</button>
         </>}
+      </div>;
+    }
+    if (round.status === 'cooling' && (!round.coolingLocation || !round.coolingStartedAt)) {
+      return <div className="mt-1 flex flex-wrap items-center gap-1">
+        <span className="text-xs font-semibold text-cyan-700">Choose cooling location:</span>
+        <button onClick={() => handleStartCooling(round.id, 'tank')} className="rounded bg-cyan-600 px-2 py-1 text-xs text-white hover:bg-cyan-700">Cooling Tank (90 min)</button>
+        <button onClick={() => handleStartCooling(round.id, 'chiller')} className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700">Chiller (120 min)</button>
       </div>;
     }
     if (round.status === 'resting') {
@@ -1269,8 +1283,9 @@ export default function ProductionBoard() {
                               </select>
                             ) : <div className="inline-flex rounded-lg border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">{statusLabels[round.status] || round.status}</div>}
                             {round.startTime && <div className="mt-1 text-[10px] text-slate-500">{new Date(round.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
-                            {round.status === 'cooling' && <div className="mt-1 flex items-center gap-2 text-[10px]">
+                            {round.status === 'cooling' && round.coolingStartedAt && round.coolingLocation && <div className="mt-1 flex items-center gap-2 text-[10px]">
                               <span className="font-mono font-bold">{formatTime(timers[round.id] || 0)}</span>
+                              <span className="text-slate-500">{round.coolingLocation === 'tank' ? 'Cooling Tank · 90 min' : 'Chiller · 120 min'}</span>
                               {(timers[round.id] || 0) === 0 && <span className="font-bold text-emerald-600">✓ Ready for Resting</span>}
                               {(timers[round.id] || 0) === 0 && <button onClick={() => handleStartResting(round.id)} className="rounded bg-teal-500 px-2 py-1 text-white font-medium hover:bg-teal-600">Start Resting</button>}
                             </div>}
@@ -1713,7 +1728,7 @@ export default function ProductionBoard() {
             history.push({
               stage: 'Cooling',
               time: new Date(round.coolingStartedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-              details: round.coolingLocation === 'tank' ? 'Cooling Tank (90 min)' : 'Chiller (120 min)'
+              details: round.coolingLocation === 'tank' ? 'Cooling Tank (90 min)' : round.coolingLocation === 'chiller' ? 'Chiller (120 min)' : 'Cooling location not selected'
             });
           }
           
