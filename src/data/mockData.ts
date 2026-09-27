@@ -168,10 +168,14 @@ export function getMilkLotAccounting(lot: MilkLot, rounds: ProductionRound[]) {
     round.milkLotId === lot.id &&
     Boolean(round.sourceVessel) &&
     isMilkProductionRound(round) &&
-    round.actualInput > 0
+    (round.actualInput > 0 || (
+      round.plannedInput > 0 &&
+      round.status !== 'scheduled' &&
+      round.status !== 'cancelled'
+    ))
   );
   const consumed = trackedRounds.length > 0
-    ? trackedRounds.reduce((total, round) => total + Math.max(0, round.actualInput), 0)
+    ? trackedRounds.reduce((total, round) => total + Math.max(0, round.actualInput || round.plannedInput), 0)
     : Math.max(0, lot.litresConsumed);
   const sold = Math.max(0, lot.litresSold || 0);
   const accountedOther = Math.max(0, lot.litresRejected) + Math.max(0, lot.litresSpilled);
