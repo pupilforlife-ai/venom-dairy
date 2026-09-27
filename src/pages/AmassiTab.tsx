@@ -151,7 +151,7 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
       showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
       return;
     }
-    addProductionShift({
+    const created = addProductionShift({
       milkLotId: milkLot.id,
       milkLotCode: milkLot.lotCode,
       shiftNumber: newShift.shiftNumber,
@@ -159,6 +159,10 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
       team: newShift.team.split(',').map(member => member.trim()).filter(Boolean),
       status: 'active',
     });
+    if (!created) {
+      showToast('error', `Shift ${newShift.shiftNumber} already exists for milk lot ${milkLot.lotCode}`);
+      return;
+    }
     showToast('success', `Amassi Shift ${newShift.shiftNumber} created`);
     setShowNewShiftModal(false);
     setNewShift({ milkLotId: selectedMilkLotId, shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16) });

@@ -202,7 +202,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       return;
     }
 
-    addProductionShift({
+    const created = addProductionShift({
       milkLotId: newShift.milkLotId,
       milkLotCode: milkLot.lotCode,
       shiftNumber: newShift.shiftNumber,
@@ -210,6 +210,10 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       team: newShift.team.split(',').map(t => t.trim()).filter(Boolean),
       status: 'active',
     });
+    if (!created) {
+      showToast('error', `Shift ${newShift.shiftNumber} already exists for milk lot ${milkLot.lotCode}`);
+      return;
+    }
     showToast('success', `Halloumi Shift ${newShift.shiftNumber} created`);
     setShowNewShiftModal(false);
     setNewShift({ milkLotId: activeMilkLot?.id || '', shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16) });

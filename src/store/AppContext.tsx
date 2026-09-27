@@ -42,7 +42,7 @@ interface AppContextType extends AppState {
   updateCreamLot: (id: string, updates: Partial<CreamLot>) => void;
   
   // Shift actions
-  addProductionShift: (shift: Omit<ProductionShift, 'id'>) => void;
+  addProductionShift: (shift: Omit<ProductionShift, 'id'>) => boolean;
   updateProductionShift: (id: string, updates: Partial<ProductionShift>) => void;
   
   // Production round actions
@@ -112,11 +112,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Shift actions
   const addProductionShift = (shift: Omit<ProductionShift, 'id'>) => {
     const newShift = { ...shift, id: `shift-${Date.now()}` };
-    setProductionShifts([...productionShifts, newShift]);
+    let created = true;
+    setProductionShifts(currentShifts => {
+      // A milk lot can have only one active shift with a given number. This
+      // also makes rapid double-clicks and two open app tabs idempotent.
+      const alreadyExists = currentShifts.some(existingShift =>
+        existingShift.milkLotId === shift.milkLotId &&
+        existingShift.shiftNumber === shift.shiftNumber &&
+        existingShift.status === 'active'
+      );
+      if (alreadyExists) {
+        created = false;
+        return currentShifts;
+      }
+      return [...currentShifts, newShift];
+    });
+    return created;
   };
 
   const updateProductionShift = (id: string, updates: Partial<ProductionShift>) => {
-    setProductionShifts(productionShifts.map(shift => 
+    setProductionShifts(currentShifts => currentShifts.map(shift =>
       shift.id === id ? { ...shift, ...updates } : shift
     ));
   };
@@ -128,9 +143,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const createProductionRound = async (round: Omit<ProductionRound, 'id' | 'roundNumber'>) => {
-    if (!supabase) return null;
+    // Local/demo mode intentionally has no Supabase client.  It should still
+    // be possible to exercise the production workflow locally; previously we
+    // returned null here, which made the UI report a misleading server error.
+    if (!supabase) {
+      const nextRoundNumber = productionRounds
+        .filter(existingRound => existingRound.shiftId === round.shiftId)
+        .reduce((highest, existingRound) => Math.max(highest, existingRound.roundNumber || 0), 0) + 1;
+      const localRound: ProductionRound = {
+        ...round,
+        id: `pr-${Date.now()}`,
+        roundNumber: nextRoundNumber,
+      };
+      setProductionRounds(current => [...current, localRound]);
+      return localRound;
+    }
+
     const { data, error } = await supabase.rpc('create_production_round', { round_input: round });
-    if (error || !data) { console.error('Error creating production round:', error); return null; }
+    if (error) {
+      console.error('Error creating production round:', error);
+      throw new Error(error.message || 'The server could not create this round');
+    }
+    if (!data) {
+      throw new Error('The server returned no round after creation');
+    }
     setProductionRounds(current => [...current, data as ProductionRound]);
     return data as ProductionRound;
   };

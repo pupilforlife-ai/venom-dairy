@@ -649,7 +649,7 @@ export default function ProductionBoard() {
       return;
     }
 
-    addProductionShift({
+    const created = addProductionShift({
       milkLotId,
       milkLotCode: milkLot.lotCode,
       shiftNumber: newShift.shiftNumber,
@@ -658,6 +658,10 @@ export default function ProductionBoard() {
       teamNotes: newShift.teamNotes || undefined,
       status: 'active',
     });
+    if (!created) {
+      showToast('error', `Shift ${newShift.shiftNumber} already exists for milk lot ${milkLot.lotCode}`);
+      return;
+    }
     showToast('success', `Shift ${newShift.shiftNumber} created`);
     setShowNewShiftModal(false);
     setNewShift({ milkLotId: selectedMilkLotId, shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16), teamNotes: '' });
@@ -728,7 +732,10 @@ export default function ProductionBoard() {
       if (createdRound) {
         showToast('success', `Round created: ${roundDisplayCode(createdRound)}`);
         setShowNewRoundModal(false);
-      } else showToast('error', 'The server could not create this round');
+      }
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : 'The server could not create this round';
+      showToast('error', `Round creation failed: ${message}`);
     });
   };
 

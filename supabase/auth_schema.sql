@@ -149,6 +149,12 @@ begin
   end if;
   shift_id := round_input->>'shiftId';
   if shift_id is null or shift_id = '' then raise exception 'Shift is required'; end if;
+  -- A new project may not have loaded the frontend state row yet. Seed the
+  -- collection here so the first round can be created without a race against
+  -- the client's asynchronous state bootstrap.
+  insert into public.app_state (key, value)
+  values ('vejoy_productionRounds', '[]'::jsonb)
+  on conflict (key) do nothing;
   select value into current_rounds from public.app_state where key = 'vejoy_productionRounds' for update;
   if current_rounds is null or jsonb_typeof(current_rounds) <> 'array' then raise exception 'Production rounds state is unavailable'; end if;
   select coalesce(max((item->>'roundNumber')::integer), 0) + 1 into next_number
