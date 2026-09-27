@@ -14,7 +14,7 @@ export default function MilkReceiving() {
     return bDate - aDate;
   })[0];
   const [selectedLot, setSelectedLot] = useState(newestLot?.id || '');
-  const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set());
+  const [expandedLots, setExpandedLots] = useState<Set<string>>(() => newestLot?.id ? new Set([newestLot.id]) : new Set());
   const [showNewLotModal, setShowNewLotModal] = useState(false);
   const [showEditLotModal, setShowEditLotModal] = useState(false);
   const [showMilkSaleModal, setShowMilkSaleModal] = useState(false);
@@ -34,6 +34,9 @@ export default function MilkReceiving() {
   useEffect(() => {
     if (newestLot && !milkLots.some((lot) => lot.id === selectedLot)) {
       setSelectedLot(newestLot.id);
+    }
+    if (newestLot) {
+      setExpandedLots((current) => current.has(newestLot.id) ? current : new Set(current).add(newestLot.id));
     }
   }, [milkLots, newestLot, selectedLot]);
   
@@ -614,7 +617,7 @@ export default function MilkReceiving() {
                               </div>
                               <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
                                 <h3 className="text-sm font-bold text-slate-900 mb-1">Vessel / location allocation</h3>
-                                <p className="text-xs text-slate-500 mb-3">Bars show quantity against each vessel’s capacity. New rounds reduce the selected vessel; older rounds are reconciled as legacy drawdown.</p>
+                                <p className="text-xs text-slate-500 mb-3">Bars show quantity against each vessel’s capacity. New rounds reduce the selected BMC; older rounds are reconciled as legacy drawdown. Direct production is normally 2,000 L and can use up to 3,000 L when required.</p>
                                 <div className="space-y-2">
                                   {getAllocations(lot).length > 0 ? getAllocations(lot).map((allocation) => {
                                     const fillPercent = allocation.capacity ? Math.min(100, (allocation.litres / allocation.capacity) * 100) : 100;

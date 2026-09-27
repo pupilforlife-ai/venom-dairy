@@ -190,12 +190,14 @@ export interface MilkStorageVessel {
 export const milkStorageVessels: MilkStorageVessel[] = [
   { id: 'silo', label: 'Silo', capacity: 10000 },
   { id: 'bmc-1', label: 'BMC #1', capacity: 3000 },
-  { id: 'bmc-2', label: 'BMC #2 (Holding Tank)', capacity: 3000 },
+  { id: 'bmc-2', label: 'BMC #2 (Holding Tank)', capacity: 2500 },
+  { id: 'bmc-3', label: 'BMC #3', capacity: 3000 },
   ...Array.from({ length: 10 }, (_, index) => ({
     id: `ibc-${index + 1}`,
     label: `IBC #${index + 1}`,
     capacity: 1000,
   })),
+  { id: 'direct-production', label: 'Direct to production (up to 3,000 L)', capacity: 3000 },
   { id: 'auxiliary', label: 'Auxiliary storage (cans / buckets)', capacity: null },
 ];
 
@@ -203,7 +205,7 @@ export const milkStorageVessels: MilkStorageVessel[] = [
 // separate from the full allocation list prevents rounds from accidentally
 // drawing directly from an IBC or the silo.
 export const milkProductionVessels = milkStorageVessels.filter((vessel) =>
-  vessel.id === 'bmc-1' || vessel.id === 'bmc-2'
+  vessel.id === 'bmc-1' || vessel.id === 'bmc-2' || vessel.id === 'bmc-3'
 );
 
 export interface ProductionShift {
@@ -950,7 +952,7 @@ export const intermediateLots: IntermediateLot[] = [
     producedQuantity: 68,
     currentQuantity: 68,
     uom: 'kg',
-    storageLocation: 'Intermediate Freezer',
+    storageLocation: 'Dairy Container (Intermediate Freezer)',
     status: 'available',
     producedAt: '2026-06-17T02:00:00',
     sourceMilkLotCode: '160626',
@@ -1051,7 +1053,7 @@ export const finishedStock: FinishedStockLot[] = [
     cases: 37,
     loosePackets: 6,
     totalPackets: 450, // 37 × 12 + 6
-    storageLocation: 'Intermediate Freezer',
+    storageLocation: 'Dairy Container (Intermediate Freezer)',
     status: 'awaiting_handover',
     createdAt: '2026-06-17T10:00:00',
     sourceBatchCodes: ['160626/S1/R2/C/S'],
@@ -1062,14 +1064,14 @@ export const finishedStock: FinishedStockLot[] = [
 // TEMPERATURE READINGS
 // ============================================================
 export const temperatureReadings: TemperatureReading[] = [
-  { id: 't-001', location: 'Chiller', temperature: 4.2, targetMin: 3, targetMax: 5, recordedAt: '2026-06-17T06:00:00', recordedBy: 'Rajesh', inRange: true },
-  { id: 't-002', location: 'Intermediate Freezer', temperature: -17.5, targetMin: -20, targetMax: -16, recordedAt: '2026-06-17T06:00:00', recordedBy: 'Amit', inRange: true },
-  { id: 't-003', location: 'Finished Stock Chiller', temperature: 4.8, targetMin: 3, targetMax: 5, recordedAt: '2026-06-17T06:00:00', recordedBy: 'Rajesh', inRange: true },
-  { id: 't-004', location: 'Chiller', temperature: 6.1, targetMin: 3, targetMax: 5, recordedAt: '2026-06-17T10:00:00', recordedBy: 'Vikram', inRange: false },
-  { id: 't-005', location: 'Intermediate Freezer', temperature: -18.2, targetMin: -20, targetMax: -16, recordedAt: '2026-06-17T10:00:00', recordedBy: 'Vikram', inRange: true },
-  { id: 't-006', location: 'Chiller', temperature: 4.5, targetMin: 3, targetMax: 5, recordedAt: '2026-06-17T14:00:00', recordedBy: 'Deepak', inRange: true },
-  { id: 't-007', location: 'Intermediate Freezer', temperature: -17.8, targetMin: -20, targetMax: -16, recordedAt: '2026-06-17T14:00:00', recordedBy: 'Deepak', inRange: true },
-  { id: 't-008', location: 'Finished Stock Chiller', temperature: 4.3, targetMin: 3, targetMax: 5, recordedAt: '2026-06-17T14:00:00', recordedBy: 'Deepak', inRange: true },
+  { id: 't-001', location: 'Chiller', temperature: 4.2, targetMin: 0, targetMax: 5, recordedAt: '2026-06-17T06:00:00', recordedBy: 'Rajesh', inRange: true },
+  { id: 't-002', location: 'Dairy Container (Intermediate Freezer)', temperature: -17.5, targetMin: -25, targetMax: -10, recordedAt: '2026-06-17T06:00:00', recordedBy: 'Amit', inRange: true },
+  { id: 't-003', location: 'Coldroom', temperature: -17.5, targetMin: -25, targetMax: -10, recordedAt: '2026-06-17T06:00:00', recordedBy: 'Rajesh', inRange: true },
+  { id: 't-004', location: 'Chiller', temperature: 6.1, targetMin: 0, targetMax: 5, recordedAt: '2026-06-17T10:00:00', recordedBy: 'Vikram', inRange: false },
+  { id: 't-005', location: 'Dairy Container (Intermediate Freezer)', temperature: -18.2, targetMin: -25, targetMax: -10, recordedAt: '2026-06-17T10:00:00', recordedBy: 'Vikram', inRange: true },
+  { id: 't-006', location: 'Chiller', temperature: 4.5, targetMin: 0, targetMax: 5, recordedAt: '2026-06-17T14:00:00', recordedBy: 'Deepak', inRange: true },
+  { id: 't-007', location: 'Dairy Container (Intermediate Freezer)', temperature: -17.8, targetMin: -25, targetMax: -10, recordedAt: '2026-06-17T14:00:00', recordedBy: 'Deepak', inRange: true },
+  { id: 't-008', location: 'Coldroom', temperature: -18.1, targetMin: -25, targetMax: -10, recordedAt: '2026-06-17T14:00:00', recordedBy: 'Deepak', inRange: true },
 ];
 
 // ============================================================

@@ -76,14 +76,50 @@ interface AppContextType extends AppState {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+const temperatureProfiles: Record<string, { location: string; targetMin: number; targetMax: number }> = {
+  Chiller: { location: 'Chiller', targetMin: 0, targetMax: 5 },
+  'Intermediate Freezer': {
+    location: 'Dairy Container (Intermediate Freezer)',
+    targetMin: -25,
+    targetMax: -10,
+  },
+  'Dairy Container (Intermediate Freezer)': {
+    location: 'Dairy Container (Intermediate Freezer)',
+    targetMin: -25,
+    targetMax: -10,
+  },
+  'Finished Stock Chiller': { location: 'Coldroom', targetMin: -25, targetMax: -10 },
+  Coldroom: { location: 'Coldroom', targetMin: -25, targetMax: -10 },
+};
+
+function normalizeTemperatureReading(reading: TemperatureReading): TemperatureReading {
+  const profile = temperatureProfiles[reading.location];
+  if (!profile) return reading;
+
+  return {
+    ...reading,
+    location: profile.location,
+    targetMin: profile.targetMin,
+    targetMax: profile.targetMax,
+    inRange: reading.temperature >= profile.targetMin && reading.temperature <= profile.targetMax,
+  };
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [milkLots, setMilkLots] = useSupabaseState<MilkLot[]>('vejoy_milkLots', initialMilkLots);
   const [creamLots, setCreamLots] = useSupabaseState<CreamLot[]>('vejoy_creamLots', []);
   const [productionShifts, setProductionShifts] = useSupabaseState<ProductionShift[]>('vejoy_productionShifts', initialShifts);
   const [productionRounds, setProductionRounds] = useSupabaseState<ProductionRound[]>('vejoy_productionRounds', initialRounds);
-  const [intermediateLots, setIntermediateLots] = useSupabaseState<IntermediateLot[]>('vejoy_intermediateLots', initialIntermediate);
-  const [finishedStock, setFinishedStock] = useSupabaseState<FinishedStockLot[]>('vejoy_finishedStock', initialFinished);
-  const [temperatureReadings, setTemperatureReadings] = useSupabaseState<TemperatureReading[]>('vejoy_temperatureReadings', initialTemps);
+  const [storedIntermediateLots, setIntermediateLots] = useSupabaseState<IntermediateLot[]>('vejoy_intermediateLots', initialIntermediate);
+  const intermediateLots = storedIntermediateLots.map(lot => lot.storageLocation === 'Intermediate Freezer'
+    ? { ...lot, storageLocation: 'Dairy Container (Intermediate Freezer)' }
+    : lot);
+  const [storedFinishedStock, setFinishedStock] = useSupabaseState<FinishedStockLot[]>('vejoy_finishedStock', initialFinished);
+  const finishedStock = storedFinishedStock.map(stock => stock.storageLocation === 'Intermediate Freezer'
+    ? { ...stock, storageLocation: 'Dairy Container (Intermediate Freezer)' }
+    : stock);
+  const [storedTemperatureReadings, setTemperatureReadings] = useSupabaseState<TemperatureReading[]>('vejoy_temperatureReadings', initialTemps);
+  const temperatureReadings = storedTemperatureReadings.map(normalizeTemperatureReading);
   const [wasteEvents, setWasteEvents] = useSupabaseState<WasteEvent[]>('vejoy_wasteEvents', initialWaste);
   const [utilityLogs, setUtilityLogs] = useSupabaseState<UtilityLog[]>('vejoy_utilityLogs', initialUtilities);
 

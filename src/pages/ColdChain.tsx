@@ -23,9 +23,9 @@ import {
 
 // Temperature profiles
 const tempProfiles = [
-  { location: 'Chiller', targetMin: 3, targetMax: 5 },
-  { location: 'Intermediate Freezer', targetMin: -20, targetMax: -16 },
-  { location: 'Finished Stock Chiller', targetMin: 3, targetMax: 5 },
+  { location: 'Chiller', targetMin: 0, targetMax: 5 },
+  { location: 'Dairy Container (Intermediate Freezer)', targetMin: -25, targetMax: -10 },
+  { location: 'Coldroom', targetMin: -25, targetMax: -10 },
 ];
 
 export default function ColdChain() {
@@ -137,13 +137,13 @@ export default function ColdChain() {
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="time" tick={{ fontSize: 12 }} stroke="#94a3b8" />
-              <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" domain={[-22, 8]} />
+              <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" domain={[-27, 8]} />
               <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }} />
               <ReferenceLine y={5} stroke="#ef4444" strokeDasharray="3 3" />
-              <ReferenceLine y={3} stroke="#ef4444" strokeDasharray="3 3" />
+              <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" />
               <Line type="monotone" dataKey="Chiller" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="Intermediate Freezer" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="Finished Stock Chiller" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="Dairy Container (Intermediate Freezer)" name="Dairy Container" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="Coldroom" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
