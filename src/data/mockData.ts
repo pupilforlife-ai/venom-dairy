@@ -1140,6 +1140,7 @@ export const statusFlow = [
 export const statusLabels: Record<string, string> = {
   pan111_pending: 'PAN111 Approval Pending',
   spp_pending: 'SPP Weight Pending',
+  cancelled: 'Cancelled',
   scheduled: 'Scheduled',
   in_production: 'In Production',
   coagulation: 'Coagulation',
@@ -1157,6 +1158,7 @@ export const statusLabels: Record<string, string> = {
 export const statusColors: Record<string, string> = {
   pan111_pending: 'bg-amber-500',
   spp_pending: 'bg-pink-500',
+  cancelled: 'bg-slate-500',
   scheduled: 'bg-slate-400',
   in_production: 'bg-blue-500',
   coagulation: 'bg-violet-500',

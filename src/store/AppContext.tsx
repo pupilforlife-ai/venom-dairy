@@ -43,11 +43,14 @@ interface AppContextType extends AppState {
   
   // Shift actions
   addProductionShift: (shift: Omit<ProductionShift, 'id'>) => boolean;
+  removeProductionShift: (id: string) => boolean;
   updateProductionShift: (id: string, updates: Partial<ProductionShift>) => void;
   
   // Production round actions
   addProductionRound: (round: Omit<ProductionRound, 'id'>) => void;
   createProductionRound: (round: Omit<ProductionRound, 'id' | 'roundNumber'>) => Promise<ProductionRound | null>;
+  removeProductionRound: (id: string) => boolean;
+  cancelProductionRound: (id: string, reason?: string) => boolean;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
   advanceRoundStatus: (id: string) => void;
   forceAdvanceRoundStatus: (id: string) => Promise<boolean>;
@@ -136,10 +139,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ));
   };
 
+  const removeProductionShift = (id: string) => {
+    if (!productionShifts.some(shift => shift.id === id)) return false;
+    if (productionRounds.some(round => round.shiftId === id)) return false;
+    setProductionShifts(currentShifts => currentShifts.filter(shift => shift.id !== id));
+    return true;
+  };
+
   // Production round actions
   const addProductionRound = (round: Omit<ProductionRound, 'id'>) => {
     const newRound = { ...round, id: `pr-${Date.now()}` };
     setProductionRounds(currentRounds => [...currentRounds, newRound]);
+  };
+
+  const removeProductionRound = (id: string) => {
+    const round = productionRounds.find(item => item.id === id);
+    if (!round) return false;
+
+    // Hard deletion is only for an untouched scheduled round. Once production
+    // has started, keep the record and use cancellation instead.
+    const hasEvidence = round.locked || round.status !== 'scheduled' || round.outputWeight > 0 ||
+      Boolean(round.blockWeights?.length || round.packedSkus?.length || round.creamRecovered !== undefined || round.sppRecordedWeight !== undefined) ||
+      intermediateLots.some(lot => lot.sourceBatchId === id);
+    if (hasEvidence) return false;
+    setProductionRounds(currentRounds => currentRounds.filter(item => item.id !== id));
+    return true;
+  };
+
+  const cancelProductionRound = (id: string, reason?: string) => {
+    const round = productionRounds.find(item => item.id === id);
+    if (!round || round.locked || round.status === 'cancelled') return false;
+    const cancellationNote = reason?.trim() ? `Cancellation: ${reason.trim()}` : 'Cancellation: created by mistake';
+    setProductionRounds(currentRounds => currentRounds.map(item => item.id === id ? {
+      ...item,
+      status: 'cancelled',
+      locked: true,
+      completedAt: new Date().toISOString(),
+      notes: item.notes ? `${item.notes}\n${cancellationNote}` : cancellationNote,
+    } : item));
+    return true;
   };
 
   const createProductionRound = async (round: Omit<ProductionRound, 'id' | 'roundNumber'>) => {
@@ -266,9 +304,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addCreamLot,
     updateCreamLot,
     addProductionShift,
+    removeProductionShift,
     updateProductionShift,
     addProductionRound,
     createProductionRound,
+    removeProductionRound,
+    cancelProductionRound,
     updateProductionRound,
     advanceRoundStatus,
     forceAdvanceRoundStatus,

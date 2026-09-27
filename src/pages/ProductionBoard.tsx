@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   History,
+  Trash2,
+  XCircle,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -52,14 +54,15 @@ export default function ProductionBoard() {
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots,
     advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
-    addProductionShift, updateProductionShift, addIntermediateLot,
+    addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot,
+    removeProductionRound, cancelProductionRound,
     updateMilkLot
   } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
   const isOwner = currentRole === 'owner';
-  const editableStageOptions = [...statusFlow, 'spp_pending', 'pan111_pending'] as string[];
+  const editableStageOptions = [...statusFlow, 'spp_pending', 'pan111_pending', 'cancelled'] as string[];
   
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'amassi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all', balance: 'all', workflow: 'all', query: '' });
@@ -672,6 +675,31 @@ export default function ProductionBoard() {
     showToast('success', 'Shift ended');
   };
 
+  const handleDeleteShift = (shiftId: string) => {
+    if (!canForceStage) return;
+    const shift = productionShifts.find(item => item.id === shiftId);
+    if (!shift || !window.confirm(`Delete Shift ${shift.shiftNumber} from milk lot ${shift.milkLotCode}? This is only available when the shift has no rounds.`)) return;
+    if (removeProductionShift(shiftId)) showToast('success', `Shift ${shift.shiftNumber} deleted`);
+    else showToast('error', 'This shift has rounds and cannot be deleted. Cancel its rounds instead.');
+  };
+
+  const handleDeleteRound = (roundId: string) => {
+    if (!canForceStage) return;
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round || !window.confirm(`${roundDisplayCode(round)} has not started production. Delete it permanently?`)) return;
+    if (removeProductionRound(roundId)) showToast('success', `${roundDisplayCode(round)} deleted`);
+    else showToast('error', 'This round already has production data. Use Cancel round instead.');
+  };
+
+  const handleCancelRound = (roundId: string) => {
+    if (!canForceStage) return;
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round || round.locked) return;
+    const reason = window.prompt(`Reason for cancelling ${roundDisplayCode(round)}:`, 'Created by mistake');
+    if (reason === null) return;
+    if (cancelProductionRound(roundId, reason)) showToast('success', `${roundDisplayCode(round)} cancelled`);
+  };
+
   const getLatestActiveShift = () => {
     return productionShifts
       .filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId)
@@ -1028,7 +1056,7 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Status</label>
             <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="all">All Statuses</option>
-              {[...statusFlow, 'spp_pending', 'pan111_pending'].map((s) => <option key={s} value={s}>{statusLabels[s] || s}</option>)}
+              {[...statusFlow, 'spp_pending', 'pan111_pending', 'cancelled'].map((s) => <option key={s} value={s}>{statusLabels[s] || s}</option>)}
             </select>
           </div>
           <div>
@@ -1139,6 +1167,11 @@ export default function ProductionBoard() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>
+                  {canForceStage && !productionRounds.some(round => round.shiftId === shift.id) && (
+                    <button onClick={() => handleDeleteShift(shift.id)} className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors">
+                      <Trash2 className="w-3 h-3" /> Delete shift
+                    </button>
+                  )}
                   {shift.status === 'active' && (
                     <button onClick={() => handleEndShift(shift.id)} className="flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-xs font-medium hover:bg-slate-200 transition-colors">
                       <Square className="w-3 h-3" /> End Shift
@@ -1276,6 +1309,8 @@ export default function ProductionBoard() {
                             {!round.locked && (
                               <div className="flex gap-1 flex-wrap">
                                 {getActionButtons(round)}
+                                {canForceStage && round.status === 'scheduled' && <button onClick={() => handleDeleteRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-100"><Trash2 className="h-3 w-3" />Delete</button>}
+                                {canForceStage && round.status !== 'scheduled' && <button onClick={() => handleCancelRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-100"><XCircle className="h-3 w-3" />Cancel</button>}
                               </div>
                             )}
                           </td>
