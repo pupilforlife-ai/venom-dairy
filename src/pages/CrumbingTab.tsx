@@ -970,7 +970,7 @@ export default function CrumbingTab() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Trays to Pack</label>
             <input
               type="number"
-              value={packForm.traysPacked}
+              value={packForm.traysPacked || ''}
               onChange={(e) => setPackForm({ ...packForm, traysPacked: parseInt(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               min="0"
@@ -981,7 +981,7 @@ export default function CrumbingTab() {
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cases</label>
               <input
                 type="number"
-                value={packForm.cases}
+                value={packForm.cases || ''}
                 onChange={(e) => setPackForm({ ...packForm, cases: parseInt(e.target.value) })}
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
                 min="0"
@@ -991,7 +991,7 @@ export default function CrumbingTab() {
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Loose Packets</label>
               <input
                 type="number"
-                value={packForm.loose}
+                value={packForm.loose || ''}
                 onChange={(e) => setPackForm({ ...packForm, loose: parseInt(e.target.value) })}
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
                 min="0"

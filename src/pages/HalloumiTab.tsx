@@ -3,7 +3,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { Plus, Clock, Package, Scissors, CheckCircle2, Thermometer, Beaker, ShieldAlert } from 'lucide-react';
-import { getHalloumiBatchCode, milkStorageVessels } from '../data/mockData';
+import { getHalloumiBatchCode, milkProductionVessels } from '../data/mockData';
 
 // Halloumi-specific status flow
 const halloumiStatusFlow = [
@@ -751,15 +751,15 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Input Quantity (L)</label>
-            <input type="number" value={newRound.plannedInput} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+            <input type="number" value={newRound.plannedInput || ''} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk taken from</label>
             <select value={newRound.sourceVessel} onChange={(e) => setNewRound({ ...newRound, sourceVessel: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select vessel</option>
-              {milkStorageVessels.map((vessel) => <option key={vessel.id} value={vessel.id}>{vessel.label}{vessel.capacity ? ` (${vessel.capacity.toLocaleString()} L)` : ''}</option>)}
+              {milkProductionVessels.map((vessel) => <option key={vessel.id} value={vessel.id}>{vessel.label} ({vessel.capacity?.toLocaleString()} L)</option>)}
             </select>
-            <p className="text-xs text-slate-500 mt-1">This is recorded for milk-lot vessel reconciliation.</p>
+            <p className="text-xs text-slate-500 mt-1">Transfer milk into BMC #1 or BMC #2 (Holding Tank) before production.</p>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (optional)</label>
@@ -804,7 +804,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Final Product Weight (kg)</label>
             <input
               type="number"
-              value={weightInput}
+              value={weightInput || ''}
               onChange={(e) => setWeightInput(parseFloat(e.target.value) || 0)}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               step="0.1"

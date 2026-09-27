@@ -21,7 +21,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getCreamBatchCode, milkStorageVessels, statusFlow, statusLabels, statusColors } from '../data/mockData';
+import { getCreamBatchCode, milkProductionVessels, statusFlow, statusLabels, statusColors } from '../data/mockData';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import HalloumiTab from './HalloumiTab';
 import AmassiTab from './AmassiTab';
@@ -37,7 +37,9 @@ function roundDisplayCode(round: { type: string; shiftNumber: number; roundNumbe
 }
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
-  const currentIndex = statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
+  const currentIndex = currentStatus === 'chiller_storage'
+    ? statusFlow.indexOf('cut')
+    : statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
   return (
     <div className="flex items-center gap-1.5" title={statusLabels[currentStatus]}>
       {statusFlow.map((step, i) => (
@@ -62,7 +64,7 @@ export default function ProductionBoard() {
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
   const isOwner = currentRole === 'owner';
-  const editableStageOptions = [...statusFlow, 'spp_pending', 'pan111_pending', 'cancelled'] as string[];
+  const editableStageOptions = [...statusFlow, 'chiller_storage', 'spp_pending', 'pan111_pending', 'cancelled'] as string[];
   
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'amassi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all', balance: 'all', workflow: 'all', query: '' });
@@ -411,6 +413,11 @@ export default function ProductionBoard() {
   const handleFreeze = (roundId: string) => {
     updateProductionRound(roundId, { status: 'frozen' });
     showToast('success', 'Moved to freezer');
+  };
+
+  const handleStoreInChiller = (roundId: string) => {
+    updateProductionRound(roundId, { status: 'chiller_storage' });
+    showToast('success', 'Restaurant blocks stored in chiller');
   };
 
   const handlePack = (roundId: string) => {
@@ -778,6 +785,10 @@ export default function ProductionBoard() {
     if (!canForceStage) return;
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.status === nextStatus) return;
+    if (nextStatus === 'chiller_storage' && round.cuttingType !== 'Restaurant blocks') {
+      showToast('error', 'Chiller storage is only available for Restaurant blocks');
+      return;
+    }
     if (!window.confirm(`Set ${roundDisplayCode(round)} to ${statusLabels[nextStatus] || nextStatus}?`)) return;
     const now = new Date().toISOString();
     const stageUpdates: any = { status: nextStatus, locked: nextStatus === 'handed_over' };
@@ -875,7 +886,10 @@ export default function ProductionBoard() {
       </div>;
     }
     if (round.status === 'cut' && round.cuttingType !== 'SPP pieces') {
-      return <div className="mt-1 flex flex-wrap gap-1"><button onClick={() => handleFreeze(round.id)} className="rounded bg-indigo-500 px-2 py-1 text-xs text-white hover:bg-indigo-600">Freeze</button></div>;
+      return <div className="mt-1 flex flex-wrap gap-1">
+        {round.cuttingType === 'Restaurant blocks' && <button onClick={() => handleStoreInChiller(round.id)} className="rounded bg-cyan-600 px-2 py-1 text-xs text-white hover:bg-cyan-700">Store in Chiller</button>}
+        <button onClick={() => handleFreeze(round.id)} className="rounded bg-indigo-500 px-2 py-1 text-xs text-white hover:bg-indigo-600">Freeze</button>
+      </div>;
     }
     return null;
   };
@@ -1070,7 +1084,7 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Status</label>
             <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="all">All Statuses</option>
-              {[...statusFlow, 'spp_pending', 'pan111_pending', 'cancelled'].map((s) => <option key={s} value={s}>{statusLabels[s] || s}</option>)}
+              {[...statusFlow, 'chiller_storage', 'spp_pending', 'pan111_pending', 'cancelled'].map((s) => <option key={s} value={s}>{statusLabels[s] || s}</option>)}
             </select>
           </div>
           <div>
@@ -1264,7 +1278,7 @@ export default function ProductionBoard() {
                             )}
                           </td>
                           <td className="px-1 py-1.5 text-slate-600 text-sm">
-                            <input type="number" min="0" value={round.actualInput > 0 ? round.actualInput : round.plannedInput} onChange={(e) => { const quantity = parseInt(e.target.value) || 0; updateProductionRound(round.id, { plannedInput: quantity, actualInput: quantity }); }} className="w-20 px-2 py-1 border border-slate-200 rounded text-sm" aria-label={`Milk quantity for round ${round.roundNumber}`} />
+                            <input type="number" min="0" value={(round.actualInput > 0 ? round.actualInput : round.plannedInput) || ''} onChange={(e) => { const quantity = parseInt(e.target.value) || 0; updateProductionRound(round.id, { plannedInput: quantity, actualInput: quantity }); }} className="w-20 px-2 py-1 border border-slate-200 rounded text-sm" aria-label={`Milk quantity for round ${round.roundNumber}`} />
                           </td>
                           <td className="px-1 py-1.5 text-sm">
                             {round.startingTemperature !== undefined ? (
@@ -1317,7 +1331,7 @@ export default function ProductionBoard() {
                             ) : <span className="text-slate-400">—</span>}
                             {round.pan111ApprovalStatus === 'pending' && <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
                             {round.remainingBalance !== undefined && <div className={`mt-1 inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold ${round.remainingBalance > 0 ? 'border-amber-200 bg-amber-50 text-amber-600' : round.remainingBalance < 0 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>Balance {round.remainingBalance.toFixed(2)} kg</div>}
-                            {['cut', 'frozen', 'packed'].includes(round.status) && !round.locked && round.pan111ApprovalStatus !== 'pending' && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm(emptyPackForm); setShowPackModal(true); }} className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"><Package className="h-3 w-3" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
+                            {['cut', 'chiller_storage', 'frozen', 'packed'].includes(round.status) && !round.locked && round.pan111ApprovalStatus !== 'pending' && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm(emptyPackForm); setShowPackModal(true); }} className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"><Package className="h-3 w-3" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
                             {isOwner && round.packedSkus && round.packedSkus.length > 0 && <button onClick={() => { const index = round.packedSkus!.length - 1; const pack = round.packedSkus![index]; setSelectedRound(round.id); setEditingPackIndex(index); setPackForm({ sku: pack.sku, cases: pack.cases, loose: pack.loose, looseWeightKg: pack.looseWeightKg || 0, weightKg: pack.weightKg || 0, reason: pack.reason || '' }); setShowPackModal(true); }} className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
@@ -1432,7 +1446,7 @@ export default function ProductionBoard() {
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Number of Blocks</label>
-            <input type="number" value={cutForm.numberOfBlocks} onChange={(e) => {
+            <input type="number" value={cutForm.numberOfBlocks || ''} onChange={(e) => {
               const num = parseInt(e.target.value);
               setCutForm({ ...cutForm, numberOfBlocks: num, blockWeights: Array(num).fill(0) });
             }} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
@@ -1444,7 +1458,7 @@ export default function ProductionBoard() {
                 {cutForm.blockWeights.map((weight, index) => (
                   <div key={index} className="flex items-center gap-2">
                     <span className="text-sm w-20">Block {index + 1}:</span>
-                    <input type="number" value={weight} onChange={(e) => {
+                    <input type="number" value={weight || ''} onChange={(e) => {
                       const newWeights = [...cutForm.blockWeights];
                       newWeights[index] = parseFloat(e.target.value) || 0;
                       setCutForm({ ...cutForm, blockWeights: newWeights });
@@ -1472,7 +1486,7 @@ export default function ProductionBoard() {
           return <div className="space-y-4">
             {round && <p className="text-sm text-slate-600">{roundDisplayCode(round)} · Milk lot {round.milkLotCode}</p>}
             {round?.storedBlockWeights?.length && round?.status !== 'clingwrapped' && <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 text-xs text-pink-900">Stored before final cutting: {round.storedBlockWeights.length} large blocks · {round.storedOutputWeight?.toFixed(2)} kg · by {round.storedCutBy || '—'}</div>}
-            <div className="space-y-2">{blockWeightsDraft.map((weight, index) => <label key={index} className="flex items-center gap-3 text-sm"><span className="w-20">Block {index + 1}</span><input type="number" min="0" step="0.01" value={weight} onChange={(e) => { if (!canForceStage) return; const next = [...blockWeightsDraft]; next[index] = parseFloat(e.target.value) || 0; setBlockWeightsDraft(next); }} disabled={!canForceStage} className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50" /><span>kg</span></label>)}</div>
+            <div className="space-y-2">{blockWeightsDraft.map((weight, index) => <label key={index} className="flex items-center gap-3 text-sm"><span className="w-20">Block {index + 1}</span><input type="number" min="0" step="0.01" value={weight || ''} onChange={(e) => { if (!canForceStage) return; const next = [...blockWeightsDraft]; next[index] = parseFloat(e.target.value) || 0; setBlockWeightsDraft(next); }} disabled={!canForceStage} className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50" /><span>kg</span></label>)}</div>
             <div className="bg-slate-50 rounded-lg p-3 text-sm font-medium">Total recorded: {total.toFixed(2)} kg{round?.sppRecordedWeight !== undefined && <div className="text-pink-600 mt-1">SPP: {round.sppRecordedWeight.toFixed(2)} kg · Balance: {Math.max(0, total - round.sppRecordedWeight).toFixed(2)} kg</div>}</div>
             {canForceStage ? <div className="flex gap-2"><button onClick={saveBlockWeights} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium">Save correction</button><button onClick={() => setBlockWeightsRoundId(null)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm">Cancel</button></div> : <button onClick={() => setBlockWeightsRoundId(null)} className="w-full px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm">Close</button>}
           </div>;
@@ -1490,8 +1504,8 @@ export default function ProductionBoard() {
               Total Paneer for this round: <strong>{totalWeight.toFixed(2)} kg</strong>
             </div>
             <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Name of cutter</span><input value={sppForm.cutBy} onChange={(e) => setSppForm({ ...sppForm, cutBy: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
-            <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">No. of blocks cut in SPP pieces</span><input type="number" min="1" value={sppForm.numberOfBlocks} onChange={(e) => setSppForm({ ...sppForm, numberOfBlocks: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
-            <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded Paneer weight for SPP (kg)</span><input type="number" min="0" step="0.01" value={sppForm.recordedWeight} onChange={(e) => setSppForm({ ...sppForm, recordedWeight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
+            <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">No. of blocks cut in SPP pieces</span><input type="number" min="1" value={sppForm.numberOfBlocks || ''} onChange={(e) => setSppForm({ ...sppForm, numberOfBlocks: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
+            <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded Paneer weight for SPP (kg)</span><input type="number" min="0" step="0.01" value={sppForm.recordedWeight || ''} onChange={(e) => setSppForm({ ...sppForm, recordedWeight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></label>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">Balance Paneer: <strong>{balance.toFixed(2)} kg</strong></div>
             {balance > 0.01 && <label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Balance disposition</span><select value={sppForm.balanceDisposition} onChange={(e) => setSppForm({ ...sppForm, balanceDisposition: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"><option value="">Select what happened to balance</option><option value="400g cubes">Cut in 400g</option><option value="200g cubes">Cut in 200g</option><option value="Restaurant blocks">Restaurant blocks</option><option value="PAN111">Went into PAN111</option></select></label>}
             <div className="flex gap-2 pt-2"><button onClick={() => selectedRound && handleRecordSppWeight(selectedRound)} className="flex-1 px-4 py-2.5 bg-pink-600 text-white rounded-lg text-sm font-medium">Save SPP record</button><button onClick={() => setShowSppModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
@@ -1538,17 +1552,17 @@ export default function ProductionBoard() {
           {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode !== 'weight_only' && <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cases</label>
-              <input type="number" value={packForm.cases} onChange={(e) => setPackForm({ ...packForm, cases: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+              <input type="number" value={packForm.cases || ''} onChange={(e) => setPackForm({ ...packForm, cases: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
             </div>
             {paneerSkuByCode[packForm.sku]?.packMode === 'weight_loose' ? <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Loose weight (kg)</label>
-              <input type="number" value={packForm.looseWeightKg} onChange={(e) => setPackForm({ ...packForm, looseWeightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" />
+              <input type="number" value={packForm.looseWeightKg || ''} onChange={(e) => setPackForm({ ...packForm, looseWeightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" />
             </div> : <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Loose Packets</label>
-              <input type="number" value={packForm.loose} onChange={(e) => setPackForm({ ...packForm, loose: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+              <input type="number" value={packForm.loose || ''} onChange={(e) => setPackForm({ ...packForm, loose: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
             </div>}
           </div>}
-          {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode === 'weight_only' && <div className="space-y-3"><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">PAN111 weight (kg)</span><input type="number" value={packForm.weightKg} onChange={(e) => setPackForm({ ...packForm, weightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" /></label><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Reason (required for approval)</span><textarea value={packForm.reason} onChange={(e) => setPackForm({ ...packForm, reason: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={2} placeholder="Explain why this paneer is being recorded as PAN111" /></label></div>}
+          {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode === 'weight_only' && <div className="space-y-3"><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">PAN111 weight (kg)</span><input type="number" value={packForm.weightKg || ''} onChange={(e) => setPackForm({ ...packForm, weightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" /></label><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Reason (required for approval)</span><textarea value={packForm.reason} onChange={(e) => setPackForm({ ...packForm, reason: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={2} placeholder="Explain why this paneer is being recorded as PAN111" /></label></div>}
           {packForm.sku && selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
             const balance = round?.remainingBalance ?? round?.outputWeight ?? 0;
@@ -1585,7 +1599,7 @@ export default function ProductionBoard() {
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Weight (kg)</label>
-            <input type="number" value={pan111Form.weight} onChange={(e) => setPan111Form({ ...pan111Form, weight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" step="0.1" min="0" />
+            <input type="number" value={pan111Form.weight || ''} onChange={(e) => setPan111Form({ ...pan111Form, weight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" step="0.1" min="0" />
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded By (Supervisor)</label>
@@ -1610,7 +1624,7 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Number of Buckets</label>
             <input 
               type="number" 
-              value={creamForm.numberOfBuckets} 
+              value={creamForm.numberOfBuckets || ''}
               onChange={(e) => {
                 const num = parseInt(e.target.value) || 0;
                 setCreamForm({ ...creamForm, numberOfBuckets: num, bucketWeights: Array(num).fill(0) });
@@ -1629,7 +1643,7 @@ export default function ProductionBoard() {
                     <span className="text-sm w-24">Bucket {index + 1}:</span>
                     <input 
                       type="number" 
-                      value={weight} 
+                      value={weight || ''}
                       onChange={(e) => {
                         const newWeights = [...creamForm.bucketWeights];
                         newWeights[index] = parseFloat(e.target.value) || 0;
@@ -1763,6 +1777,14 @@ export default function ProductionBoard() {
               details: 'Stored in chiller'
             });
           }
+
+          if (round.status === 'chiller_storage') {
+            history.push({
+              stage: 'Chiller Storage',
+              time: '',
+              details: 'Restaurant blocks stored fresh in the chiller'
+            });
+          }
           
           if (round.status === 'frozen' || ['packed', 'handed_over'].includes(round.status)) {
             history.push({
@@ -1878,15 +1900,15 @@ export default function ProductionBoard() {
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Planned Input (L)</label>
-            <input type="number" value={newRound.plannedInput} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+            <input type="number" value={newRound.plannedInput || ''} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk taken from</label>
             <select value={newRound.sourceVessel} onChange={(e) => setNewRound({ ...newRound, sourceVessel: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select vessel</option>
-              {milkStorageVessels.map((vessel) => <option key={vessel.id} value={vessel.id}>{vessel.label}{vessel.capacity ? ` (${vessel.capacity.toLocaleString()} L)` : ''}</option>)}
+              {milkProductionVessels.map((vessel) => <option key={vessel.id} value={vessel.id}>{vessel.label} ({vessel.capacity?.toLocaleString()} L)</option>)}
             </select>
-            <p className="text-xs text-slate-500 mt-1">This is recorded for milk-lot vessel reconciliation.</p>
+            <p className="text-xs text-slate-500 mt-1">Milk must be transferred into BMC #1 or BMC #2 (Holding Tank) before production. The editable Milk Qty is the actual quantity taken into this round.</p>
           </div>
           <div className="flex gap-2 pt-2">
             <button onClick={handleCreateRound} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Create Round</button>

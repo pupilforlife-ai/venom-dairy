@@ -151,6 +151,34 @@ export interface MilkLot {
   halloumiPool?: HalloumiPool;
 }
 
+/** Product rounds that draw liquid milk from a storage vessel. */
+export const milkProductionTypes: ProductionRound['type'][] = ['D', 'C/S', 'Halloumi', 'Amassi'];
+
+export function isMilkProductionRound(round: Pick<ProductionRound, 'type'>) {
+  return milkProductionTypes.includes(round.type);
+}
+
+/**
+ * Use recorded round inputs when the round has a vessel assignment. Older
+ * snapshots pre-date vessel tracking, so they continue to use the milk lot's
+ * stored totals until a tracked round is actually started.
+ */
+export function getMilkLotAccounting(lot: MilkLot, rounds: ProductionRound[]) {
+  const trackedRounds = rounds.filter((round) =>
+    round.milkLotId === lot.id &&
+    Boolean(round.sourceVessel) &&
+    isMilkProductionRound(round) &&
+    round.actualInput > 0
+  );
+  const consumed = trackedRounds.length > 0
+    ? trackedRounds.reduce((total, round) => total + Math.max(0, round.actualInput), 0)
+    : Math.max(0, lot.litresConsumed);
+  const sold = Math.max(0, lot.litresSold || 0);
+  const accountedOther = Math.max(0, lot.litresRejected) + Math.max(0, lot.litresSpilled);
+  const remaining = Math.max(0, lot.litresReceived - consumed - sold - accountedOther);
+  return { consumed, sold, remaining };
+}
+
 export interface MilkStorageVessel {
   id: string;
   label: string;
@@ -162,9 +190,7 @@ export interface MilkStorageVessel {
 export const milkStorageVessels: MilkStorageVessel[] = [
   { id: 'silo', label: 'Silo', capacity: 10000 },
   { id: 'bmc-1', label: 'BMC #1', capacity: 3000 },
-  { id: 'bmc-2', label: 'BMC #2', capacity: 3000 },
-  { id: 'holding-tank', label: 'Holding Tank', capacity: 2500 },
-  { id: 'direct-production', label: 'Direct to Production', capacity: 2000 },
+  { id: 'bmc-2', label: 'BMC #2 (Holding Tank)', capacity: 3000 },
   ...Array.from({ length: 10 }, (_, index) => ({
     id: `ibc-${index + 1}`,
     label: `IBC #${index + 1}`,
@@ -172,6 +198,13 @@ export const milkStorageVessels: MilkStorageVessel[] = [
   })),
   { id: 'auxiliary', label: 'Auxiliary storage (cans / buckets)', capacity: null },
 ];
+
+// Milk is transferred into a BMC before production. Keeping this list
+// separate from the full allocation list prevents rounds from accidentally
+// drawing directly from an IBC or the silo.
+export const milkProductionVessels = milkStorageVessels.filter((vessel) =>
+  vessel.id === 'bmc-1' || vessel.id === 'bmc-2'
+);
 
 export interface ProductionShift {
   id: string;
@@ -1150,6 +1183,7 @@ export const statusLabels: Record<string, string> = {
   ready_cutting: 'Ready for Cutting',
   cut: 'Cut',
   clingwrapped: 'Clingwrapped',
+  chiller_storage: 'Chiller Storage',
   frozen: 'Frozen',
   packed: 'Packed',
   handed_over: 'Handed Over',
@@ -1168,6 +1202,7 @@ export const statusColors: Record<string, string> = {
   ready_cutting: 'bg-amber-500',
   cut: 'bg-orange-500',
   clingwrapped: 'bg-pink-400',
+  chiller_storage: 'bg-cyan-500',
   frozen: 'bg-indigo-500',
   packed: 'bg-emerald-500',
   handed_over: 'bg-emerald-700',

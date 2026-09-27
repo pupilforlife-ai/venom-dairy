@@ -24,7 +24,7 @@ import {
   Legend,
 } from 'recharts';
 import { useApp } from '../store/AppContext';
-import { statusLabels } from '../data/mockData';
+import { getMilkLotAccounting, statusLabels } from '../data/mockData';
 
 type DashboardMetric = {
   label: string;
@@ -79,6 +79,9 @@ export default function Dashboard() {
   const activeMilkLot = milkLots.find((m) => m.status === 'active') ?? milkLots[0];
   const activeLotCode = activeMilkLot?.lotCode;
   const activeLotRounds = productionRounds.filter((r) => r.milkLotCode === activeLotCode);
+  const milkAccounting = activeMilkLot
+    ? getMilkLotAccounting(activeMilkLot, productionRounds)
+    : { consumed: 0, sold: 0, remaining: 0 };
   const activeRounds = activeLotRounds.filter((r) => r.status !== 'handed_over');
   const outOfRangeTemps = temperatureReadings.filter((t) => !t.inRange);
   const awaitingHandover = finishedStock.filter((f) => f.status === 'awaiting_handover');
@@ -93,11 +96,11 @@ export default function Dashboard() {
     .filter((lot) => lot.status !== 'consumed' && /frozen/i.test(lot.productName))
     .reduce((s, lot) => s + lot.currentQuantity, 0);
   const unexplainedMilk = activeMilkLot
-    ? activeMilkLot.litresReceived - activeMilkLot.litresConsumed - activeMilkLot.litresRemaining
-      - activeMilkLot.litresRejected - activeMilkLot.litresSpilled - (activeMilkLot.litresSold ?? 0)
+    ? activeMilkLot.litresReceived - milkAccounting.consumed - milkAccounting.remaining
+      - activeMilkLot.litresRejected - activeMilkLot.litresSpilled - milkAccounting.sold
     : 0;
   const metrics: DashboardMetric[] = [
-    { label: 'Milk Remaining', value: activeMilkLot?.litresRemaining ?? 0, unit: 'L', trend: 'down', trendValue: activeMilkLot ? `${Math.round((activeMilkLot.litresConsumed / activeMilkLot.litresReceived) * 100)}% consumed` : 'No active lot', color: 'blue' },
+    { label: 'Milk Remaining', value: milkAccounting.remaining, unit: 'L', trend: 'down', trendValue: activeMilkLot ? `${Math.round((milkAccounting.consumed / activeMilkLot.litresReceived) * 100)}% consumed` : 'No active lot', color: 'blue' },
     { label: 'Current Lot Output', value: totalOutput.toFixed(1), unit: 'kg', trend: 'up', trendValue: `${activeLotRounds.filter((r) => r.outputWeight > 0).length} completed rounds`, color: 'emerald' },
     { label: 'Paneer Yield', value: paneerYield.toFixed(1), unit: '%', trend: 'stable', trendValue: paneerInput > 0 ? 'Calculated from rounds' : 'No paneer input recorded', color: 'teal' },
     { label: 'Frozen Stock', value: frozenStock.toFixed(1), unit: 'kg', trend: 'up', trendValue: 'Available intermediate stock', color: 'indigo' },
@@ -137,13 +140,13 @@ export default function Dashboard() {
           {activeMilkLot && (
             <div>
               <div className="flex justify-between text-xs text-slate-500 mb-1">
-                <span>{activeMilkLot.litresConsumed.toLocaleString()}L consumed</span>
-                <span>{activeMilkLot.litresRemaining.toLocaleString()}L remaining</span>
+                <span>{milkAccounting.consumed.toLocaleString()}L consumed</span>
+                <span>{milkAccounting.remaining.toLocaleString()}L remaining</span>
               </div>
               <div className="w-full bg-slate-100 rounded-full h-2.5">
                 <div
                   className="bg-blue-500 h-2.5 rounded-full transition-all"
-                  style={{ width: `${(activeMilkLot.litresConsumed / activeMilkLot.litresReceived) * 100}%` }}
+                  style={{ width: `${Math.min(100, (milkAccounting.consumed / activeMilkLot.litresReceived) * 100)}%` }}
                 />
               </div>
               <div className="grid grid-cols-3 gap-2 mt-3 text-center">

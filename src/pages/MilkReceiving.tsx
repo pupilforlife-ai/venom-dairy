@@ -3,7 +3,7 @@ import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, milkStorageVessels } from '../data/mockData';
+import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, milkStorageVessels } from '../data/mockData';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, addMilkLot, updateMilkLot, addCreamLot } = useApp();
@@ -117,6 +117,7 @@ export default function MilkReceiving() {
   };
 
   const getAllocations = (lot: typeof milkLots[number]) => {
+    const accounting = getMilkLotAccounting(lot, productionRounds);
     let receiptRemainder = Math.max(0, lot.litresReceived);
     const allocations = milkStorageVessels.map((vessel) => {
       const litres = vessel.capacity === null ? receiptRemainder : Math.min(vessel.capacity, receiptRemainder);
@@ -124,14 +125,16 @@ export default function MilkReceiving() {
       return { ...vessel, litres };
     });
 
-    // New rounds identify their source vessel. Use planned input until the
-    // round has an actual input, then use the actual value.
+    // New rounds identify their source vessel. Only actual input is drawn
+    // from a vessel; a scheduled round is still only a plan.
     const sourceDraws = new Map<string, number>();
     productionRounds
       .filter((round) => round.milkLotId === lot.id && round.sourceVessel)
       .forEach((round) => {
-        const draw = round.actualInput > 0 ? round.actualInput : round.plannedInput;
-        sourceDraws.set(round.sourceVessel!, (sourceDraws.get(round.sourceVessel!) || 0) + Math.max(0, draw));
+        const draw = round.actualInput > 0 ? round.actualInput : 0;
+        if (draw <= 0) return;
+        const vesselId = round.sourceVessel === 'holding-tank' ? 'bmc-2' : round.sourceVessel!;
+        sourceDraws.set(vesselId, (sourceDraws.get(vesselId) || 0) + Math.max(0, draw));
       });
     allocations.forEach((allocation) => {
       const draw = sourceDraws.get(allocation.id) || 0;
@@ -142,7 +145,7 @@ export default function MilkReceiving() {
     // drawdown against the receiving fill order so the displayed quantities
     // still add up to the lot's current remaining figure.
     const knownDraw = [...sourceDraws.values()].reduce((sum, draw) => sum + draw, 0);
-    let legacyDraw = Math.max(0, lot.litresReceived - lot.litresRemaining - knownDraw);
+    let legacyDraw = Math.max(0, lot.litresReceived - accounting.remaining - knownDraw);
     allocations.forEach((allocation) => {
       if (legacyDraw <= 0) return;
       const draw = Math.min(allocation.litres, legacyDraw);
@@ -151,7 +154,7 @@ export default function MilkReceiving() {
     });
 
     const displayedTotal = allocations.reduce((sum, allocation) => sum + allocation.litres, 0);
-    const reconciliationDifference = Math.max(0, lot.litresRemaining - displayedTotal);
+    const reconciliationDifference = Math.max(0, accounting.remaining - displayedTotal);
     const auxiliary = allocations.find((allocation) => allocation.id === 'auxiliary');
     if (auxiliary) auxiliary.litres += reconciliationDifference;
     return allocations.filter((allocation) => allocation.litres > 0 || sourceDraws.has(allocation.id));
@@ -175,9 +178,7 @@ export default function MilkReceiving() {
 
   const totals = displayedLot ? {
     received: displayedLot.litresReceived,
-    consumed: displayedLot.litresConsumed,
-    sold: displayedLot.litresSold || 0,
-    remaining: displayedLot.litresRemaining,
+    ...getMilkLotAccounting(displayedLot, productionRounds),
   } : { received: 0, consumed: 0, sold: 0, remaining: 0 };
 
   const openEditLot = (lot: typeof milkLots[number]) => {
@@ -200,7 +201,8 @@ export default function MilkReceiving() {
       showToast('error', 'Enter a lot code and a valid received quantity');
       return;
     }
-    const alreadyAccountedFor = lot.litresConsumed + (lot.litresSold || 0) + lot.litresRejected + lot.litresSpilled;
+    const accounting = getMilkLotAccounting(lot, productionRounds);
+    const alreadyAccountedFor = accounting.consumed + accounting.sold + lot.litresRejected + lot.litresSpilled;
     if (editLot.litresReceived < alreadyAccountedFor) {
       showToast('error', `Received quantity cannot be below ${alreadyAccountedFor.toLocaleString()} L already accounted for`);
       return;
@@ -210,7 +212,7 @@ export default function MilkReceiving() {
       lotCode: editLot.lotCode.trim(),
       supplier: editLot.supplier.trim(),
       litresReceived: editLot.litresReceived,
-      litresRemaining: Math.max(0, lot.litresRemaining + delta),
+      litresRemaining: Math.max(0, accounting.remaining + delta),
       receiptDate: editLot.receiptDate,
       receiptTime: editLot.receiptTime || undefined,
       invoiceNo: editLot.invoiceNo.trim() || undefined,
@@ -232,13 +234,15 @@ export default function MilkReceiving() {
       showToast('error', 'Enter sale quantity, customer, and date');
       return;
     }
-    if (milkSale.quantity > lot.litresRemaining) {
-      showToast('error', `Only ${lot.litresRemaining.toLocaleString()} L is available in this lot`);
+    const available = getMilkLotAccounting(lot, productionRounds).remaining;
+    if (milkSale.quantity > available) {
+      showToast('error', `Only ${available.toLocaleString()} L is available in this lot`);
       return;
     }
     updateMilkLot(lot.id, {
+      litresConsumed: getMilkLotAccounting(lot, productionRounds).consumed,
       litresSold: (lot.litresSold || 0) + milkSale.quantity,
-      litresRemaining: lot.litresRemaining - milkSale.quantity,
+      litresRemaining: available - milkSale.quantity,
       milkSales: [...(lot.milkSales || []), {
         id: `ms-${Date.now()}`,
         milkLotId: lot.id,
@@ -394,7 +398,8 @@ export default function MilkReceiving() {
             <tbody className="divide-y divide-slate-200">
               {(displayedLot ? [displayedLot] : []).map((lot) => {
                 const isExpanded = expandedLots.has(lot.id);
-                const milkLeft = lot.litresRemaining;
+                const lotAccounting = getMilkLotAccounting(lot, productionRounds);
+                const milkLeft = lotAccounting.remaining;
                 
                 return (
                   <React.Fragment key={lot.id}>
@@ -430,7 +435,7 @@ export default function MilkReceiving() {
                         <span className="font-semibold text-slate-900">{lot.litresReceived.toLocaleString()} L</span>
                       </td>
                       <td className="px-4 py-4 text-right">
-                        <span className="text-slate-700">{lot.litresConsumed.toLocaleString()} L</span>
+                        <span className="text-slate-700">{lotAccounting.consumed.toLocaleString()} L</span>
                       </td>
                       <td className="px-4 py-4 text-right">
                         <span className="text-slate-700">{(lot.litresSold || 0).toLocaleString()} L</span>
@@ -595,16 +600,16 @@ export default function MilkReceiving() {
                               <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
                                 <div className="flex items-center justify-between mb-3">
                                   <h3 className="text-sm font-bold text-slate-900">Lot consumption progress</h3>
-                                  <span className="text-xs text-slate-500">{lot.litresReceived > 0 ? ((lot.litresConsumed / lot.litresReceived) * 100).toFixed(0) : 0}% utilized</span>
+                                  <span className="text-xs text-slate-500">{lot.litresReceived > 0 ? ((lotAccounting.consumed / lot.litresReceived) * 100).toFixed(0) : 0}% utilized</span>
                                 </div>
                                 <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                                  <div className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full" style={{ width: `${lot.litresReceived > 0 ? Math.min(100, (lot.litresConsumed / lot.litresReceived) * 100) : 0}%` }} />
+                                  <div className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full" style={{ width: `${lot.litresReceived > 0 ? Math.min(100, (lotAccounting.consumed / lot.litresReceived) * 100) : 0}%` }} />
                                 </div>
                                 <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
                                   <div><span className="text-slate-500">Rejected</span><div className="font-bold text-red-600">{lot.litresRejected.toLocaleString()} L</div></div>
                                   <div><span className="text-slate-500">Spilled</span><div className="font-bold text-amber-600">{lot.litresSpilled.toLocaleString()} L</div></div>
                                   <div><span className="text-slate-500">Received</span><div className="font-bold text-slate-900">{lot.litresReceived.toLocaleString()} L</div></div>
-                                  <div><span className="text-slate-500">Unallocated</span><div className="font-bold text-emerald-600">{lot.litresRemaining.toLocaleString()} L</div></div>
+                                  <div><span className="text-slate-500">Unallocated</span><div className="font-bold text-emerald-600">{lotAccounting.remaining.toLocaleString()} L</div></div>
                                 </div>
                               </div>
                               <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
@@ -802,8 +807,8 @@ export default function MilkReceiving() {
 
       <Modal isOpen={showMilkSaleModal} onClose={() => setShowMilkSaleModal(false)} title={`Log milk sale · ${displayedLot?.lotCode || ''}`}>
         <div className="space-y-4">
-          <p className="text-xs text-slate-500">Only the selected lot’s remaining milk can be sold. Available: <strong>{displayedLot?.litresRemaining.toLocaleString() || 0} L</strong>.</p>
-          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of milk (L)</label><input type="number" min="1" value={milkSale.quantity} onChange={(e) => setMilkSale({ ...milkSale, quantity: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <p className="text-xs text-slate-500">Only the selected lot’s remaining milk can be sold. Available: <strong>{totals.remaining.toLocaleString()} L</strong>.</p>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of milk (L)</label><input type="number" min="1" value={milkSale.quantity || ''} onChange={(e) => setMilkSale({ ...milkSale, quantity: Number(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Sold to customer</label><input value={milkSale.customer} onChange={(e) => setMilkSale({ ...milkSale, customer: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Customer name" /></div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Date of sale</label><input type="date" value={milkSale.saleDate} onChange={(e) => setMilkSale({ ...milkSale, saleDate: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
           <div className="flex gap-2 pt-2"><button onClick={handleMilkSale} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium">Save milk sale</button><button onClick={() => setShowMilkSaleModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
@@ -820,11 +825,11 @@ export default function MilkReceiving() {
 
       <Modal isOpen={showReceiveCreamModal} onClose={() => setShowReceiveCreamModal(false)} title="Receive purchased cream">
         <div className="space-y-4">
-          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of cream (kg)</label><input type="number" min="0" step="0.01" value={creamReceipt.quantity} onChange={(e) => setCreamReceipt({ ...creamReceipt, quantity: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of cream (kg)</label><input type="number" min="0" step="0.01" value={creamReceipt.quantity || ''} onChange={(e) => setCreamReceipt({ ...creamReceipt, quantity: Number(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Received from</label><input value={creamReceipt.receivedFrom} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivedFrom: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receiving temp (°C)</label><input type="number" step="0.1" value={creamReceipt.receivingTemp} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivingTemp: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
-            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receiving pH</label><input type="number" step="0.01" value={creamReceipt.receivingPh} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivingPh: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receiving temp (°C)</label><input type="number" step="0.1" value={creamReceipt.receivingTemp || ''} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivingTemp: Number(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receiving pH</label><input type="number" step="0.01" value={creamReceipt.receivingPh || ''} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivingPh: Number(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
           </div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Storage location</label><select value={creamReceipt.storageLocation} onChange={(e) => setCreamReceipt({ ...creamReceipt, storageLocation: e.target.value as typeof creamReceipt.storageLocation })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"><option value="container">Container</option><option value="chiller">Chiller</option><option value="coldroom">Coldroom</option></select></div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Comments / remarks</label><textarea value={creamReceipt.remarks} onChange={(e) => setCreamReceipt({ ...creamReceipt, remarks: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={3} /></div>

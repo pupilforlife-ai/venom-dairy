@@ -641,7 +641,7 @@ export default function GheeTab() {
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Butter Input (kg)</label>
               <input
                 type="number"
-                value={newRound.butterInput}
+              value={newRound.butterInput || ''}
                 onChange={(e) => setNewRound({ ...newRound, butterInput: parseFloat(e.target.value) })}
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
                 step="0.1"
@@ -722,7 +722,7 @@ export default function GheeTab() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Number of Buckets</label>
             <input
               type="number"
-              value={packingForm.buckets}
+              value={packingForm.buckets || ''}
               onChange={(e) => setPackingForm({ ...packingForm, buckets: parseInt(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               min="0"

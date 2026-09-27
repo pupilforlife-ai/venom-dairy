@@ -966,7 +966,7 @@ export default function ButterTab() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Input Quantity (kg)</label>
             <input
               type="number"
-              value={newRound.inputQuantity}
+              value={newRound.inputQuantity || ''}
               onChange={(e) => setNewRound({ ...newRound, inputQuantity: parseFloat(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               step="0.1"
@@ -1007,7 +1007,7 @@ export default function ButterTab() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Butter Output (kg)</label>
             <input
               type="number"
-              value={outputForm.butterOutput}
+              value={outputForm.butterOutput || ''}
               onChange={(e) => setOutputForm({ ...outputForm, butterOutput: parseFloat(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               step="0.1"
@@ -1018,7 +1018,7 @@ export default function ButterTab() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Buttermilk Output (kg, optional)</label>
             <input
               type="number"
-              value={outputForm.buttermilkOutput}
+              value={outputForm.buttermilkOutput || ''}
               onChange={(e) => setOutputForm({ ...outputForm, buttermilkOutput: parseFloat(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               step="0.1"
@@ -1157,7 +1157,7 @@ export default function ButterTab() {
             </label>
             <input
               type="number"
-              value={packingForm.quantity}
+              value={packingForm.quantity || ''}
               onChange={(e) => setPackingForm({ ...packingForm, quantity: parseInt(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               min="0"
