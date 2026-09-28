@@ -308,6 +308,27 @@ export default function ProductionBoard() {
     showToast('success', 'Ready for cutting');
   };
 
+  const openCutModal = (roundId: string) => {
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round) return;
+
+    // Clingwrapped rounds already have their pressed-block weights recorded.
+    // Reuse that record for the final-cut step instead of asking staff to
+    // count and weigh the same blocks a second time.
+    const isFinalCut = round.status === 'clingwrapped';
+    const recordedWeights = round.storedBlockWeights?.length
+      ? round.storedBlockWeights
+      : round.blockWeights || [];
+    setSelectedRound(roundId);
+    setCutForm({
+      cutBy: isFinalCut ? round.storedCutBy || round.cutBy || '' : '',
+      cuttingType: '',
+      numberOfBlocks: isFinalCut ? round.storedNumberOfBlocks || recordedWeights.length : 0,
+      blockWeights: isFinalCut ? [...recordedWeights] : [],
+    });
+    setShowCutModal(true);
+  };
+
   const handleCut = (roundId: string) => {
     const round = productionRounds.find(r => r.id === roundId);
     if (!round) return;
@@ -982,10 +1003,10 @@ export default function ProductionBoard() {
 
   const getCutActionButtons = (round: any) => {
     if (round.status === 'ready_cutting') {
-      return <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="mt-1 flex w-fit items-center gap-1 rounded bg-orange-500 px-2 py-1 text-xs text-white hover:bg-orange-600"><Scissors className="h-3 w-3" /> Cut</button>;
+      return <button onClick={() => openCutModal(round.id)} className="mt-1 flex w-fit items-center gap-1 rounded bg-orange-500 px-2 py-1 text-xs text-white hover:bg-orange-600"><Scissors className="h-3 w-3" /> Cut</button>;
     }
     if (round.status === 'clingwrapped') {
-      return <button onClick={() => { setSelectedRound(round.id); setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] }); setShowCutModal(true); }} className="mt-1 flex w-fit items-center gap-1 rounded bg-orange-500 px-2 py-1 text-xs text-white hover:bg-orange-600"><Scissors className="h-3 w-3" /> Final Cut</button>;
+      return <button onClick={() => openCutModal(round.id)} className="mt-1 flex w-fit items-center gap-1 rounded bg-orange-500 px-2 py-1 text-xs text-white hover:bg-orange-600"><Scissors className="h-3 w-3" /> Final Cut</button>;
     }
     if (round.status === 'spp_pending' && round.cuttingType === 'SPP pieces') {
       return <button onClick={() => { setSelectedRound(round.id); setSppForm({ cutBy: round.cutBy || '', numberOfBlocks: round.numberOfBlocks || 0, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 }); setShowSppModal(true); }} className="mt-1 flex w-fit rounded bg-pink-600 px-2 py-1 text-xs font-medium text-white hover:bg-pink-700">Record SPP Weight</button>;
@@ -1520,8 +1541,13 @@ export default function ProductionBoard() {
       {activeTab === 'paneer' && (
       <>
       {/* Cut Modal */}
-      <Modal isOpen={showCutModal} onClose={() => setShowCutModal(false)} title="Record Cutting" size="lg">
+      <Modal isOpen={showCutModal} onClose={() => setShowCutModal(false)} title={selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped' ? 'Record Final Cutting' : 'Record Cutting'} size="lg">
         <div className="space-y-4">
+          {selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped' && (
+            <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-sm text-pink-900">
+              The pressed-block count and weights recorded when this round was clingwrapped have been carried forward. Review them below; they do not need to be entered again.
+            </div>
+          )}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cut By</label>
             <input type="text" value={cutForm.cutBy} onChange={(e) => setCutForm({ ...cutForm, cutBy: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Worker name" />
@@ -1538,24 +1564,26 @@ export default function ProductionBoard() {
             </select>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Number of Blocks</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">{selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped' ? 'Recorded Number of Blocks' : 'Number of Blocks'}</label>
             <input type="number" value={cutForm.numberOfBlocks || ''} onChange={(e) => {
+              if (selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped') return;
               const num = parseInt(e.target.value);
               setCutForm({ ...cutForm, numberOfBlocks: num, blockWeights: Array(num).fill(0) });
-            }} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+            }} disabled={Boolean(selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped')} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50 disabled:text-slate-600" min="0" />
           </div>
           {cutForm.blockWeights.length > 0 && (
             <div>
-              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Block Weights (kg)</label>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">{selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped' ? 'Recorded Block Weights (kg)' : 'Block Weights (kg)'}</label>
               <div className="space-y-2 mt-1">
                 {cutForm.blockWeights.map((weight, index) => (
                   <div key={index} className="flex items-center gap-2">
                     <span className="text-sm w-20">Block {index + 1}:</span>
                     <input type="number" value={weight || ''} onChange={(e) => {
+                      if (selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped') return;
                       const newWeights = [...cutForm.blockWeights];
                       newWeights[index] = parseFloat(e.target.value) || 0;
                       setCutForm({ ...cutForm, blockWeights: newWeights });
-                    }} className="flex-1 px-3 py-1 border border-slate-200 rounded text-sm" step="0.1" min="0" />
+                    }} disabled={Boolean(selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped')} className="flex-1 px-3 py-1 border border-slate-200 rounded text-sm disabled:bg-slate-50 disabled:text-slate-600" step="0.1" min="0" />
                   </div>
                 ))}
                 <div className="text-sm font-medium mt-2 p-2 bg-slate-50 rounded">
