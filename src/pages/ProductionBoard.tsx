@@ -64,7 +64,7 @@ export default function ProductionBoard() {
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
   const isOwner = currentRole === 'owner';
-  const editableStageOptions = [...statusFlow, 'chiller_storage', 'spp_pending', 'pan111_pending', 'cancelled'] as string[];
+  const editableStageOptions = [...statusFlow, 'chiller_storage', 'spp_pending', 'pan111_pending', 'spoilage_pending', 'spoiled', 'cancelled'] as string[];
   
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'amassi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all', balance: 'all', workflow: 'all', query: '' });
@@ -78,6 +78,7 @@ export default function ProductionBoard() {
   const [showCreamModal, setShowCreamModal] = useState(false);
   const [showTemperatureModal, setShowTemperatureModal] = useState(false);
   const [showSppModal, setShowSppModal] = useState(false);
+  const [showSpoilageModal, setShowSpoilageModal] = useState(false);
   const [startingTemperature, setStartingTemperature] = useState<number | null>(null);
   const [selectedVat, setSelectedVat] = useState<'vat2' | 'vat3' | null>(null);
   const [collapsedShifts, setCollapsedShifts] = useState<Set<string>>(new Set());
@@ -98,6 +99,7 @@ export default function ProductionBoard() {
     blockWeights: [] as number[],
   });
   const [sppForm, setSppForm] = useState({ cutBy: '', numberOfBlocks: 0, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 });
+  const [spoilageForm, setSpoilageForm] = useState({ quantity: 0, unit: 'kg' as 'kg' | 'L', reason: '', notes: '', reportedBy: '' });
   
   // Pack form state
   const [packForm, setPackForm] = useState({
@@ -408,6 +410,86 @@ export default function ProductionBoard() {
     });
     setShowSppModal(false);
     showToast('success', `Recorded ${sppForm.recordedWeight.toFixed(2)} kg for SPP`);
+  };
+
+  const openSpoilageModal = (roundId: string) => {
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round || round.locked || ['cancelled', 'handed_over', 'spoiled', 'spoilage_pending'].includes(round.status)) return;
+    setSelectedRound(roundId);
+    setSpoilageForm({
+      quantity: round.outputWeight > 0 ? round.outputWeight : 0,
+      unit: 'kg',
+      reason: '',
+      notes: '',
+      reportedBy: '',
+    });
+    setShowSpoilageModal(true);
+  };
+
+  const handleReportSpoilage = (roundId: string) => {
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round || round.locked || ['cancelled', 'handed_over', 'spoiled', 'spoilage_pending'].includes(round.status)) return;
+    if (spoilageForm.quantity <= 0 || !spoilageForm.reason.trim() || !spoilageForm.reportedBy.trim()) {
+      showToast('error', 'Enter the spoiled quantity, reason, and staff name');
+      return;
+    }
+    const reportedAt = new Date().toISOString();
+    updateProductionRound(roundId, {
+      status: 'spoilage_pending',
+      locked: false,
+      spoilageApprovalStatus: 'pending',
+      spoilageRequestedQuantity: spoilageForm.quantity,
+      spoilageUnit: spoilageForm.unit,
+      spoilageReason: spoilageForm.reason.trim(),
+      spoilageNotes: spoilageForm.notes.trim() || undefined,
+      spoilageReportedBy: spoilageForm.reportedBy.trim(),
+      spoilageReportedAt: reportedAt,
+      spoilagePreviousStatus: round.status,
+    });
+    setShowSpoilageModal(false);
+    setSpoilageForm({ quantity: 0, unit: 'kg', reason: '', notes: '', reportedBy: '' });
+    showToast('success', `${roundDisplayCode(round)} spoilage reported for owner approval`);
+  };
+
+  const handleApproveSpoilage = (roundId: string) => {
+    if (!isOwner) return;
+    const round = productionRounds.find(item => item.id === roundId);
+    const quantity = round?.spoilageRequestedQuantity || 0;
+    if (!round || round.spoilageApprovalStatus !== 'pending' || quantity <= 0) return;
+    const approvedAt = new Date().toISOString();
+    addWasteEvent({
+      date: approvedAt.slice(0, 10),
+      product: `${round.type} round spoilage`,
+      quantity,
+      unit: round.spoilageUnit || 'kg',
+      reason: round.spoilageReason || 'Production round spoiled',
+      recordedBy: round.spoilageReportedBy || 'Staff',
+      batchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}`,
+      isRecoverable: false,
+    });
+    updateProductionRound(roundId, {
+      status: 'spoiled',
+      locked: true,
+      completedAt: approvedAt,
+      spoilageApprovalStatus: 'approved',
+      spoilageApprovedAt: approvedAt,
+      spoilageApprovedBy: currentRole,
+    });
+    showToast('success', `${roundDisplayCode(round)} spoilage approved and recorded in Waste & Yield`);
+  };
+
+  const handleRejectSpoilage = (roundId: string) => {
+    if (!isOwner) return;
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round || round.spoilageApprovalStatus !== 'pending') return;
+    updateProductionRound(roundId, {
+      status: round.spoilagePreviousStatus || 'resting',
+      locked: false,
+      spoilageApprovalStatus: 'rejected',
+      spoilageRejectedAt: new Date().toISOString(),
+      spoilageRejectedBy: currentRole,
+    });
+    showToast('success', `${roundDisplayCode(round)} spoilage rejected; round returned to its previous stage`);
   };
 
   const handleFreeze = (roundId: string) => {
@@ -785,6 +867,10 @@ export default function ProductionBoard() {
     if (!canForceStage) return;
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.status === nextStatus) return;
+    if (round.spoilageApprovalStatus === 'pending') {
+      showToast('error', 'This round is awaiting owner spoilage approval');
+      return;
+    }
     if (nextStatus === 'chiller_storage' && round.cuttingType !== 'Restaurant blocks') {
       showToast('error', 'Chiller storage is only available for Restaurant blocks');
       return;
@@ -908,11 +994,18 @@ export default function ProductionBoard() {
   };
 
   const getActionButtons = (round: any) => {
+    if (round.spoilageApprovalStatus === 'pending') {
+      const summary = <span className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700">Spoilage: {round.spoilageRequestedQuantity?.toFixed(2)} {round.spoilageUnit || 'kg'} · {round.spoilageReason || 'Reason not provided'} · {round.spoilageReportedBy || 'Staff'}</span>;
+      if (!isOwner) return <div className="flex flex-wrap items-center gap-1">{summary}<span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Awaiting owner approval</span></div>;
+      return <div className="flex flex-wrap items-center gap-1">{summary}<button onClick={() => handleApproveSpoilage(round.id)} className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-700">Approve</button><button onClick={() => handleRejectSpoilage(round.id)} className="rounded bg-slate-600 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700">Reject</button></div>;
+    }
     if (round.pan111ApprovalStatus === 'pending') {
       return canForceStage ? <div className="flex flex-wrap items-center gap-1"><span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 {round.pan111RequestedWeight?.toFixed(2)} kg · {round.pan111ApprovalReason}</span><button onClick={() => handleApprovePan111(round.id)} className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-700">Approve</button><button onClick={() => handleRejectPan111(round.id)} className="rounded bg-red-600 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700">Reject</button></div> : <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Awaiting PAN111 approval</span>;
     }
-    if (!isOwner || round.status !== 'packed') return null;
-    return <button onClick={() => handleHandover(round.id)} className="flex w-fit items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-800"><CheckCircle2 className="h-3 w-3" /> Hand Over</button>;
+    const canReport = !round.locked && !['cancelled', 'handed_over', 'spoiled', 'spoilage_pending'].includes(round.status);
+    const reportButton = canReport ? <button onClick={() => openSpoilageModal(round.id)} className="flex w-fit items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"><AlertTriangle className="h-3 w-3" /> Report Spoilage</button> : null;
+    if (round.status !== 'packed') return reportButton;
+    return <div className="flex flex-wrap items-center gap-1">{reportButton}{isOwner && <button onClick={() => handleHandover(round.id)} className="flex w-fit items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-800"><CheckCircle2 className="h-3 w-3" /> Hand Over</button>}</div>;
   };
 
   const selectedPackRound = selectedRound ? productionRounds.find(r => r.id === selectedRound) : undefined;
@@ -1513,6 +1606,25 @@ export default function ProductionBoard() {
         })()}
       </Modal>
 
+      {/* Spoilage report modal */}
+      <Modal isOpen={showSpoilageModal} onClose={() => setShowSpoilageModal(false)} title="Report Spoilage">
+        {selectedRound && (() => {
+          const round = productionRounds.find(item => item.id === selectedRound);
+          if (!round) return <div className="text-sm text-slate-500">Round not found</div>;
+          return <div className="space-y-4">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <strong>{roundDisplayCode(round)}</strong> · {round.type} · Milk lot {round.milkLotCode}
+              <p className="mt-1 text-xs text-red-700">This report will remain pending until an owner approves it. Approval closes the round and adds the quantity to Waste &amp; Yield.</p>
+            </div>
+            <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Spoiled quantity</span><div className="mt-1 flex gap-2"><input type="number" min="0" step="0.01" value={spoilageForm.quantity || ''} onChange={(e) => setSpoilageForm({ ...spoilageForm, quantity: parseFloat(e.target.value) || 0 })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /><select value={spoilageForm.unit} onChange={(e) => setSpoilageForm({ ...spoilageForm, unit: e.target.value as 'kg' | 'L' })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="kg">kg</option><option value="L">L</option></select></div><span className="mt-1 block text-xs text-slate-500">Enter the quantity physically spoiled for this round.</span></label>
+            <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Reason</span><select value={spoilageForm.reason} onChange={(e) => setSpoilageForm({ ...spoilageForm, reason: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select reason</option><option value="Contamination">Contamination</option><option value="Texture defect">Texture defect</option><option value="Temperature failure">Temperature failure</option><option value="Equipment failure">Equipment failure</option><option value="Process error">Process error</option><option value="Other">Other</option></select></label>
+            <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Details / remarks</span><textarea value={spoilageForm.notes} onChange={(e) => setSpoilageForm({ ...spoilageForm, notes: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" rows={2} placeholder="What happened?" /></label>
+            <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Reported by</span><input value={spoilageForm.reportedBy} onChange={(e) => setSpoilageForm({ ...spoilageForm, reportedBy: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Staff name" /></label>
+            <div className="flex gap-2 pt-2"><button onClick={() => handleReportSpoilage(round.id)} className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700">Submit for owner approval</button><button onClick={() => setShowSpoilageModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button></div>
+          </div>;
+        })()}
+      </Modal>
+
       {/* Pack Modal */}
       <Modal isOpen={showPackModal} onClose={() => { setShowPackModal(false); setEditingPackIndex(null); }} title={editingPackIndex !== null ? "Correct Packing" : selectedRound && productionRounds.find(r => r.id === selectedRound)?.packedSkus?.length ? "+Add Packing" : "Record Packing"}>
         <div className="space-y-4">
@@ -1817,6 +1929,16 @@ export default function ProductionBoard() {
               stage: 'Handed Over',
               time: round.completedAt ? new Date(round.completedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
               details: 'Distribution pickup'
+            });
+          }
+
+          if (round.spoilageApprovalStatus) {
+            history.push({
+              stage: round.spoilageApprovalStatus === 'approved' ? 'Spoilage Approved' : round.spoilageApprovalStatus === 'rejected' ? 'Spoilage Rejected' : 'Spoilage Reported',
+              time: round.spoilageApprovedAt || round.spoilageRejectedAt || round.spoilageReportedAt
+                ? new Date(round.spoilageApprovedAt || round.spoilageRejectedAt || round.spoilageReportedAt || '').toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                : '',
+              details: `${round.spoilageRequestedQuantity?.toFixed(2) || '0.00'} ${round.spoilageUnit || 'kg'} • ${round.spoilageReason || 'No reason recorded'} • Reported by ${round.spoilageReportedBy || 'Staff'}`
             });
           }
           

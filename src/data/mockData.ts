@@ -288,6 +288,21 @@ export interface ProductionRound {
   // Remaining balance after cutting (kg available for packing)
   remainingBalance?: number;
 
+  // Round spoilage is reported by staff and must be approved by an owner
+  // before the round is closed and added to Waste & Yield.
+  spoilageApprovalStatus?: 'pending' | 'approved' | 'rejected';
+  spoilageRequestedQuantity?: number;
+  spoilageUnit?: 'kg' | 'L';
+  spoilageReason?: string;
+  spoilageNotes?: string;
+  spoilageReportedBy?: string;
+  spoilageReportedAt?: string;
+  spoilagePreviousStatus?: string;
+  spoilageApprovedBy?: string;
+  spoilageApprovedAt?: string;
+  spoilageRejectedBy?: string;
+  spoilageRejectedAt?: string;
+
   // Round-level PAN111 approval. The requested weight remains in the round
   // balance until an approved admin/owner verifies it.
   pan111ApprovalStatus?: 'pending' | 'approved' | 'rejected';
@@ -1179,6 +1194,8 @@ export const statusFlow = [
 export const statusLabels: Record<string, string> = {
   pan111_pending: 'PAN111 Approval Pending',
   spp_pending: 'SPP Weight Pending',
+  spoilage_pending: 'Spoilage Approval Pending',
+  spoiled: 'Spoiled',
   cancelled: 'Cancelled',
   scheduled: 'Scheduled',
   in_production: 'In Production',
@@ -1198,6 +1215,8 @@ export const statusLabels: Record<string, string> = {
 export const statusColors: Record<string, string> = {
   pan111_pending: 'bg-amber-500',
   spp_pending: 'bg-pink-500',
+  spoilage_pending: 'bg-red-400',
+  spoiled: 'bg-red-700',
   cancelled: 'bg-slate-500',
   scheduled: 'bg-slate-400',
   in_production: 'bg-blue-500',

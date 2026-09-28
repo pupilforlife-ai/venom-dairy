@@ -1,205 +1,315 @@
--- One-time trial-data cleanup.
+-- READ-ONLY PREVIEW for records before lot 270926 (27 Sep 2026).
 --
--- Lot numbers are DDMMYY. This removes records before 270926 (27 Sep 2026)
--- and preserves 270926 itself and all later records. It does not touch
--- auth.users, public.profiles, SKU definitions, or database schema.
--- Run this whole file once in the Supabase SQL Editor as an owner/admin.
+-- This query changes nothing. It uses no temporary tables, no temporary
+-- functions, and no transaction control. Run the whole query once in the
+-- Supabase SQL Editor. It reports how many records would remain and how many
+-- would be removed from each stored collection.
+--
+-- Records dated/source-coded 270926 or later are kept. Missing or malformed
+-- identifiers are kept conservatively.
 
-begin;
-
--- A missing/unknown lot code is kept deliberately. That makes this cleanup
--- conservative: only records that can be proven to be before the cutoff are
--- removed.
-create or replace function pg_temp.keep_lot_code(code text)
-returns boolean
-language sql
-immutable
-as $$
-  select coalesce(
-    to_date((regexp_match(coalesce(code, ''), '([0-9]{6})'))[1], 'DDMMYY') >= date '2026-09-27',
-    true
-  );
-$$;
-
-create or replace function pg_temp.keep_iso_date(value text)
-returns boolean
-language sql
-immutable
-as $$
-  select coalesce(
-    substring(value from 1 for 10)::date >= date '2026-09-27',
-    true
-  );
-$$;
-
-create temporary table cleanup_keep_milk_lots (id text primary key) on commit drop;
-insert into cleanup_keep_milk_lots (id)
-select item->>'id'
-from jsonb_array_elements(coalesce((select value from public.app_state where key = 'vejoy_milkLots'), '[]'::jsonb)) with ordinality as rows(item, position)
-where pg_temp.keep_lot_code(item->>'lotCode');
-
-create temporary table cleanup_values (
-  key text primary key,
-  old_value jsonb not null,
-  new_value jsonb not null
-) on commit drop;
-
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_milkLots',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where item->>'id' in (select id from cleanup_keep_milk_lots)
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_milkLots' and jsonb_typeof(state.value) = 'array';
-
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_productionShifts',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where pg_temp.keep_lot_code(item->>'milkLotCode')
-      and (
-        item->>'milkLotId' is null
-        or item->>'milkLotId' in (select id from cleanup_keep_milk_lots)
-      )
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_productionShifts' and jsonb_typeof(state.value) = 'array';
-
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_productionRounds',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where pg_temp.keep_lot_code(item->>'milkLotCode')
-      and (
-        item->>'milkLotId' is null
-        or item->>'milkLotId' in (select id from cleanup_keep_milk_lots)
-      )
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_productionRounds' and jsonb_typeof(state.value) = 'array';
-
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_creamLots',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where pg_temp.keep_lot_code(item->>'lotCode')
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_creamLots' and jsonb_typeof(state.value) = 'array';
-
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_intermediateLots',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where pg_temp.keep_lot_code(coalesce(item->>'sourceMilkLotCode', item->>'sourceBatchCode', item->>'lotCode'))
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_intermediateLots' and jsonb_typeof(state.value) = 'array';
-
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_finishedStock',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where case
-      when jsonb_typeof(item->'sourceBatchCodes') = 'array'
-        and jsonb_array_length(item->'sourceBatchCodes') > 0
-      then exists (
-        select 1
-        from jsonb_array_elements_text(item->'sourceBatchCodes') as source(code)
-        where pg_temp.keep_lot_code(source.code)
-      )
-      else pg_temp.keep_iso_date(item->>'createdAt')
+with
+cutoff as (
+  select date '2026-09-27' as cutoff_date
+),
+required_keys(key) as (
+  values
+    ('vejoy_milkLots'),
+    ('vejoy_productionShifts'),
+    ('vejoy_productionRounds'),
+    ('vejoy_creamLots'),
+    ('vejoy_intermediateLots'),
+    ('vejoy_finishedStock'),
+    ('vejoy_crumbingBatches'),
+    ('vejoy_temperatureReadings'),
+    ('vejoy_wasteEvents'),
+    ('vejoy_utilityLogs')
+),
+state as (
+  select key, value
+  from public.app_state
+  where key in (select key from required_keys)
+),
+arrays as (
+  select
+    required.key,
+    coalesce(
+      case when jsonb_typeof(state.value) = 'array' then state.value end,
+      '[]'::jsonb
+    ) as value
+  from required_keys required
+  left join state on state.key = required.key
+),
+milk_lot_items as (
+  select
+    item->>'id' as id,
+    item->>'lotCode' as code
+  from arrays
+  cross join lateral jsonb_array_elements(arrays.value) as elements(item)
+  where arrays.key = 'vejoy_milkLots'
+),
+all_lot_codes as (
+  select code from milk_lot_items
+  union
+  select item->>'milkLotCode'
+  from arrays
+  cross join lateral jsonb_array_elements(arrays.value) as elements(item)
+  where arrays.key in ('vejoy_productionShifts', 'vejoy_productionRounds')
+  union
+  select item->>'lotCode'
+  from arrays
+  cross join lateral jsonb_array_elements(arrays.value) as elements(item)
+  where arrays.key = 'vejoy_creamLots'
+  union
+  select coalesce(item->>'sourceMilkLotCode', item->>'sourceBatchCode', item->>'lotCode')
+  from arrays
+  cross join lateral jsonb_array_elements(arrays.value) as elements(item)
+  where arrays.key = 'vejoy_intermediateLots'
+  union
+  select batch_codes.code
+  from arrays
+  cross join lateral jsonb_array_elements(arrays.value) as elements(item)
+  cross join lateral jsonb_array_elements_text(
+    case
+      when jsonb_typeof(elements.item->'sourceBatchCodes') = 'array'
+        then elements.item->'sourceBatchCodes'
+      else '[]'::jsonb
     end
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_finishedStock' and jsonb_typeof(state.value) = 'array';
+  ) as batch_codes(code)
+  where arrays.key = 'vejoy_finishedStock'
+  union
+  select item->>'sourceBatchCode'
+  from arrays
+  cross join lateral jsonb_array_elements(arrays.value) as elements(item)
+  where arrays.key = 'vejoy_crumbingBatches'
+  union
+  select item->>'batchCode'
+  from arrays
+  cross join lateral jsonb_array_elements(arrays.value) as elements(item)
+  where arrays.key = 'vejoy_wasteEvents'
+),
+parsed_lot_codes as (
+  select
+    code,
+    case
+      when (regexp_match(coalesce(code, ''), '(20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01]))')) is not null
+        then to_date(
+          (regexp_match(coalesce(code, ''), '(20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01]))'))[1],
+          'YYYYMMDD'
+        )
+      when (regexp_match(coalesce(code, ''), '((0[1-9]|[12][0-9]|3[01])(0[1-9]|1[0-2])[0-9]{2})')) is not null
+        then to_date(
+          (regexp_match(coalesce(code, ''), '((0[1-9]|[12][0-9]|3[01])(0[1-9]|1[0-2])[0-9]{2})'))[1],
+          'DDMMYY'
+        )
+      else null
+    end as parsed_date
+  from all_lot_codes
+),
+keep_lot_codes as (
+  select parsed.code
+  from parsed_lot_codes parsed
+  cross join cutoff
+  where parsed.code is null
+     or parsed.parsed_date is null
+     or parsed.parsed_date >= cutoff.cutoff_date
+),
+keep_milk_lot_ids as (
+  select milk.id
+  from milk_lot_items milk
+  where milk.code is null
+     or milk.code in (select code from keep_lot_codes)
+),
+preview as (
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value) as before_count,
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where elements.item->>'lotCode' is null
+         or elements.item->>'lotCode' in (select code from keep_lot_codes)
+    ), '[]'::jsonb)) as after_count
+  from arrays
+  where arrays.key = 'vejoy_milkLots'
 
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_crumbingBatches',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where pg_temp.keep_lot_code(item->>'sourceBatchCode')
-      and pg_temp.keep_iso_date(item->>'createdAt')
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_crumbingBatches' and jsonb_typeof(state.value) = 'array';
+  union all
 
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_temperatureReadings',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where pg_temp.keep_iso_date(item->>'recordedAt')
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_temperatureReadings' and jsonb_typeof(state.value) = 'array';
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where (elements.item->>'milkLotCode' is null
+             or elements.item->>'milkLotCode' in (select code from keep_lot_codes))
+        and (
+          elements.item->>'milkLotId' is null
+          or elements.item->>'milkLotId' in (select id from keep_milk_lot_ids)
+        )
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_productionShifts'
 
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_wasteEvents',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where case
-      when nullif(item->>'batchCode', '') is not null
-        then pg_temp.keep_lot_code(item->>'batchCode')
-      else pg_temp.keep_iso_date(item->>'date')
-    end
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_wasteEvents' and jsonb_typeof(state.value) = 'array';
+  union all
 
-insert into cleanup_values (key, old_value, new_value)
-select
-  'vejoy_utilityLogs',
-  state.value,
-  coalesce((
-    select jsonb_agg(item order by position)
-    from jsonb_array_elements(state.value) with ordinality as rows(item, position)
-    where pg_temp.keep_iso_date(item->>'periodEnd')
-  ), '[]'::jsonb)
-from public.app_state state
-where state.key = 'vejoy_utilityLogs' and jsonb_typeof(state.value) = 'array';
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where (elements.item->>'milkLotCode' is null
+             or elements.item->>'milkLotCode' in (select code from keep_lot_codes))
+        and (
+          elements.item->>'milkLotId' is null
+          or elements.item->>'milkLotId' in (select id from keep_milk_lot_ids)
+        )
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_productionRounds'
 
--- Preview counts inside the transaction before the updates are applied.
+  union all
+
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where elements.item->>'lotCode' is null
+         or elements.item->>'lotCode' in (select code from keep_lot_codes)
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_creamLots'
+
+  union all
+
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where coalesce(
+          elements.item->>'sourceMilkLotCode',
+          elements.item->>'sourceBatchCode',
+          elements.item->>'lotCode'
+        ) is null
+         or coalesce(
+          elements.item->>'sourceMilkLotCode',
+          elements.item->>'sourceBatchCode',
+          elements.item->>'lotCode'
+        ) in (select code from keep_lot_codes)
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_intermediateLots'
+
+  union all
+
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where case
+        when jsonb_typeof(elements.item->'sourceBatchCodes') = 'array'
+          and jsonb_array_length(elements.item->'sourceBatchCodes') > 0
+        then exists (
+          select 1
+          from jsonb_array_elements_text(elements.item->'sourceBatchCodes') as source(code)
+          where source.code is null or source.code in (select code from keep_lot_codes)
+        )
+        else (
+          elements.item->>'createdAt' is null
+          or elements.item->>'createdAt' = ''
+          or left(elements.item->>'createdAt', 10) !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          or left(elements.item->>'createdAt', 10) >= (select cutoff_date::text from cutoff)
+        )
+      end
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_finishedStock'
+
+  union all
+
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where (elements.item->>'sourceBatchCode' is null
+             or elements.item->>'sourceBatchCode' in (select code from keep_lot_codes))
+        and (
+          elements.item->>'createdAt' is null
+          or elements.item->>'createdAt' = ''
+          or left(elements.item->>'createdAt', 10) !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          or left(elements.item->>'createdAt', 10) >= (select cutoff_date::text from cutoff)
+        )
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_crumbingBatches'
+
+  union all
+
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where elements.item->>'recordedAt' is null
+         or elements.item->>'recordedAt' = ''
+         or left(elements.item->>'recordedAt', 10) !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         or left(elements.item->>'recordedAt', 10) >= (select cutoff_date::text from cutoff)
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_temperatureReadings'
+
+  union all
+
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where case
+        when nullif(elements.item->>'batchCode', '') is not null
+        then elements.item->>'batchCode' in (select code from keep_lot_codes)
+        else (
+          elements.item->>'date' is null
+          or elements.item->>'date' = ''
+          or left(elements.item->>'date', 10) !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          or left(elements.item->>'date', 10) >= (select cutoff_date::text from cutoff)
+        )
+      end
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_wasteEvents'
+
+  union all
+
+  select
+    arrays.key,
+    jsonb_array_length(arrays.value),
+    jsonb_array_length(coalesce((
+      select jsonb_agg(elements.item order by elements.ordinality)
+      from jsonb_array_elements(arrays.value) with ordinality as elements(item, ordinality)
+      where elements.item->>'periodEnd' is null
+         or elements.item->>'periodEnd' = ''
+         or left(elements.item->>'periodEnd', 10) !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         or left(elements.item->>'periodEnd', 10) >= (select cutoff_date::text from cutoff)
+    ), '[]'::jsonb))
+  from arrays
+  where arrays.key = 'vejoy_utilityLogs'
+)
 select
   key,
-  jsonb_array_length(old_value) as before_count,
-  jsonb_array_length(new_value) as after_count,
-  jsonb_array_length(old_value) - jsonb_array_length(new_value) as deleted_count
-from cleanup_values
+  before_count,
+  after_count,
+  before_count - after_count as deleted_count
+from preview
 order by key;
-
--- Apply the filtered collections atomically.
-update public.app_state state
-set value = cleanup.new_value
-from cleanup_values cleanup
-where cleanup.key = state.key
-  and cleanup.old_value <> cleanup.new_value;
-
-commit;
