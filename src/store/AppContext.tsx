@@ -252,7 +252,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const advanceRoundStatus = (id: string) => {
-    setProductionRounds(productionRounds.map(round => {
+    setProductionRounds(currentRounds => currentRounds.map(round => {
       if (round.id !== id) return round;
       const currentIndex = statusFlow.indexOf(round.status as any);
       if (currentIndex === -1 || currentIndex >= statusFlow.length - 1) return round;
@@ -277,7 +277,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const recordRoundOutput = (id: string, outputWeight: number, notes?: string) => {
-    setProductionRounds(productionRounds.map(round => 
+    setProductionRounds(currentRounds => currentRounds.map(round =>
       round.id === id ? { ...round, outputWeight, notes: notes || round.notes } : round
     ));
   };

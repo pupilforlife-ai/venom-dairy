@@ -57,7 +57,7 @@ export default function ProductionBoard() {
     productionRounds, productionShifts, intermediateLots, milkLots,
     advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
     addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot,
-    removeProductionRound, cancelProductionRound,
+    removeProductionRound, cancelProductionRound, addWasteEvent,
     updateMilkLot
   } = useApp();
   const { showToast } = useToast();
