@@ -40,6 +40,9 @@ interface CrumbingBatch {
   type: CrumbingType;
   sourceBatchId: string;
   sourceBatchCode: string;
+  // Manual SPP batches may come from paneer that is not represented by a
+  // production round. Keep the origin on the batch for traceability.
+  origin?: string;
   status: CrumbingStatus;
   traysCrumbed: number;
   traysFried: number;
@@ -95,6 +98,8 @@ export default function CrumbingTab() {
   const [newBatchForm, setNewBatchForm] = useState({
     type: 'SPP' as CrumbingType,
     sourceBatchId: '',
+    manualPaneerWeightKg: 0,
+    manualOrigin: '',
     traysCrumbed: 0,
     crumbingTeam: '',
   });
@@ -245,8 +250,13 @@ export default function CrumbingTab() {
 
   // Handlers
   const handleCreateBatch = () => {
-    if (!newBatchForm.sourceBatchId || !newBatchForm.crumbingTeam.trim()) {
+    const isManualSpp = newBatchForm.type === 'SPP' && newBatchForm.sourceBatchId === 'manual';
+    if ((!newBatchForm.sourceBatchId || (isManualSpp && !newBatchForm.manualOrigin.trim())) || !newBatchForm.crumbingTeam.trim()) {
       showToast('error', 'Please fill all required fields');
+      return;
+    }
+    if (isManualSpp && newBatchForm.manualPaneerWeightKg <= 0) {
+      showToast('error', 'Enter the paneer weight available for SPP');
       return;
     }
     if (newBatchForm.type !== 'SPP' && newBatchForm.traysCrumbed <= 0) {
@@ -256,17 +266,24 @@ export default function CrumbingTab() {
 
     let sourceBatchCode = '';
     let milkLotCode = '';
+    let origin: string | undefined;
+    let sourceWeightKg: number | undefined;
 
     if (newBatchForm.type === 'SPP') {
-      const source = productionRounds.find(r => r.id === newBatchForm.sourceBatchId);
-      if (!source) {
-        showToast('error', 'Select a valid SPP source round');
-        return;
-      }
-      if (source) {
+      if (isManualSpp) {
+        origin = newBatchForm.manualOrigin.trim();
+        sourceBatchCode = `Manual entry · ${origin}`;
+        milkLotCode = 'MANUAL';
+        sourceWeightKg = Math.max(0, Number(newBatchForm.manualPaneerWeightKg) || 0);
+      } else {
+        const source = productionRounds.find(r => r.id === newBatchForm.sourceBatchId);
+        if (!source) {
+          showToast('error', 'Select a valid SPP source round or choose Manual entry');
+          return;
+        }
         sourceBatchCode = `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/${source.type}`;
         milkLotCode = source.milkLotCode;
-        const sourceWeightKg = getSppAvailableWeight(source);
+        sourceWeightKg = getSppAvailableWeight(source);
         if (sourceWeightKg <= 0.01) {
           showToast('error', 'This SPP source has no balance available for another crumbing batch');
           return;
@@ -288,14 +305,19 @@ export default function CrumbingTab() {
 
     const batchCode = generateBatchCode(newBatchForm.type, milkLotCode);
 
-    const sourceRound = newBatchForm.type === 'SPP' ? productionRounds.find(round => round.id === newBatchForm.sourceBatchId) : undefined;
-    const sourceWeightKg = sourceRound ? getSppAvailableWeight(sourceRound) : undefined;
+    const sourceRound = newBatchForm.type === 'SPP' && !isManualSpp
+      ? productionRounds.find(round => round.id === newBatchForm.sourceBatchId)
+      : undefined;
+    if (newBatchForm.type === 'SPP' && sourceWeightKg === undefined && sourceRound) {
+      sourceWeightKg = getSppAvailableWeight(sourceRound);
+    }
     const newBatch: CrumbingBatch = {
       id: `crumb-${Date.now()}`,
       batchCode,
       type: newBatchForm.type,
-      sourceBatchId: newBatchForm.sourceBatchId,
+      sourceBatchId: isManualSpp ? `manual-spp-${Date.now()}` : newBatchForm.sourceBatchId,
       sourceBatchCode,
+      origin,
       status: newBatchForm.type === 'SPP' ? 'scheduled' : 'crumbing',
       traysCrumbed: newBatchForm.type === 'SPP' ? 0 : newBatchForm.traysCrumbed,
       traysFried: 0,
@@ -322,7 +344,7 @@ export default function CrumbingTab() {
         breadingMultiplier: 0,
       });
     }
-    setNewBatchForm({ type: 'SPP', sourceBatchId: '', traysCrumbed: 0, crumbingTeam: '' });
+    setNewBatchForm({ type: 'SPP', sourceBatchId: '', manualPaneerWeightKg: 0, manualOrigin: '', traysCrumbed: 0, crumbingTeam: '' });
   };
 
   const handleCompleteProduction = () => {
@@ -332,7 +354,10 @@ export default function CrumbingTab() {
     const sourceWeightKg = batch.sourceWeightKg || recipeForm.sourceWeightKg;
     const balanceWeightKg = Number(recipeForm.balanceWeightKg) || 0;
     const wastageKg = Number(recipeForm.wastageKg) || 0;
-    if (!recipeForm.balanceRecorded || batch.balanceWeightKg === undefined) {
+    // Zero is a valid balance when all paneer has been consumed. Use the
+    // current form flag as the source of truth so completion does not race
+    // the autosave update that writes balanceWeightKg onto the batch object.
+    if (!recipeForm.balanceRecorded) {
       showToast('error', 'Record the physically weighed balance paneer before completing production');
       return;
     }
@@ -654,7 +679,14 @@ export default function CrumbingTab() {
             <button
               onClick={() => {
                 setActiveType(type);
-                setNewBatchForm({ ...newBatchForm, type });
+                setNewBatchForm({
+                  ...newBatchForm,
+                  type,
+                  sourceBatchId: '',
+                  manualPaneerWeightKg: 0,
+                  manualOrigin: '',
+                  traysCrumbed: 0,
+                });
                 setShowNewBatchModal(true);
               }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-pink-600 text-white hover:bg-pink-700"
@@ -690,6 +722,7 @@ export default function CrumbingTab() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-xs text-slate-600">{batch.sourceBatchCode}</div>
+                      {batch.origin && <div className="mt-1 text-[11px] text-slate-500">Origin: {batch.origin}</div>}
                       {batch.type === 'SPP' && batch.sourceWeightKg !== undefined && <div className="mt-1 text-[11px] text-pink-700">{batch.sourceWeightKg.toFixed(2)} kg source</div>}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">
@@ -842,6 +875,7 @@ export default function CrumbingTab() {
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
               <option value="">Select source...</option>
+              {activeType === 'SPP' && <option value="manual">Manual entry — no source round</option>}
               {getAvailableSources(activeType).map((source: any) => (
                 <option key={source.id} value={source.id}>
                   {activeType === 'SPP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/${source.type} - ${getSppAvailableWeight(source).toFixed(2)} kg SPP available`}
@@ -851,6 +885,30 @@ export default function CrumbingTab() {
               ))}
             </select>
           </div>
+          {activeType === 'SPP' && newBatchForm.sourceBatchId === 'manual' && <>
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Paneer weight for SPP (kg)</label>
+              <input
+                type="number"
+                value={newBatchForm.manualPaneerWeightKg || ''}
+                onChange={(e) => setNewBatchForm({ ...newBatchForm, manualPaneerWeightKg: parseFloat(e.target.value) || 0 })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                min="0"
+                step="0.01"
+                placeholder="e.g., 25"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Origin</label>
+              <input
+                type="text"
+                value={newBatchForm.manualOrigin}
+                onChange={(e) => setNewBatchForm({ ...newBatchForm, manualOrigin: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                placeholder="e.g., external paneer / trial batch"
+              />
+            </div>
+          </>}
           {activeType !== 'SPP' && <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Trays Crumbed</label>
             <input
