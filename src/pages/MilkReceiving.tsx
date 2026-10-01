@@ -593,7 +593,7 @@ export default function MilkReceiving() {
                                 <div className="rounded-lg border border-cyan-100 bg-cyan-50 p-3">
                                   <p className="text-xs text-cyan-700 font-semibold">Halloumi</p>
                                   <p className="font-mono font-bold text-slate-900">{lot.halloumiPool?.batchId || getHalloumiBatchCode(lot.lotCode)}</p>
-                                  <p className="text-xs text-slate-600 mt-1">{(lot.halloumiPool?.availableForCrumbing || 0).toFixed(2)} kg for crumbing</p>
+                                  <p className="text-xs text-slate-600 mt-1">{(lot.halloumiPool?.availableForCrumbing || 0).toFixed(2)} kg available for sale / HCP</p>
                                 </div>
                               </div>
                             </div>

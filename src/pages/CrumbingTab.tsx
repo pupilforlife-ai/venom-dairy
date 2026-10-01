@@ -83,7 +83,7 @@ interface CrumbingBatch {
 }
 
 export default function CrumbingTab() {
-  const { productionRounds, milkLots, intermediateLots } = useApp();
+  const { productionRounds, milkLots, intermediateLots, updateMilkLot } = useApp();
   const { showToast } = useToast();
 
   const [crumbingBatches, setCrumbingBatches] = useSupabaseState<CrumbingBatch[]>('vejoy_crumbingBatches', []);
@@ -100,6 +100,7 @@ export default function CrumbingTab() {
     sourceBatchId: '',
     manualPaneerWeightKg: 0,
     manualOrigin: '',
+    halloumiWeightKg: 0,
     traysCrumbed: 0,
     crumbingTeam: '',
   });
@@ -259,6 +260,10 @@ export default function CrumbingTab() {
       showToast('error', 'Enter the paneer weight available for SPP');
       return;
     }
+    if (newBatchForm.type === 'HCP' && newBatchForm.halloumiWeightKg <= 0) {
+      showToast('error', 'Enter the Halloumi weight being allocated to HCP crumbing');
+      return;
+    }
     if (newBatchForm.type !== 'SPP' && newBatchForm.traysCrumbed <= 0) {
       showToast('error', 'Enter the number of trays crumbed');
       return;
@@ -297,10 +302,26 @@ export default function CrumbingTab() {
       }
     } else if (newBatchForm.type === 'HCP') {
       const source = milkLots.find(lot => lot.id === newBatchForm.sourceBatchId);
-      if (source) {
-        sourceBatchCode = source.halloumiPool?.batchId || `HAL-${source.lotCode}`;
-        milkLotCode = source.lotCode;
+      const pool = source?.halloumiPool;
+      const availableForCrumbing = Math.max(0, pool?.availableForCrumbing || 0);
+      if (!source || !pool) {
+        showToast('error', 'Select a Halloumi common pool');
+        return;
       }
+      if (newBatchForm.halloumiWeightKg > availableForCrumbing + 0.01) {
+        showToast('error', `Only ${availableForCrumbing.toFixed(2)} kg is unallocated in this Halloumi pool`);
+        return;
+      }
+      sourceBatchCode = pool.batchId || `HAL-${source.lotCode}`;
+      milkLotCode = source.lotCode;
+      sourceWeightKg = Math.min(availableForCrumbing, Math.max(0, Number(newBatchForm.halloumiWeightKg) || 0));
+      updateMilkLot(source.id, {
+        halloumiPool: {
+          ...pool,
+          usedInCrumbing: (pool.usedInCrumbing || 0) + sourceWeightKg,
+          availableForCrumbing: Math.max(0, availableForCrumbing - sourceWeightKg),
+        },
+      });
     }
 
     const batchCode = generateBatchCode(newBatchForm.type, milkLotCode);
@@ -344,7 +365,7 @@ export default function CrumbingTab() {
         breadingMultiplier: 0,
       });
     }
-    setNewBatchForm({ type: 'SPP', sourceBatchId: '', manualPaneerWeightKg: 0, manualOrigin: '', traysCrumbed: 0, crumbingTeam: '' });
+    setNewBatchForm({ type: 'SPP', sourceBatchId: '', manualPaneerWeightKg: 0, manualOrigin: '', halloumiWeightKg: 0, traysCrumbed: 0, crumbingTeam: '' });
   };
 
   const handleCompleteProduction = () => {
@@ -685,6 +706,7 @@ export default function CrumbingTab() {
                   sourceBatchId: '',
                   manualPaneerWeightKg: 0,
                   manualOrigin: '',
+                  halloumiWeightKg: 0,
                   traysCrumbed: 0,
                 });
                 setShowNewBatchModal(true);
@@ -723,7 +745,7 @@ export default function CrumbingTab() {
                     <td className="px-4 py-3">
                       <div className="text-xs text-slate-600">{batch.sourceBatchCode}</div>
                       {batch.origin && <div className="mt-1 text-[11px] text-slate-500">Origin: {batch.origin}</div>}
-                      {batch.type === 'SPP' && batch.sourceWeightKg !== undefined && <div className="mt-1 text-[11px] text-pink-700">{batch.sourceWeightKg.toFixed(2)} kg source</div>}
+                      {(batch.type === 'SPP' || batch.type === 'HCP') && batch.sourceWeightKg !== undefined && <div className="mt-1 text-[11px] text-pink-700">{batch.sourceWeightKg.toFixed(2)} kg source</div>}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">
                       {batch.type === 'SPP' ? (
@@ -885,6 +907,19 @@ export default function CrumbingTab() {
               ))}
             </select>
           </div>
+          {activeType === 'HCP' && <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Halloumi weight for crumbing (kg)</label>
+            <input
+              type="number"
+              value={newBatchForm.halloumiWeightKg || ''}
+              onChange={(e) => setNewBatchForm({ ...newBatchForm, halloumiWeightKg: parseFloat(e.target.value) || 0 })}
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              min="0"
+              step="0.01"
+              placeholder="Enter the quantity allocated from the pool"
+            />
+            {newBatchForm.sourceBatchId && newBatchForm.sourceBatchId !== 'manual' && <p className="mt-1 text-xs text-slate-500">This quantity is deducted from the milk lot's unallocated Halloumi pool when the HCP batch is created.</p>}
+          </div>}
           {activeType === 'SPP' && newBatchForm.sourceBatchId === 'manual' && <>
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Paneer weight for SPP (kg)</label>

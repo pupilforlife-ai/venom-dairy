@@ -92,9 +92,38 @@ export interface HalloumiPool {
   batchId: string;
   milkLotId: string;
   totalProduced: number;
+  // Physical stock vacuumed and stored in the chiller. This is preservation,
+  // not a sale or a crumbing allocation.
   vacuumPacked: number;
+  soldWeight?: number;
+  // Halloumi allocated from the common pool into HCP crumbing. Optional for
+  // older snapshots created before pool destinations were recorded.
+  usedInCrumbing?: number;
+  // Vacuumed Halloumi handed over to Distribution. This is tracked separately
+  // from sold stock because handover is an internal transfer record.
+  handedOverWeight?: number;
+  // Unallocated vacuumed stock that can still be sold or used in crumbing.
   availableForCrumbing: number;
   roundsContributed: string[];
+}
+
+export type DistributionHandoverSource = 'finished_stock' | 'halloumi_pool' | 'production_round' | 'crumbing_batch' | 'manual';
+
+export interface DistributionHandover {
+  id: string;
+  sourceType: DistributionHandoverSource;
+  sourceId?: string;
+  productName: string;
+  batchCode: string;
+  quantity: number;
+  unit: 'kg' | 'packets' | 'bottles';
+  cases?: number;
+  looseQuantity?: number;
+  storageLocation?: string;
+  destination: string;
+  handedOverBy: string;
+  handedOverAt: string;
+  notes?: string;
 }
 
 export function getCreamBatchCode(milkLotCode: string) {
@@ -243,7 +272,7 @@ export interface ProductionRound {
   batchCode?: string;
   sourceBatchCode?: string;
   outputWeight: number; // kg gross manufactured output
-  vacuumPackedWeight?: number; // kg allocated from a Halloumi pool for vacuum sale
+  vacuumPackedWeight?: number; // kg vacuumed and stored in the Halloumi chiller
   startTime: string;
   completedAt?: string;
   

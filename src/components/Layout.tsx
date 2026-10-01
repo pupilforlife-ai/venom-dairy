@@ -34,7 +34,7 @@ const navItems = [
   { path: '/cold-chain', label: 'Cold Chain', icon: Thermometer },
   { path: '/waste', label: 'Waste & Yield', icon: AlertTriangle },
   { path: '/utilities', label: 'Utilities', icon: Truck },
-  { path: '/handover', label: 'Handover', icon: Truck },
+  { path: '/distribution', label: 'Distribution', icon: Truck },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 

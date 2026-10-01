@@ -125,9 +125,11 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
   const [showVacuumPackModal, setShowVacuumPackModal] = useState(false);
+  const [showSaleModal, setShowSaleModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
   const [weightInput, setWeightInput] = useState(0);
   const [vacuumPackInput, setVacuumPackInput] = useState(0);
+  const [saleInput, setSaleInput] = useState(0);
 
   // Timer state
   const [timers, setTimers] = useState<Record<string, number>>({});
@@ -283,6 +285,8 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       milkLotId: milkLot.id,
       totalProduced: 0,
       vacuumPacked: 0,
+      soldWeight: 0,
+      usedInCrumbing: 0,
       availableForCrumbing: 0,
       roundsContributed: [],
     };
@@ -296,7 +300,9 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
         ...existingPool,
         batchId: existingPool.batchId || getHalloumiBatchCode(milkLot.lotCode),
         totalProduced: Math.max(0, existingPool.totalProduced + weightDelta),
-        availableForCrumbing: Math.max(0, existingPool.availableForCrumbing + weightDelta),
+        soldWeight: existingPool.soldWeight || 0,
+        usedInCrumbing: existingPool.usedInCrumbing || 0,
+        availableForCrumbing: Math.max(0, existingPool.availableForCrumbing || 0),
         roundsContributed: existingPool.roundsContributed.includes(round.id)
           ? existingPool.roundsContributed
           : [...existingPool.roundsContributed, round.id],
@@ -326,6 +332,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       showToast('error', 'Record the Halloumi output weight before vacuum packing');
       return;
     }
+    const poolAvailable = Math.max(0, existingPool.availableForCrumbing || 0);
 
     updateProductionRound(selectedRound, {
       status: 'vacuum_packed',
@@ -335,12 +342,42 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       halloumiPool: {
         ...existingPool,
         vacuumPacked: existingPool.vacuumPacked + vacuumPackInput,
-        availableForCrumbing: Math.max(0, existingPool.availableForCrumbing - vacuumPackInput),
+        soldWeight: existingPool.soldWeight || 0,
+        usedInCrumbing: existingPool.usedInCrumbing || 0,
+        availableForCrumbing: poolAvailable + vacuumPackInput,
       },
     });
-    showToast('success', `${vacuumPackInput.toFixed(2)} kg allocated to vacuum-packed Halloumi`);
+    showToast('success', `${vacuumPackInput.toFixed(2)} kg vacuumed and stored in the Halloumi pool`);
     setShowVacuumPackModal(false);
     setVacuumPackInput(0);
+  };
+
+  const handleRecordSale = () => {
+    if (saleInput <= 0) {
+      showToast('error', 'Enter a valid quantity sold');
+      return;
+    }
+    if (!activeMilkLot?.halloumiPool) {
+      showToast('error', 'There is no Halloumi pool for this milk lot');
+      return;
+    }
+    const pool = activeMilkLot.halloumiPool;
+    const available = Math.max(0, pool.availableForCrumbing || 0);
+    if (saleInput > available + 0.01) {
+      showToast('error', `Only ${available.toFixed(2)} kg is available for sale or crumbing`);
+      return;
+    }
+    updateMilkLot(activeMilkLot.id, {
+      halloumiPool: {
+        ...pool,
+        soldWeight: (pool.soldWeight || 0) + saleInput,
+        usedInCrumbing: pool.usedInCrumbing || 0,
+        availableForCrumbing: Math.max(0, available - saleInput),
+      },
+    });
+    showToast('success', `${saleInput.toFixed(2)} kg recorded as sold Halloumi`);
+    setShowSaleModal(false);
+    setSaleInput(0);
   };
 
   const getActionButtons = (round: any) => {
@@ -502,13 +539,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
             }}
             className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-medium hover:bg-emerald-700"
           >
-            <Package className="w-3 h-3" /> Vacuum Pack
-          </button>
-          <button
-            onClick={() => handleStatusChange(round.id, 'sent_to_hcp')}
-            className="flex items-center gap-1 px-3 py-1.5 bg-pink-500 text-white rounded text-xs font-medium hover:bg-pink-600"
-          >
-            <Scissors className="w-3 h-3" /> Send to HCP
+            <Package className="w-3 h-3" /> Vacuum &amp; Store
           </button>
         </div>
       );
@@ -560,13 +591,19 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       {activeMilkLot?.halloumiPool && (
         <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border border-cyan-200 rounded-xl p-4">
           <h4 className="text-sm font-semibold text-cyan-900 mb-3">🧀 Common Halloumi Pool</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-sm">
             <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Pool batch</p><p className="font-bold text-slate-900">{activeMilkLot.halloumiPool.batchId}</p><p className="text-[11px] text-slate-500">Milk lot {activeMilkLot.lotCode}</p></div>
             <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Total produced</p><p className="font-bold text-slate-900">{activeMilkLot.halloumiPool.totalProduced.toFixed(2)} kg</p></div>
-            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Vacuum packed / sold</p><p className="font-bold text-emerald-700">{activeMilkLot.halloumiPool.vacuumPacked.toFixed(2)} kg</p></div>
-            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Available for crumbing</p><p className="font-bold text-blue-700">{activeMilkLot.halloumiPool.availableForCrumbing.toFixed(2)} kg</p></div>
+            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Vacuumed in chiller</p><p className="font-bold text-cyan-700">{activeMilkLot.halloumiPool.vacuumPacked.toFixed(2)} kg</p></div>
+            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Sold</p><p className="font-bold text-emerald-700">{(activeMilkLot.halloumiPool.soldWeight || 0).toFixed(2)} kg</p></div>
+            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Used in crumbing</p><p className="font-bold text-pink-700">{(activeMilkLot.halloumiPool.usedInCrumbing || 0).toFixed(2)} kg</p></div>
+            <div className="bg-white rounded-lg border border-cyan-100 p-3"><p className="text-xs text-slate-500">Available for sale / crumbing</p><p className="font-bold text-blue-700">{activeMilkLot.halloumiPool.availableForCrumbing.toFixed(2)} kg</p></div>
           </div>
-          <p className="text-xs text-cyan-800 mt-3">All weighed Halloumi rounds for this milk lot feed the single {activeMilkLot.halloumiPool.batchId} pool. Quantities chosen for vacuum sale and later crumbing remain traceable separately.</p>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-cyan-800">Vacuuming only preserves Halloumi in the chiller. It does not record a sale; the unallocated vacuumed balance can later be sold, handed to Distribution, or used in HCP crumbing.</p>
+            <p className="mt-1 text-[11px] text-cyan-700">Handed to Distribution: {(activeMilkLot.halloumiPool.handedOverWeight || 0).toFixed(2)} kg</p>
+            {activeMilkLot.halloumiPool.availableForCrumbing > 0 && <button type="button" onClick={() => { setSaleInput(0); setShowSaleModal(true); }} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Record sold quantity</button>}
+          </div>
         </div>
       )}
 
@@ -834,19 +871,36 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
         </div>
       </Modal>
 
-      <Modal isOpen={showVacuumPackModal} onClose={() => setShowVacuumPackModal(false)} title="Allocate Halloumi for vacuum sale">
+      <Modal isOpen={showVacuumPackModal} onClose={() => setShowVacuumPackModal(false)} title="Vacuum & Store Halloumi">
         <div className="space-y-4">
-          <p className="text-xs text-slate-500">Enter only the quantity being vacuumed and sold now. The remaining Halloumi stays in the common <strong>{activeMilkLot?.halloumiPool?.batchId || 'HAL pool'}</strong> pool for later crumbing.</p>
+          <p className="text-xs text-slate-500">Enter the quantity being vacuumed and stored in the chiller. This is preserved stock for a future sale, Distribution handover, or HCP crumbing; it is not recorded as sold.</p>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Vacuum-packed quantity (kg)</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity to vacuum &amp; store (kg)</label>
             <input type="number" value={vacuumPackInput} onChange={(e) => setVacuumPackInput(parseFloat(e.target.value) || 0)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" step="0.1" min="0" placeholder="e.g., 18.5" />
           </div>
           <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 text-xs text-cyan-800">
-            The unselected balance remains available for crumbing and is not lost.
+            The unselected balance remains unallocated. It can be vacuumed later, sold from the pool, handed to Distribution, or allocated to HCP crumbing once vacuumed.
           </div>
           <div className="flex gap-2 pt-2">
             <button onClick={handleVacuumPack} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Save vacuum allocation</button>
             <button onClick={() => setShowVacuumPackModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showSaleModal} onClose={() => setShowSaleModal(false)} title="Record Halloumi Sale">
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">Record only the quantity leaving the common Halloumi pool as sold product. Vacuuming alone does not count as a sale.</p>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Sold quantity (kg)</label>
+            <input type="number" value={saleInput || ''} onChange={(e) => setSaleInput(parseFloat(e.target.value) || 0)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" step="0.1" min="0" placeholder="e.g., 18.5" />
+          </div>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+            Available for sale or crumbing: {(activeMilkLot?.halloumiPool?.availableForCrumbing || 0).toFixed(2)} kg
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={handleRecordSale} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700">Record sale</button>
+            <button type="button" onClick={() => setShowSaleModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button>
           </div>
         </div>
       </Modal>

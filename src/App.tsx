@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './store/AppContext';
 import AuthGate from './components/AuthGate';
 import { ToastProvider } from './components/Toast';
@@ -12,7 +12,7 @@ import Packing from './pages/Packing';
 import ColdChain from './pages/ColdChain';
 import WasteAndYield from './pages/WasteAndYield';
 import Utilities from './pages/Utilities';
-import Handover from './pages/Handover';
+import Distribution from './pages/Distribution';
 import Reconciliation from './pages/Reconciliation';
 import Settings from './pages/Settings';
 
@@ -33,7 +33,9 @@ export default function App() {
               <Route path="/cold-chain" element={<ColdChain />} />
               <Route path="/waste" element={<WasteAndYield />} />
               <Route path="/utilities" element={<Utilities />} />
-              <Route path="/handover" element={<Handover />} />
+              <Route path="/distribution" element={<Distribution />} />
+              {/* Keep the old bookmark working while the page is now called Distribution. */}
+              <Route path="/handover" element={<Navigate to="/distribution" replace />} />
               <Route path="/reconciliation" element={<Reconciliation />} />
               <Route path="/settings" element={<Settings />} />
               </Routes>
