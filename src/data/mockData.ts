@@ -348,6 +348,7 @@ export interface ProductionRound {
   
   // Cream recovery (C/S rounds only)
   creamRecovered?: number; // kg
+  creamBucketWeights?: number[]; // kg per recovered cream bucket
   creamRecoveredAt?: string;
   creamRecoveredBy?: string;
   

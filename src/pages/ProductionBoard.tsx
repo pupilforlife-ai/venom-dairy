@@ -60,13 +60,14 @@ export default function ProductionBoard() {
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots, finishedStock,
     advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
-    addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot,
+    addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot, updateIntermediateLot,
     removeProductionRound, cancelProductionRound, addWasteEvent,
     updateMilkLot, addFinishedStock, updateFinishedStock
   } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
+  const canEditCream = canForceStage;
   const isOwner = currentRole === 'owner';
   const editableStageOptions = [...statusFlow, 'chiller_storage', 'spp_pending', 'pan111_pending', 'spoilage_pending', 'spoiled', 'cancelled'] as string[];
   
@@ -80,6 +81,8 @@ export default function ProductionBoard() {
   const [showPackModal, setShowPackModal] = useState(false);
   const [showPan111Modal, setShowPan111Modal] = useState(false);
   const [showCreamModal, setShowCreamModal] = useState(false);
+  const [showCreamDetailsModal, setShowCreamDetailsModal] = useState(false);
+  const [creamEditRoundId, setCreamEditRoundId] = useState<string | null>(null);
   const [showTemperatureModal, setShowTemperatureModal] = useState(false);
   const [showSppModal, setShowSppModal] = useState(false);
   const [showSpoilageModal, setShowSpoilageModal] = useState(false);
@@ -733,6 +736,11 @@ export default function ProductionBoard() {
 
   const handleRecordCream = () => {
     if (!selectedRound) return;
+
+    if (creamEditRoundId && !canEditCream) {
+      showToast('error', 'Only an admin or owner can edit cream recovery records');
+      return;
+    }
     
     const round = productionRounds.find(r => r.id === selectedRound);
     if (!round || round.type !== 'C/S') {
@@ -748,10 +756,16 @@ export default function ProductionBoard() {
       return;
     }
 
+    const isEditing = creamEditRoundId === selectedRound;
+    const previousWeight = isEditing ? round.creamRecovered || 0 : 0;
+    const weightDelta = roundToTwo(totalWeight - previousWeight);
+    const recoveredBy = creamForm.recordedBy.trim() || round.creamRecoveredBy;
+
     updateProductionRound(selectedRound, {
       creamRecovered: totalWeight,
+      creamBucketWeights: roundedBucketWeights,
       creamRecoveredAt: new Date().toISOString(),
-      creamRecoveredBy: creamForm.recordedBy,
+      creamRecoveredBy: recoveredBy,
     });
 
     // Update the milk lot's cream pool
@@ -771,34 +785,48 @@ export default function ProductionBoard() {
         creamPool: {
           ...existingPool,
           batchId: existingPool.batchId || getCreamBatchCode(milkLot.lotCode),
-          totalCream: roundToTwo(existingPool.totalCream + totalWeight),
-          availableBalance: roundToTwo(existingPool.availableBalance + totalWeight),
-          roundsContributed: [...existingPool.roundsContributed, round.id],
+          totalCream: roundToTwo(Math.max(0, existingPool.totalCream + weightDelta)),
+          availableBalance: roundToTwo(Math.max(0, existingPool.availableBalance + weightDelta)),
+          roundsContributed: existingPool.roundsContributed.includes(round.id)
+            ? existingPool.roundsContributed
+            : [...existingPool.roundsContributed, round.id],
         },
       });
     }
 
-    // Also create an intermediate lot for the cream
-    addIntermediateLot({
-      lotCode: `CREAM-${round.milkLotCode}-S${round.shiftNumber}-R${round.roundNumber}`,
-      productId: 'cream',
-      productName: 'Recovered Cream (from C/S)',
-      productClass: 'intermediate',
-      sourceBatchId: round.id,
-      sourceBatchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/C/S`,
-      producedQuantity: totalWeight,
-      currentQuantity: totalWeight,
-      uom: 'kg',
-      storageLocation: 'Chiller',
-      status: 'available',
-      producedAt: new Date().toISOString(),
-      sourceMilkLotCode: round.milkLotCode,
-      sourceShift: round.shiftNumber,
-      sourceRound: round.roundNumber,
-    });
+    // Also create or update the intermediate cream lot. Editing a recovery
+    // must adjust the existing lot rather than create a duplicate.
+    const existingCreamLot = intermediateLots.find((lot) => lot.sourceBatchId === round.id && lot.productId === 'cream');
+    if (existingCreamLot) {
+      const newCurrentQuantity = roundToTwo(Math.max(0, existingCreamLot.currentQuantity + weightDelta));
+      updateIntermediateLot(existingCreamLot.id, {
+        producedQuantity: totalWeight,
+        currentQuantity: newCurrentQuantity,
+        status: newCurrentQuantity > 0 ? 'available' : 'consumed',
+      });
+    } else {
+      addIntermediateLot({
+        lotCode: `CREAM-${round.milkLotCode}-S${round.shiftNumber}-R${round.roundNumber}`,
+        productId: 'cream',
+        productName: 'Recovered Cream (from C/S)',
+        productClass: 'intermediate',
+        sourceBatchId: round.id,
+        sourceBatchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/C/S`,
+        producedQuantity: totalWeight,
+        currentQuantity: totalWeight,
+        uom: 'kg',
+        storageLocation: 'Chiller',
+        status: 'available',
+        producedAt: new Date().toISOString(),
+        sourceMilkLotCode: round.milkLotCode,
+        sourceShift: round.shiftNumber,
+        sourceRound: round.roundNumber,
+      });
+    }
 
-    showToast('success', `Cream recorded: ${totalWeight.toFixed(2)} kg (${creamForm.numberOfBuckets} buckets) - Added to milk lot pool`);
+    showToast('success', `${isEditing ? 'Cream record updated' : 'Cream recorded'}: ${totalWeight.toFixed(2)} kg (${roundedBucketWeights.length} buckets)`);
     setShowCreamModal(false);
+    setCreamEditRoundId(null);
     setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' });
   };
 
@@ -987,7 +1015,29 @@ export default function ProductionBoard() {
 
   const openCreamModal = (roundId: string) => {
     setSelectedRound(roundId);
+    setCreamEditRoundId(null);
     setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' });
+    setShowCreamModal(true);
+  };
+
+  const openCreamDetails = (roundId: string) => {
+    setSelectedRound(roundId);
+    setShowCreamDetailsModal(true);
+  };
+
+  const beginCreamEdit = (roundId: string) => {
+    if (!canEditCream) return;
+    const round = productionRounds.find((item) => item.id === roundId);
+    if (!round) return;
+    const bucketWeights = (round.creamBucketWeights || []).map(roundToTwo);
+    setSelectedRound(roundId);
+    setCreamEditRoundId(roundId);
+    setCreamForm({
+      numberOfBuckets: bucketWeights.length,
+      bucketWeights,
+      recordedBy: round.creamRecoveredBy || '',
+    });
+    setShowCreamDetailsModal(false);
     setShowCreamModal(true);
   };
 
@@ -1452,7 +1502,7 @@ export default function ProductionBoard() {
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             <span className="inline-flex rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm font-bold text-slate-700">{round.type}</span>
-                            {round.creamRecovered !== undefined && <div className="mt-1 flex w-fit whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Cream {round.creamRecovered.toFixed(2)} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</div>}
+                            {round.creamRecovered !== undefined && <button type="button" onClick={() => openCreamDetails(round.id)} className="mt-1 flex w-fit whitespace-nowrap rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Cream {round.creamRecovered.toFixed(2)} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</button>}
                             {renderCreamAction(round)}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
@@ -1803,8 +1853,42 @@ export default function ProductionBoard() {
         </div>
       </Modal>
 
+      {/* Cream details */}
+      <Modal isOpen={showCreamDetailsModal} onClose={() => setShowCreamDetailsModal(false)} title="Cream recovery details">
+        {(() => {
+          const round = selectedRound ? productionRounds.find((item) => item.id === selectedRound) : undefined;
+          if (!round || round.creamRecovered === undefined) {
+            return <p className="text-sm text-slate-500">Cream recovery record not found.</p>;
+          }
+          const bucketWeights = round.creamBucketWeights || [];
+          return (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <strong>{roundDisplayCode(round)}</strong> · {round.creamRecovered.toFixed(2)} kg total cream
+                {round.creamRecoveredBy && <div className="mt-1 text-xs">Recorded by {round.creamRecoveredBy}</div>}
+              </div>
+              {bucketWeights.length > 0 ? (
+                <div>
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-600">Individual bucket weights</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {bucketWeights.map((weight, index) => <div key={index} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">Bucket {index + 1}<span className="float-right">{roundToTwo(weight).toFixed(2)} kg</span></div>)}
+                  </div>
+                </div>
+              ) : (
+                <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">No individual bucket weights were saved for this historical record.</p>
+              )}
+              <div className="flex gap-2 pt-2">
+                {canEditCream && <button type="button" onClick={() => beginCreamEdit(round.id)} className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-700">Edit bucket weights</button>}
+                <button type="button" onClick={() => setShowCreamDetailsModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Close</button>
+              </div>
+              {!canEditCream && <p className="text-xs text-slate-500">Only an admin or owner can edit cream recovery records.</p>}
+            </div>
+          );
+        })()}
+      </Modal>
+
       {/* Cream Modal */}
-      <Modal isOpen={showCreamModal} onClose={() => setShowCreamModal(false)} title="Record Cream Recovery (C/S Rounds Only)">
+      <Modal isOpen={showCreamModal} onClose={() => { setShowCreamModal(false); setCreamEditRoundId(null); }} title={creamEditRoundId ? "Edit Cream Recovery" : "Record Cream Recovery (C/S Rounds Only)"}>
         <div className="space-y-4">
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
             <p className="text-xs text-amber-700">
@@ -1865,8 +1949,8 @@ export default function ProductionBoard() {
             />
           </div>
           <div className="flex gap-2 pt-2">
-            <button onClick={handleRecordCream} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record Cream</button>
-            <button onClick={() => setShowCreamModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+            <button onClick={handleRecordCream} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">{creamEditRoundId ? 'Save cream changes' : 'Record Cream'}</button>
+            <button onClick={() => { setShowCreamModal(false); setCreamEditRoundId(null); }} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
       </Modal>
@@ -2000,7 +2084,7 @@ export default function ProductionBoard() {
             history.push({
               stage: 'Cream Recovered',
               time: round.creamRecoveredAt ? new Date(round.creamRecoveredAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
-              details: `${round.creamRecovered} kg ${round.creamRecoveredBy ? `by ${round.creamRecoveredBy}` : ''}`
+              details: `${round.creamRecovered.toFixed(2)} kg ${round.creamRecoveredBy ? `by ${round.creamRecoveredBy}` : ''}`
             });
           }
           
