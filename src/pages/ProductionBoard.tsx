@@ -31,6 +31,10 @@ import CrumbingTab from './CrumbingTab';
 
 const emptyPackForm = { sku: '', cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0, reason: '' };
 
+function roundToTwo(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 function roundDisplayCode(round: { type: string; shiftNumber: number; roundNumber: number }) {
   const prefix = round.type === 'Halloumi' ? 'HAL' : 'PAN';
   return `${prefix} S${round.shiftNumber}/R${round.roundNumber}`;
@@ -54,11 +58,11 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
 
 export default function ProductionBoard() {
   const { 
-    productionRounds, productionShifts, intermediateLots, milkLots,
+    productionRounds, productionShifts, intermediateLots, milkLots, finishedStock,
     advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
     addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot,
     removeProductionRound, cancelProductionRound, addWasteEvent,
-    updateMilkLot
+    updateMilkLot, addFinishedStock, updateFinishedStock
   } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
@@ -569,11 +573,18 @@ export default function ProductionBoard() {
       return;
     }
 
-    // Add to packed SKUs array
+    const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
+    const previousPackingRunId = previousPack?.packingRunId;
+    const packingRunId = previousPackingRunId || `pb-${round.id}-${Date.now()}`;
+
+    // Add to packed SKUs array. The packing run ID links this round entry to
+    // the corresponding finished-stock row, so corrections do not duplicate
+    // inventory.
     const replacement = {
       sku: packForm.sku,
       cases: definition.packMode === 'weight_only' ? 0 : packForm.cases,
       loose: definition.packMode === 'weight_only' ? 0 : packForm.loose,
+      packingRunId,
       ...(definition.packMode === 'weight_loose' ? { looseWeightKg: packForm.looseWeightKg } : {}),
       ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightPacked, reason: packForm.reason.trim() } : {}),
     };
@@ -583,6 +594,39 @@ export default function ProductionBoard() {
 
     // Determine new status - mark as packed if balance is 0 or negative
     const newStatus = newBalance <= 0 ? 'packed' : round.status;
+
+    const finishedStockInput = {
+      sku: packForm.sku,
+      productName: definition.productName,
+      packingRunId,
+      cases: definition.packMode === 'weight_only' ? 0 : packForm.cases,
+      loosePackets: definition.packMode === 'weight_only' ? 0 : packForm.loose,
+      totalPackets: definition.packMode === 'units'
+        ? packForm.cases * (definition.unitsPerCase || 0) + packForm.loose
+        : 0,
+      storageLocation: 'Finished Production Stock',
+      status: 'awaiting_handover' as const,
+      createdAt: new Date().toISOString(),
+      sourceBatchCodes: [sourceBatchCode],
+      ...(definition.packMode === 'weight_only'
+        ? { weightKg: totalWeightPacked }
+        : definition.packMode === 'weight_loose'
+          ? { looseWeightKg: packForm.looseWeightKg }
+          : {}),
+    };
+
+    const existingFinishedStock = previousPackingRunId
+      ? finishedStock.find((stock) => stock.packingRunId === previousPackingRunId)
+      : undefined;
+    if (existingFinishedStock) {
+      updateFinishedStock(existingFinishedStock.id, {
+        ...finishedStockInput,
+        status: existingFinishedStock.status,
+        createdAt: existingFinishedStock.createdAt,
+      });
+    } else {
+      addFinishedStock(finishedStockInput);
+    }
 
     updateProductionRound(roundId, {
       status: newStatus,
@@ -638,6 +682,12 @@ export default function ProductionBoard() {
   };
 
   const handleHandover = (roundId: string) => {
+    const round = productionRounds.find((item) => item.id === roundId);
+    if (!round) return;
+    const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
+    finishedStock
+      .filter((stock) => stock.status === 'awaiting_handover' && (stock.sourceBatchCodes || []).includes(sourceBatchCode))
+      .forEach((stock) => updateFinishedStock(stock.id, { status: 'handed_over' }));
     updateProductionRound(roundId, { 
       status: 'handed_over',
       locked: true,
@@ -690,7 +740,8 @@ export default function ProductionBoard() {
       return;
     }
 
-    const totalWeight = creamForm.bucketWeights.reduce((sum, w) => sum + w, 0);
+    const roundedBucketWeights = creamForm.bucketWeights.map(roundToTwo);
+    const totalWeight = roundToTwo(roundedBucketWeights.reduce((sum, weight) => sum + weight, 0));
     
     if (totalWeight <= 0) {
       showToast('error', 'Please enter valid bucket weights');
@@ -720,8 +771,8 @@ export default function ProductionBoard() {
         creamPool: {
           ...existingPool,
           batchId: existingPool.batchId || getCreamBatchCode(milkLot.lotCode),
-          totalCream: existingPool.totalCream + totalWeight,
-          availableBalance: existingPool.availableBalance + totalWeight,
+          totalCream: roundToTwo(existingPool.totalCream + totalWeight),
+          availableBalance: roundToTwo(existingPool.availableBalance + totalWeight),
           roundsContributed: [...existingPool.roundsContributed, round.id],
         },
       });
@@ -1401,7 +1452,7 @@ export default function ProductionBoard() {
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             <span className="inline-flex rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm font-bold text-slate-700">{round.type}</span>
-                            {round.creamRecovered !== undefined && <div className="mt-1 flex w-fit whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Cream {round.creamRecovered} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</div>}
+                            {round.creamRecovered !== undefined && <div className="mt-1 flex w-fit whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Cream {round.creamRecovered.toFixed(2)} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</div>}
                             {renderCreamAction(round)}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
@@ -1786,11 +1837,12 @@ export default function ProductionBoard() {
                       value={weight || ''}
                       onChange={(e) => {
                         const newWeights = [...creamForm.bucketWeights];
-                        newWeights[index] = parseFloat(e.target.value) || 0;
+                        const parsedWeight = parseFloat(e.target.value);
+                        newWeights[index] = Number.isFinite(parsedWeight) ? roundToTwo(parsedWeight) : 0;
                         setCreamForm({ ...creamForm, bucketWeights: newWeights });
                       }} 
                       className="flex-1 px-3 py-1 border border-slate-200 rounded text-sm" 
-                      step="0.1" 
+                      step="0.01"
                       min="0"
                       placeholder="Weight in kg"
                     />

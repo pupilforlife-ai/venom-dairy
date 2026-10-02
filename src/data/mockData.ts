@@ -29,6 +29,8 @@ export interface PackedSku {
   sku: string;
   cases: number;
   loose?: number;
+  // Links a production-board packing entry to its finished-stock record.
+  packingRunId?: string;
   looseWeightKg?: number;
   weightKg?: number;
   reason?: string;

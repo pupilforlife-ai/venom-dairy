@@ -14,7 +14,7 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 
 export default function Cutting() {
-  const { productionRounds, intermediateLots, addIntermediateLot, updateProductionRound } = useApp();
+  const { productionRounds, intermediateLots, addIntermediateLot, updateIntermediateLot, updateProductionRound } = useApp();
   const { showToast } = useToast();
 
   const [showCutModal, setShowCutModal] = useState(false);
@@ -104,13 +104,15 @@ export default function Cutting() {
     setCutForm({ batchId: '', cutBy: '', cutType: '400g blocks', outputWeight: 0, pan111Weight: 0, wasteWeight: 0, notes: '' });
   };
 
-  // Freeze action
+  // Freeze action: persist the stock movement so Packing can see it.
   const handleFreeze = (lotId: string) => {
     const lot = intermediateLots.find((l) => l.id === lotId);
     if (!lot) return;
 
-    // Update lot location to freezer
-    // In real app, this would be a stock movement
+    updateIntermediateLot(lotId, {
+      storageLocation: 'Dairy Container (Intermediate Freezer)',
+      status: lot.currentQuantity > 0 ? 'available' : 'consumed',
+    });
     showToast('success', `${lot.productName} moved to freezer`);
   };
 

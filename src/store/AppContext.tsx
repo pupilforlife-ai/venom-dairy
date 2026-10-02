@@ -298,11 +298,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Intermediate lot actions
   const addIntermediateLot = (lot: Omit<IntermediateLot, 'id'>) => {
     const newLot = { ...lot, id: `il-${Date.now()}` };
-    setIntermediateLots([...intermediateLots, newLot]);
+    setIntermediateLots(currentLots => [...currentLots, newLot]);
   };
 
   const updateIntermediateLot = (id: string, updates: Partial<IntermediateLot>) => {
-    setIntermediateLots(intermediateLots.map(lot => 
+    setIntermediateLots(currentLots => currentLots.map(lot =>
       lot.id === id ? { ...lot, ...updates } : lot
     ));
   };
@@ -310,11 +310,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Finished stock actions
   const addFinishedStock = (stock: Omit<FinishedStockLot, 'id'>) => {
     const newStock = { ...stock, id: `fs-${Date.now()}` };
-    setFinishedStock([...finishedStock, newStock]);
+    setFinishedStock(currentStock => [...currentStock, newStock]);
   };
 
   const updateFinishedStock = (id: string, updates: Partial<FinishedStockLot>) => {
-    setFinishedStock(finishedStock.map(stock => 
+    setFinishedStock(currentStock => currentStock.map(stock =>
       stock.id === id ? { ...stock, ...updates } : stock
     ));
   };

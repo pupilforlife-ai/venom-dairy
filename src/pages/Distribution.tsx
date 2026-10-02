@@ -90,19 +90,25 @@ export default function Distribution() {
   const candidates = useMemo<DistributionCandidate[]>(() => {
     const finishedCandidates: DistributionCandidate[] = finishedStock
       .filter(stock => stock.status === 'awaiting_handover')
-      .map(stock => ({
-        id: `finished:${stock.id}`,
-        sourceType: 'finished_stock',
-        sourceId: stock.id,
-        productName: stock.productName,
-        batchCode: stock.sku,
-        quantity: stock.totalPackets,
-        unit: 'packets',
-        cases: stock.cases,
-        looseQuantity: stock.loosePackets,
-        storageLocation: stock.storageLocation,
-        detail: `${stock.cases} cases · ${stock.loosePackets} loose packets`,
-      }));
+      .map(stock => {
+        const weight = stock.weightKg ?? stock.looseWeightKg;
+        const isWeightStock = weight !== undefined;
+        return {
+          id: `finished:${stock.id}`,
+          sourceType: 'finished_stock',
+          sourceId: stock.id,
+          productName: stock.productName,
+          batchCode: (stock.sourceBatchCodes || [])[0] || stock.sku,
+          quantity: isWeightStock ? weight : stock.totalPackets,
+          unit: isWeightStock ? 'kg' : 'packets',
+          cases: stock.cases,
+          looseQuantity: stock.loosePackets,
+          storageLocation: stock.storageLocation,
+          detail: isWeightStock
+            ? `${weight.toFixed(2)} kg finished stock`
+            : `${stock.cases} cases · ${stock.loosePackets} loose packets`,
+        };
+      });
 
     const halloumiCandidates: DistributionCandidate[] = milkLots
       .filter(lot => {

@@ -77,11 +77,15 @@ export default function Packing() {
       return;
     }
 
-    // Create finished stock
+    const packingRunId = `pk-${Date.now()}`;
+
+    // Create finished stock. The same packingRunId is stored on the source
+    // round so Inventory, Distribution, and the production board share one
+    // traceable stock record.
     addFinishedStock({
       sku: packForm.sku,
       productName: definition.productName,
-      packingRunId: `pk-${Date.now()}`,
+      packingRunId,
       cases: packForm.cases,
       loosePackets: packForm.loosePackets,
       totalPackets,
@@ -99,16 +103,28 @@ export default function Packing() {
       status: newQuantity <= 0 ? 'consumed' : 'available',
     });
 
-    // Update production round status if this was the last of the batch
-    if (newQuantity <= 0) {
-      const round = productionRounds.find((r) => r.id === lot.sourceBatchId);
-      if (round) {
-        updateProductionRound(round.id, {
-          status: 'packed',
-          packedSkus: [{ sku: packForm.sku, cases: packForm.cases, loose: packForm.loosePackets, ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightKg } : definition.packMode === 'weight_loose' ? { looseWeightKg: packForm.looseWeightKg } : {}) }],
-          intermediateBalance: 0,
-        });
-      }
+    // Keep every packing session on the source round. Previously this
+    // replaced the earlier sessions whenever the final balance reached zero,
+    // which made the board and stock totals disagree.
+    const round = productionRounds.find((item) => item.id === lot.sourceBatchId);
+    if (round) {
+      const packedEntry = {
+        sku: packForm.sku,
+        cases: packForm.cases,
+        loose: packForm.loosePackets,
+        packingRunId,
+        ...(definition.packMode === 'weight_only'
+          ? { weightKg: totalWeightKg }
+          : definition.packMode === 'weight_loose'
+            ? { looseWeightKg: packForm.looseWeightKg }
+            : {}),
+      };
+      updateProductionRound(round.id, {
+        status: newQuantity <= 0 ? 'packed' : round.status,
+        packedSkus: [...(round.packedSkus || []), packedEntry],
+        remainingBalance: newQuantity,
+        intermediateBalance: newQuantity,
+      });
     }
 
     showToast('success', `Packed ${packForm.cases} cases + ${packForm.loosePackets} loose packets of ${definition.productName}`);
