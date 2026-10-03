@@ -17,7 +17,12 @@ export default function Reconciliation() {
   const { milkLots, productionRounds, updateProductionRound } = useApp();
   const [selectedLotCode, setSelectedLotCode] = useState('');
   const [auditIdentity, setAuditIdentity] = useState({ username: '', role: '' });
-  const selectedLot = milkLots.find(lot => lot.lotCode === selectedLotCode) ?? milkLots[0];
+  const latestMilkLot = [...milkLots].sort((a, b) => {
+    const aTime = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
+    const bTime = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
+    return bTime - aTime;
+  })[0];
+  const selectedLot = milkLots.find(lot => lot.lotCode === selectedLotCode) ?? latestMilkLot;
   const lotCode = selectedLot?.lotCode ?? '';
   const previousLot = selectedLot
     ? [...milkLots]
