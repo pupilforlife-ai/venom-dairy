@@ -25,6 +25,7 @@ export interface CrumbingSkuDefinition {
 export const paneerSkuDefinitions: PaneerSkuDefinition[] = [
   { sku: 'MPAN100', productName: 'Malai Paneer - 1kg', unitWeightKg: 1, unitsPerCase: 15, packMode: 'units', sourceTypes: ['D'] },
   { sku: 'MPAN200', productName: 'Malai Paneer - 200g', unitWeightKg: 0.2, unitsPerCase: 24, packMode: 'units', sourceTypes: ['D'] },
+  { sku: 'VJPAN', productName: 'Malai Paneer - 200g (VJ)', unitWeightKg: 0.2, unitsPerCase: 20, packMode: 'units', sourceTypes: ['D'] },
   { sku: 'MPAN400', productName: 'Malai Paneer - 400g', unitWeightKg: 0.4, unitsPerCase: 24, packMode: 'units', sourceTypes: ['D'] },
   { sku: 'MPAN010', productName: 'Malai Paneer - Restaurant Blocks', unitWeightKg: 0.4, unitsPerCase: 50, packMode: 'weight_loose', sourceTypes: ['D'], cutTypes: ['Restaurant blocks'] },
   { sku: 'MPAN101', productName: 'Malai Paneer - Clear 1kg', unitWeightKg: 1, unitsPerCase: 15, packMode: 'units', sourceTypes: ['D'], cutTypes: ['400g cubes'] },
