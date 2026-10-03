@@ -515,6 +515,36 @@ export interface UtilityLog {
   notes?: string;
 }
 
+export type CipFrequency = 'daily' | 'weekly';
+export type CipCycle = 'sh8000' | 'acid' | 'caustic' | 'weekly_full';
+
+export interface CipRecord {
+  id: string;
+  frequency: CipFrequency;
+  cycle: CipCycle;
+  milkLotId: string;
+  milkLotCode: string;
+  shiftId?: string;
+  shiftNumber?: number;
+  performedAt: string;
+  recordedBy: string;
+  notes?: string;
+  completedSteps?: string[];
+  waterVolumeLitres?: number;
+  waterTemperatureC?: number;
+  chemicalName?: string;
+  chemicalVolumeLitres?: number;
+  circulationMinutes?: number;
+  extensionMinutes?: number;
+  acidWaterTemperatureC?: number;
+  acidChemicalName?: string;
+  acidChemicalVolumeLitres?: number;
+  acidCirculationMinutes?: number;
+  acidExtensionMinutes?: number;
+  supervisorName?: string;
+  supervisorSignedOffAt?: string;
+}
+
 // ============================================================
 // PRODUCTION SHIFTS
 // ============================================================
@@ -1194,6 +1224,10 @@ export const utilityLogs: UtilityLog[] = [
   { id: 'u-003', type: 'gas', periodStart: '2026-06-13', periodEnd: '2026-06-17', quantity: 45, uom: 'kg', unitCost: 35.0, totalCost: 1575, notes: 'LPG for frying' },
   { id: 'u-004', type: 'electricity', periodStart: '2026-06-13', periodEnd: '2026-06-17', quantity: 2850, uom: 'kWh', unitCost: 3.2, totalCost: 9120, notes: 'Meter reading' },
 ];
+
+// CIP records are persisted as the app is used. Keep demo data empty so a
+// fresh installation does not falsely claim that a cleaning cycle happened.
+export const cipRecords: CipRecord[] = [];
 
 // ============================================================
 // DASHBOARD METRICS — Management priorities

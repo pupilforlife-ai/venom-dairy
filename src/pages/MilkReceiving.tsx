@@ -4,9 +4,10 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, milkStorageVessels } from '../data/mockData';
+import { dailyCipChecklist, dailyCipOptionalSteps, weeklyAcidCipChecklist, weeklyAcidCipOptionalSteps } from '../data/cip';
 
 export default function MilkReceiving() {
-  const { milkLots, creamLots, productionRounds, addMilkLot, updateMilkLot, addCreamLot } = useApp();
+  const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
   const { showToast } = useToast();
   const newestLot = [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
@@ -21,6 +22,11 @@ export default function MilkReceiving() {
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showReceiveCreamModal, setShowReceiveCreamModal] = useState(false);
   const [editingLotId, setEditingLotId] = useState<string | null>(null);
+  const [weeklyCipRecordedBy, setWeeklyCipRecordedBy] = useState(() => typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_username') || '');
+  const [weeklyCipNotes, setWeeklyCipNotes] = useState('');
+  const [weeklyCipSupervisorName, setWeeklyCipSupervisorName] = useState('');
+  const [weeklyCipSupervisorConfirmed, setWeeklyCipSupervisorConfirmed] = useState(false);
+  const [weeklyCipCompletedSteps, setWeeklyCipCompletedSteps] = useState<string[]>([]);
 
   const orderedLots = useMemo(() => [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
@@ -30,6 +36,7 @@ export default function MilkReceiving() {
   const quickLots = orderedLots.slice(0, 4);
   const olderLots = orderedLots.slice(4);
   const displayedLot = orderedLots.find((lot) => lot.id === selectedLot) || orderedLots[0];
+  const closeModalLot = milkLots.find((lot) => lot.id === selectedLot);
 
   useEffect(() => {
     if (newestLot && !milkLots.some((lot) => lot.id === selectedLot)) {
@@ -260,12 +267,57 @@ export default function MilkReceiving() {
 
   const openCloseLot = (lot: typeof milkLots[number]) => {
     setSelectedLot(lot.id);
+    setWeeklyCipCompletedSteps([]);
+    setWeeklyCipSupervisorName('');
+    setWeeklyCipSupervisorConfirmed(false);
+    setWeeklyCipNotes('');
     setShowCloseModal(true);
   };
 
   const handleCloseLot = () => {
     const lot = milkLots.find((item) => item.id === selectedLot);
     if (!lot) return;
+    const weeklyCipAlreadyRecorded = cipRecords.some(record =>
+      record.frequency === 'weekly' && record.milkLotId === lot.id
+    );
+    if (!weeklyCipAlreadyRecorded) {
+      if (!weeklyCipRecordedBy.trim()) {
+        showToast('error', 'Enter the person who verified the weekly CIP');
+        return;
+      }
+      const requiredWeeklySteps = [...dailyCipChecklist, ...weeklyAcidCipChecklist];
+      const missingStep = requiredWeeklySteps.find(step => !weeklyCipCompletedSteps.includes(step.id));
+      if (missingStep) {
+        showToast('error', `Complete the weekly CIP checklist: ${missingStep.label}`);
+        return;
+      }
+      if (!weeklyCipSupervisorName.trim() || !weeklyCipSupervisorConfirmed) {
+        showToast('error', 'Supervisor sign-off is required before closing milk production');
+        return;
+      }
+      addCipRecord({
+        frequency: 'weekly',
+        cycle: 'weekly_full',
+        milkLotId: lot.id,
+        milkLotCode: lot.lotCode,
+        performedAt: new Date().toISOString(),
+        recordedBy: weeklyCipRecordedBy.trim(),
+        completedSteps: weeklyCipCompletedSteps,
+        waterVolumeLitres: 200,
+        waterTemperatureC: 80,
+        chemicalName: 'SH8000',
+        chemicalVolumeLitres: 5,
+        circulationMinutes: 45,
+        acidWaterTemperatureC: 65,
+        acidChemicalName: 'Scale Bright',
+        acidChemicalVolumeLitres: 2,
+        acidCirculationMinutes: 45,
+        acidExtensionMinutes: weeklyCipCompletedSteps.includes('weekly-acid-extra-10-minutes') ? 10 : 0,
+        supervisorName: weeklyCipSupervisorName.trim(),
+        supervisorSignedOffAt: new Date().toISOString(),
+        notes: weeklyCipNotes.trim() || undefined,
+      });
+    }
     updateMilkLot(lot.id, {
       productionClosed: true,
       productionClosedAt: new Date().toISOString(),
@@ -274,6 +326,10 @@ export default function MilkReceiving() {
     });
     showToast('success', `Production for lot ${lot.lotCode} is closed`);
     setShowCloseModal(false);
+    setWeeklyCipNotes('');
+    setWeeklyCipSupervisorName('');
+    setWeeklyCipSupervisorConfirmed(false);
+    setWeeklyCipCompletedSteps([]);
   };
 
   const handleReceiveCream = () => {
@@ -820,11 +876,59 @@ export default function MilkReceiving() {
         </div>
       </Modal>
 
-      <Modal isOpen={showCloseModal} onClose={() => setShowCloseModal(false)} title="Close milk-lot production">
+      <Modal isOpen={showCloseModal} onClose={() => setShowCloseModal(false)} title="Weekly CIP & close milk-lot production" size="lg">
         <div className="space-y-4">
-          <p className="text-sm text-slate-700">Are you sure the production for this lot of milk is closed?</p>
+          <p className="text-sm text-slate-700">Complete both CIP parts before closing production for {closeModalLot?.lotCode || 'this lot'}.</p>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm font-medium text-amber-900">Weekly CIP = daily SH8000 cycle + acid cycle</p>
+            <p className="text-xs text-amber-800 mt-1">Part 1 repeats the daily SH8000 cycle. Part 2 uses 200 L water at 65°C with 2 L Scale Bright. Existing shift-level daily CIP records remain separate.</p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Part 1 · Daily SH8000 cycle</p>
+            {[...dailyCipChecklist, ...dailyCipOptionalSteps].map(step => (
+              <label key={step.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-2.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={weeklyCipCompletedSteps.includes(step.id)}
+                  onChange={(e) => setWeeklyCipCompletedSteps(current => e.target.checked ? [...current, step.id] : current.filter(id => id !== step.id))}
+                  className="mt-0.5"
+                />
+                <span>{step.label}{step.required === false ? ' (only if needed)' : ''}</span>
+              </label>
+            ))}
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Part 2 · Weekly acid cycle</p>
+            {[...weeklyAcidCipChecklist, ...weeklyAcidCipOptionalSteps].map(step => (
+              <label key={step.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-2.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={weeklyCipCompletedSteps.includes(step.id)}
+                  onChange={(e) => setWeeklyCipCompletedSteps(current => e.target.checked ? [...current, step.id] : current.filter(id => id !== step.id))}
+                  className="mt-0.5"
+                />
+                <span>{step.label}{step.required === false ? ' (only if needed)' : ''}</span>
+              </label>
+            ))}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Verified / recorded by</label>
+            <input value={weeklyCipRecordedBy} onChange={(e) => setWeeklyCipRecordedBy(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Name or username" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Supervisor sign-off</label>
+            <input value={weeklyCipSupervisorName} onChange={(e) => setWeeklyCipSupervisorName(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Supervisor name" />
+            <label className="flex items-start gap-2 mt-2 text-xs text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={weeklyCipSupervisorConfirmed} onChange={(e) => setWeeklyCipSupervisorConfirmed(e.target.checked)} className="mt-0.5" />
+              <span>I confirm both weekly CIP parts were reviewed and signed off.</span>
+            </label>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Notes (optional)</label>
+            <textarea value={weeklyCipNotes} onChange={(e) => setWeeklyCipNotes(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={3} placeholder="Weekly cleaning observations or corrective action" />
+          </div>
           <p className="text-xs text-slate-500">Closing prevents new production shifts and rounds from being created for this lot. Existing records remain available.</p>
-          <div className="flex gap-2 pt-2"><button onClick={handleCloseLot} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium">Yes, close production</button><button onClick={() => setShowCloseModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
+          <div className="flex gap-2 pt-2"><button onClick={handleCloseLot} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium">Record weekly CIP & close</button><button onClick={() => setShowCloseModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
         </div>
       </Modal>
 

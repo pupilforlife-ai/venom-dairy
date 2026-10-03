@@ -19,6 +19,8 @@ import {
   TemperatureReading,
   WasteEvent,
   UtilityLog,
+  CipRecord,
+  cipRecords as initialCipRecords,
   statusFlow
 } from '../data/mockData';
 
@@ -32,6 +34,7 @@ interface AppState {
   temperatureReadings: TemperatureReading[];
   wasteEvents: WasteEvent[];
   utilityLogs: UtilityLog[];
+  cipRecords: CipRecord[];
 }
 
 interface AppContextType extends AppState {
@@ -72,6 +75,9 @@ interface AppContextType extends AppState {
   
   // Utility actions
   addUtilityLog: (log: Omit<UtilityLog, 'id'>) => void;
+
+  // CIP actions
+  addCipRecord: (record: Omit<CipRecord, 'id'>) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -122,6 +128,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const temperatureReadings = storedTemperatureReadings.map(normalizeTemperatureReading);
   const [wasteEvents, setWasteEvents] = useSupabaseState<WasteEvent[]>('vejoy_wasteEvents', initialWaste);
   const [utilityLogs, setUtilityLogs] = useSupabaseState<UtilityLog[]>('vejoy_utilityLogs', initialUtilities);
+  const [cipRecords, setCipRecords] = useSupabaseState<CipRecord[]>('vejoy_cipRecords', initialCipRecords);
 
   // Milk lot actions
   const addMilkLot = (lot: Omit<MilkLot, 'id'>) => {
@@ -325,6 +332,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUtilityLogs([...utilityLogs, newLog]);
   };
 
+  // CIP actions
+  const addCipRecord = (record: Omit<CipRecord, 'id'>) => {
+    const newRecord = { ...record, id: `cip-${Date.now()}` };
+    setCipRecords(currentRecords => {
+      const alreadyRecorded = currentRecords.some(existing =>
+        existing.frequency === record.frequency && (
+          record.frequency === 'daily'
+            ? existing.shiftId === record.shiftId
+            : existing.milkLotId === record.milkLotId
+        )
+      );
+      return alreadyRecorded ? currentRecords : [...currentRecords, newRecord];
+    });
+  };
+
   const value: AppContextType = {
     milkLots,
     creamLots,
@@ -335,6 +357,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     temperatureReadings,
     wasteEvents,
     utilityLogs,
+    cipRecords,
     addMilkLot,
     updateMilkLot,
     addCreamLot,
@@ -357,6 +380,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addFinishedStock,
     updateFinishedStock,
     addUtilityLog,
+    addCipRecord,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
