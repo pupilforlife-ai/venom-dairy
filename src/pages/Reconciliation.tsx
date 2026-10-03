@@ -10,6 +10,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { supabase } from '../lib/supabase';
+import { getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput } from '../data/mockData';
 import { getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 
 export default function Reconciliation() {
@@ -18,13 +19,42 @@ export default function Reconciliation() {
   const [auditIdentity, setAuditIdentity] = useState({ username: '', role: '' });
   const selectedLot = milkLots.find(lot => lot.lotCode === selectedLotCode) ?? milkLots[0];
   const lotCode = selectedLot?.lotCode ?? '';
-  const currentWeekRounds = productionRounds.filter(r => r.milkLotCode === lotCode && r.outputWeight > 0);
-  const consumedByProduction = currentWeekRounds.reduce((total, round) => total + round.actualInput, 0);
+  const previousLot = selectedLot
+    ? [...milkLots]
+      .filter(lot => lot.id !== selectedLot.id && lot.receiptDate < selectedLot.receiptDate)
+      .sort((a, b) => b.receiptDate.localeCompare(a.receiptDate))[0]
+    : undefined;
+  const previousAccounting = previousLot ? getMilkLotAccounting(previousLot, productionRounds) : undefined;
+  const previousUnexplained = previousLot && previousAccounting
+    ? previousLot.litresReceived - previousAccounting.consumed - previousAccounting.remaining
+      - previousLot.litresRejected - previousLot.litresSpilled - previousAccounting.sold
+    : 0;
+  const lotRounds = productionRounds.filter(r => r.milkLotCode === lotCode || r.milkLotId === selectedLot?.id);
+  const completedRounds = lotRounds.filter(r => r.outputWeight > 0 && !['scheduled', 'cancelled', 'spoiled'].includes(r.status));
+  const emptyProductionReconciliation = {
+    paneerRecorded: 0,
+    yieldLPerKg: 0,
+    paneerYieldPer100L: 0,
+    dRounds: 0,
+    csRounds: 0,
+    cream: 0,
+    pan111: 0,
+    paneerForSpp: 0,
+    paneerInputLitres: 0,
+    completedRounds: 0,
+  };
+  const productionReconciliation = selectedLot
+    ? getMilkLotProductionReconciliation(selectedLot, productionRounds)
+    : emptyProductionReconciliation;
+  const milkAccounting = selectedLot
+    ? getMilkLotAccounting(selectedLot, productionRounds)
+    : { consumed: 0, sold: 0, remaining: 0 };
+  const consumedByProduction = milkAccounting.consumed;
   const received = selectedLot?.litresReceived ?? 0;
-  const remaining = selectedLot?.litresRemaining ?? 0;
+  const remaining = milkAccounting.remaining;
   const rejected = selectedLot?.litresRejected ?? 0;
   const spilled = selectedLot?.litresSpilled ?? 0;
-  const accountedOther = selectedLot?.litresSold ?? 0;
+  const accountedOther = milkAccounting.sold;
   const unexplainedVariance = received - (consumedByProduction + remaining + rejected + spilled + accountedOther);
   const recon = {
     lotCode,
@@ -36,11 +66,11 @@ export default function Reconciliation() {
     accountedOther,
     unexplainedVariance,
   };
-  const hasVariance = recon.unexplainedVariance !== 0;
+  const hasVariance = Math.abs(recon.unexplainedVariance) > 0.01;
 
-  const totalPaneerD = currentWeekRounds.filter(r => r.type === 'D').reduce((s, r) => s + r.outputWeight, 0);
-  const totalPaneerCS = currentWeekRounds.filter(r => r.type === 'C/S').reduce((s, r) => s + r.outputWeight, 0);
-  const totalHalloumi = currentWeekRounds.filter(r => r.type === 'Halloumi').reduce((s, r) => s + r.outputWeight, 0);
+  const totalPaneerD = completedRounds.filter(r => r.type === 'D').reduce((s, r) => s + r.outputWeight, 0);
+  const totalPaneerCS = completedRounds.filter(r => r.type === 'C/S').reduce((s, r) => s + r.outputWeight, 0);
+  const totalHalloumi = completedRounds.filter(r => r.type === 'Halloumi').reduce((s, r) => s + r.outputWeight, 0);
 
   useEffect(() => {
     const fallback = {
@@ -64,8 +94,8 @@ export default function Reconciliation() {
   const isKbOwner = auditIdentity.username.toLowerCase() === 'kb' && auditIdentity.role.toLowerCase() === 'owner';
   const auditToleranceKg = 1;
   const paneerAuditRounds = useMemo(
-    () => productionRounds.filter(round => round.milkLotCode === lotCode && (round.type === 'D' || round.type === 'C/S') && (round.actualInput > 0 || round.outputWeight > 0 || round.blockWeights?.length || round.packedSkus?.length)),
-    [productionRounds, lotCode],
+    () => productionRounds.filter(round => (round.milkLotCode === lotCode || round.milkLotId === selectedLot?.id) && (round.type === 'D' || round.type === 'C/S') && (round.actualInput > 0 || round.outputWeight > 0 || round.blockWeights?.length || round.packedSkus?.length)),
+    [productionRounds, lotCode, selectedLot?.id],
   );
   const getPackWeight = (pack: { sku: string; cases: number; loose?: number; looseWeightKg?: number; weightKg?: number }) =>
     getPaneerPackWeight(paneerSkuByCode[pack.sku], pack.cases || 0, pack.loose || 0, pack.looseWeightKg || 0, pack.weightKg || 0);
@@ -82,7 +112,7 @@ export default function Reconciliation() {
     const verifiedOutput = getVerifiedSkuWeight(round) + getApprovedPan111Weight(round);
     return {
       round,
-      milkUsed: round.actualInput || round.plannedInput || 0,
+      milkUsed: getRoundMilkInput(round),
       staffOutput,
       blockWeight,
       staffPacked,
@@ -166,6 +196,12 @@ export default function Reconciliation() {
           </div>
         </div>
 
+        <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <div className="font-semibold">Received = Consumed + Remaining + Rejected + Spilled + Milk sold + Unexplained</div>
+          <div className="mt-1 font-mono">{recon.received.toLocaleString()} = {recon.consumedByProduction.toLocaleString()} + {recon.remaining.toLocaleString()} + {recon.rejected.toLocaleString()} + {recon.spilled.toLocaleString()} + {recon.accountedOther.toLocaleString()} + {recon.unexplainedVariance.toFixed(2)}</div>
+          <div className="mt-1 text-blue-700">Consumed uses actual input when recorded; otherwise it uses planned input for a started round. Scheduled and cancelled rounds are excluded.</div>
+        </div>
+
         {hasVariance && (
           <div className="mt-4 flex items-start gap-2 p-3 bg-red-50 rounded-lg">
             <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
@@ -201,38 +237,38 @@ export default function Reconciliation() {
               <tr className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-900">Malai Paneer (D)</td>
                 <td className="px-4 py-3 text-slate-700 font-medium">{totalPaneerD} kg</td>
-                <td className="px-4 py-3 text-slate-500">{currentWeekRounds.filter(r => r.type === 'D').length}</td>
+                <td className="px-4 py-3 text-slate-500">{productionReconciliation.dRounds}</td>
                 <td className="px-4 py-3">
                   <span className="text-emerald-600 font-medium">
-                    {recon.consumedByProduction > 0 ? ((totalPaneerD / recon.consumedByProduction) * 100).toFixed(1) : '—'}%
+                    {productionReconciliation.paneerInputLitres > 0 ? ((totalPaneerD / productionReconciliation.paneerInputLitres) * 100).toFixed(1) : '—'}%
                   </span>
                 </td>
               </tr>
               <tr className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-900">Rozana Paneer (C/S)</td>
                 <td className="px-4 py-3 text-slate-700 font-medium">{totalPaneerCS} kg</td>
-                <td className="px-4 py-3 text-slate-500">{currentWeekRounds.filter(r => r.type === 'C/S').length}</td>
+                <td className="px-4 py-3 text-slate-500">{productionReconciliation.csRounds}</td>
                 <td className="px-4 py-3">
                   <span className="text-indigo-600 font-medium">
-                    {recon.consumedByProduction > 0 ? ((totalPaneerCS / recon.consumedByProduction) * 100).toFixed(1) : '—'}%
+                    {productionReconciliation.paneerInputLitres > 0 ? ((totalPaneerCS / productionReconciliation.paneerInputLitres) * 100).toFixed(1) : '—'}%
                   </span>
                 </td>
               </tr>
               <tr className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-900">Halloumi</td>
                 <td className="px-4 py-3 text-slate-700 font-medium">{totalHalloumi} kg</td>
-                <td className="px-4 py-3 text-slate-500">{currentWeekRounds.filter(r => r.type === 'Halloumi').length}</td>
+                <td className="px-4 py-3 text-slate-500">{completedRounds.filter(r => r.type === 'Halloumi').length}</td>
                 <td className="px-4 py-3 text-slate-500">—</td>
               </tr>
               <tr className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-900">Recovered Cream</td>
-                <td className="px-4 py-3 text-slate-700 font-medium">12 L</td>
+                <td className="px-4 py-3 text-slate-700 font-medium">{productionReconciliation.cream.toFixed(2)} kg</td>
                 <td className="px-4 py-3 text-slate-500">Co-product</td>
                 <td className="px-4 py-3 text-slate-500">—</td>
               </tr>
               <tr className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-900">PAN111 (Recovered)</td>
-                <td className="px-4 py-3 text-slate-700 font-medium">4.2 kg</td>
+                <td className="px-4 py-3 text-slate-700 font-medium">{productionReconciliation.pan111.toFixed(2)} kg</td>
                 <td className="px-4 py-3 text-slate-500">Intermediate (not waste)</td>
                 <td className="px-4 py-3 text-slate-500">—</td>
               </tr>
@@ -260,10 +296,10 @@ export default function Reconciliation() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {productionRounds
-                .filter(r => r.milkLotCode === '160626' && r.locked)
+              {completedRounds
                 .map(round => {
-                  const yieldPct = round.actualInput > 0 ? ((round.outputWeight / round.actualInput) * 100).toFixed(1) : '—';
+                  const milkInput = getRoundMilkInput(round);
+                  const yieldPct = milkInput > 0 ? ((round.outputWeight / milkInput) * 100).toFixed(1) : '—';
                   return (
                     <tr key={round.id} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 font-mono text-xs font-bold text-slate-900">
@@ -272,7 +308,7 @@ export default function Reconciliation() {
                       <td className="px-4 py-2.5">
                         <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-bold">{round.type}</span>
                       </td>
-                      <td className="px-4 py-2.5 text-slate-600">{round.actualInput} L</td>
+                      <td className="px-4 py-2.5 text-slate-600">{milkInput} L</td>
                       <td className="px-4 py-2.5 text-slate-600">{round.outputWeight} kg</td>
                       <td className="px-4 py-2.5">
                         <span className={`font-medium ${
@@ -295,6 +331,13 @@ export default function Reconciliation() {
                     </tr>
                   );
                 })}
+              {completedRounds.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
+                    No completed rounds are recorded for this milk lot yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -361,27 +404,33 @@ export default function Reconciliation() {
         </section>
       )}
 
-      {/* Previous week comparison */}
+      {/* Previous lot comparison */}
       <div className="bg-slate-50 rounded-xl border border-slate-200 p-4">
-        <h3 className="text-sm font-semibold text-slate-900 mb-3">Previous Week Comparison (Lot 090626)</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-          <div>
-            <p className="text-xs text-slate-500">Received</p>
-            <p className="text-lg font-bold text-slate-900">24,000 L</p>
+        <h3 className="text-sm font-semibold text-slate-900 mb-3">
+          {previousLot ? `Previous Lot Comparison (${previousLot.lotCode})` : 'Previous Lot Comparison'}
+        </h3>
+        {previousLot && previousAccounting ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+            <div>
+              <p className="text-xs text-slate-500">Received</p>
+              <p className="text-lg font-bold text-slate-900">{previousLot.litresReceived.toLocaleString()} L</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Consumed</p>
+              <p className="text-lg font-bold text-slate-900">{previousAccounting.consumed.toLocaleString()} L</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Rejected</p>
+              <p className="text-lg font-bold text-red-600">{previousLot.litresRejected.toLocaleString()} L</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Unexplained</p>
+              <p className={`text-lg font-bold ${Math.abs(previousUnexplained) > 0.01 ? 'text-amber-600' : 'text-emerald-600'}`}>{previousUnexplained.toFixed(2)} L</p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-slate-500">Consumed</p>
-            <p className="text-lg font-bold text-slate-900">23,600 L</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500">Rejected</p>
-            <p className="text-lg font-bold text-red-600">200 L</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500">Unexplained</p>
-            <p className="text-lg font-bold text-amber-600">200 L</p>
-          </div>
-        </div>
+        ) : (
+          <p className="text-sm text-slate-500">No earlier milk lot is available for comparison.</p>
+        )}
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, milkStorageVessels } from '../data/mockData';
+import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, milkStorageVessels } from '../data/mockData';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, addMilkLot, updateMilkLot, addCreamLot } = useApp();
@@ -402,6 +402,7 @@ export default function MilkReceiving() {
               {(displayedLot ? [displayedLot] : []).map((lot) => {
                 const isExpanded = expandedLots.has(lot.id);
                 const lotAccounting = getMilkLotAccounting(lot, productionRounds);
+                const lotReconciliation = getMilkLotProductionReconciliation(lot, productionRounds);
                 const milkLeft = lotAccounting.remaining;
                 
                 return (
@@ -477,7 +478,7 @@ export default function MilkReceiving() {
                     </tr>
 
                     {/* Expanded Detail View */}
-                    {isExpanded && lot.reconciliation && (
+                    {isExpanded && (
                       <tr className="bg-slate-50">
                         <td colSpan={8} className="px-6 py-6">
                           <div className="space-y-6">
@@ -488,53 +489,54 @@ export default function MilkReceiving() {
                                 <h3 className="text-sm font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200">
                                   Production reconciliation · {lot.lotCode}
                                 </h3>
+                                <p className="mb-4 text-xs text-slate-500">Calculated from recorded production rounds. Milk input uses actual input when present, otherwise the started round’s planned input.</p>
                                 <div className="grid grid-cols-2 gap-x-6 gap-y-4">
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Paneer Recorded</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lot.reconciliation.paneerRecorded.toLocaleString()} kg
+                                      {lotReconciliation.paneerRecorded.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Yield (Milk/kg Paneer)</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lot.reconciliation.yieldLPerKg.toFixed(2)} L/kg
+                                      {lotReconciliation.yieldLPerKg.toFixed(2)} L/kg
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Paneer Yield per 100 L</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lot.reconciliation.paneerYieldPer100L.toFixed(2)} kg/100 L
+                                      {lotReconciliation.paneerYieldPer100L.toFixed(2)} kg/100 L
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">D Rounds</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lot.reconciliation.dRounds}
+                                      {lotReconciliation.dRounds}
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">C/S Rounds</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lot.reconciliation.csRounds}
+                                      {lotReconciliation.csRounds}
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Cream</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lot.reconciliation.cream.toFixed(2)} kg
+                                      {lotReconciliation.cream.toFixed(2)} kg
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">PAN111</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lot.reconciliation.pan111.toFixed(2)} kg
+                                      {lotReconciliation.pan111.toFixed(2)} kg
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-slate-300 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Paneer for SPP</p>
                                     <p className="text-xl font-bold text-slate-400 mt-1">
-                                      {lot.reconciliation.paneerForSpp.toFixed(2)} kg
+                                      {lotReconciliation.paneerForSpp.toFixed(2)} kg
                                     </p>
                                   </div>
                                 </div>

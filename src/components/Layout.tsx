@@ -17,6 +17,7 @@ import {
   Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useApp } from '../store/AppContext';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -39,6 +40,7 @@ const navItems = [
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
+  const { milkLots, productionShifts } = useApp();
   const isLocalDemo = import.meta.env.VITE_LOCAL_DEMO_MODE === 'true';
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [username, setUsername] = useState('');
@@ -47,6 +49,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const location = useLocation();
+
+  const latestMilkLot = [...milkLots].sort((a, b) => {
+    const aTime = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
+    const bTime = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
+    return bTime - aTime;
+  })[0];
+  const latestShift = [...productionShifts]
+    .filter((shift) => shift.milkLotId === latestMilkLot?.id || shift.milkLotCode === latestMilkLot?.lotCode)
+    .sort((a, b) => {
+      // Prefer the latest active shift. If none is active, fall back to the
+      // most recently started shift so the header never shows a fixed value.
+      const activeRank = Number(b.status === 'active') - Number(a.status === 'active');
+      if (activeRank !== 0) return activeRank;
+      return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+    })[0];
 
   useEffect(() => {
     window.localStorage.setItem('vejoy_theme', theme);
@@ -200,10 +217,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <option value="system">System Default</option>
             </select>
             <span className="hidden sm:inline text-sm text-slate-500">
-              Milk Lot: <span className="font-medium text-slate-700">ML-2026-W24</span>
+              Milk Lot: <span className="font-medium text-slate-700">{latestMilkLot?.lotCode || '—'}</span>
             </span>
             <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-full">
-              Shift 2
+              {latestShift ? `Shift ${latestShift.shiftNumber}` : 'No shift'}
             </span>
           </div>
         </header>

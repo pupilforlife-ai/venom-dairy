@@ -190,13 +190,25 @@ export function isMilkProductionRound(round: Pick<ProductionRound, 'type'>) {
 }
 
 /**
+ * Return the milk draw used for accounting a production round.
+ *
+ * A started round may not have an actual input recorded yet. In that case its
+ * planned input is the only defensible quantity until staff corrects it.
+ * Scheduled and cancelled rounds do not consume milk.
+ */
+export function getRoundMilkInput(round: Pick<ProductionRound, 'actualInput' | 'plannedInput' | 'status'>) {
+  if (round.status === 'scheduled' || round.status === 'cancelled') return 0;
+  return Math.max(0, round.actualInput > 0 ? round.actualInput : round.plannedInput);
+}
+
+/**
  * Use recorded round inputs when the round has a vessel assignment. Older
  * snapshots pre-date vessel tracking, so they continue to use the milk lot's
  * stored totals until a tracked round is actually started.
  */
 export function getMilkLotAccounting(lot: MilkLot, rounds: ProductionRound[]) {
   const trackedRounds = rounds.filter((round) =>
-    round.milkLotId === lot.id &&
+    (round.milkLotId === lot.id || round.milkLotCode === lot.lotCode) &&
     Boolean(round.sourceVessel) &&
     isMilkProductionRound(round) &&
     (round.actualInput > 0 || (
@@ -206,12 +218,49 @@ export function getMilkLotAccounting(lot: MilkLot, rounds: ProductionRound[]) {
     ))
   );
   const consumed = trackedRounds.length > 0
-    ? trackedRounds.reduce((total, round) => total + Math.max(0, round.actualInput || round.plannedInput), 0)
+    ? trackedRounds.reduce((total, round) => total + getRoundMilkInput(round), 0)
     : Math.max(0, lot.litresConsumed);
   const sold = Math.max(0, lot.litresSold || 0);
   const accountedOther = Math.max(0, lot.litresRejected) + Math.max(0, lot.litresSpilled);
   const remaining = Math.max(0, lot.litresReceived - consumed - sold - accountedOther);
   return { consumed, sold, remaining };
+}
+
+/**
+ * Calculate the live product reconciliation for one milk lot from its rounds.
+ * Stored `MilkLot.reconciliation` values are retained for legacy snapshots but
+ * must not be treated as the source of truth for current production.
+ */
+export function getMilkLotProductionReconciliation(lot: MilkLot, rounds: ProductionRound[]) {
+  const lotRounds = rounds.filter((round) => round.milkLotId === lot.id || round.milkLotCode === lot.lotCode);
+  const completedRounds = lotRounds.filter((round) => round.outputWeight > 0 && !['scheduled', 'cancelled', 'spoiled'].includes(round.status));
+  const accountedRounds = lotRounds.filter((round) => !['cancelled', 'spoiled'].includes(round.status));
+  const paneerRounds = completedRounds.filter((round) => round.type === 'D' || round.type === 'C/S');
+  const paneerRecorded = paneerRounds.reduce((total, round) => total + Math.max(0, round.outputWeight), 0);
+  const paneerInputLitres = paneerRounds.reduce((total, round) => total + getRoundMilkInput(round), 0);
+  const pan111 = accountedRounds.reduce((total, round) => {
+    if (round.pan111ApprovalStatus === 'approved') {
+      return total + Math.max(0, round.pan111RequestedWeight || 0);
+    }
+    return total + (round.packedSkus || [])
+      .filter((pack) => pack.sku === 'PAN111')
+      .reduce((weight, pack) => weight + Math.max(0, pack.weightKg || 0), 0);
+  }, 0);
+  const cream = accountedRounds.reduce((total, round) => total + Math.max(0, round.creamRecovered || 0), 0);
+  const paneerForSpp = accountedRounds.reduce((total, round) => total + Math.max(0, round.sppRecordedWeight || 0), 0);
+
+  return {
+    paneerRecorded,
+    yieldLPerKg: paneerRecorded > 0 ? paneerInputLitres / paneerRecorded : 0,
+    paneerYieldPer100L: paneerInputLitres > 0 ? (paneerRecorded / paneerInputLitres) * 100 : 0,
+    dRounds: paneerRounds.filter((round) => round.type === 'D').length,
+    csRounds: paneerRounds.filter((round) => round.type === 'C/S').length,
+    cream,
+    pan111,
+    paneerForSpp,
+    paneerInputLitres,
+    completedRounds: completedRounds.length,
+  };
 }
 
 export interface MilkStorageVessel {

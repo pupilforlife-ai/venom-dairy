@@ -24,7 +24,7 @@ import {
   Legend,
 } from 'recharts';
 import { useApp } from '../store/AppContext';
-import { getMilkLotAccounting, statusLabels } from '../data/mockData';
+import { getMilkLotAccounting, getRoundMilkInput, statusLabels } from '../data/mockData';
 
 type DashboardMetric = {
   label: string;
@@ -78,23 +78,37 @@ export default function Dashboard() {
   
   const activeMilkLot = milkLots.find((m) => m.status === 'active') ?? milkLots[0];
   const activeLotCode = activeMilkLot?.lotCode;
-  const activeLotRounds = productionRounds.filter((r) => r.milkLotCode === activeLotCode);
+  const activeLotRounds = productionRounds.filter((r) => r.milkLotCode === activeLotCode || r.milkLotId === activeMilkLot?.id);
   const milkAccounting = activeMilkLot
     ? getMilkLotAccounting(activeMilkLot, productionRounds)
     : { consumed: 0, sold: 0, remaining: 0 };
-  const activeRounds = activeLotRounds.filter((r) => r.status !== 'handed_over');
+  const activeRounds = activeLotRounds.filter((r) => !['handed_over', 'packed', 'frozen', 'cancelled', 'spoiled'].includes(r.status));
   const outOfRangeTemps = temperatureReadings.filter((t) => !t.inRange);
   const awaitingHandover = finishedStock.filter((f) => f.status === 'awaiting_handover');
-  const totalCases = awaitingHandover.reduce((s, f) => s + f.cases, 0);
+  const linkedPackingRunIds = new Set(finishedStock.map((stock) => stock.packingRunId).filter(Boolean));
+  const legacyAwaitingEntries = activeLotRounds
+    .filter((round) => !['handed_over', 'cancelled', 'spoiled'].includes(round.status))
+    .flatMap((round) => round.packedSkus || [])
+    .filter((packed) => !packed.packingRunId || !linkedPackingRunIds.has(packed.packingRunId));
+  const totalCases = awaitingHandover.reduce((s, f) => s + f.cases, 0) + legacyAwaitingEntries.reduce((s, packed) => s + packed.cases, 0);
+  const readyHandoverSkus = [
+    ...awaitingHandover.map((item) => item.sku),
+    ...legacyAwaitingEntries.map((item) => item.sku),
+  ].filter((sku, index, values) => values.indexOf(sku) === index);
   const totalOutput = activeLotRounds.reduce((s, r) => s + r.outputWeight, 0);
   const paneerRounds = activeLotRounds.filter((r) => r.type === 'D' || r.type === 'C/S');
   const paneerOutput = paneerRounds.reduce((s, r) => s + r.outputWeight, 0);
-  const paneerInput = paneerRounds.reduce((s, r) => s + r.actualInput, 0);
+  const paneerInput = paneerRounds.reduce((s, r) => s + getRoundMilkInput(r), 0);
   const paneerYield = paneerInput > 0 ? (paneerOutput / paneerInput) * 100 : 0;
   const totalWaste = wasteEvents.reduce((s, event) => s + event.quantity, 0);
-  const frozenStock = intermediateLots
-    .filter((lot) => lot.status !== 'consumed' && /frozen/i.test(lot.productName))
+  const intermediateSourceRoundIds = new Set(intermediateLots.map((lot) => lot.sourceBatchId));
+  const recordedFrozenStock = intermediateLots
+    .filter((lot) => lot.status !== 'consumed' && lot.currentQuantity > 0 && /freezer/i.test(lot.storageLocation))
     .reduce((s, lot) => s + lot.currentQuantity, 0);
+  const legacyFrozenRoundStock = activeLotRounds
+    .filter((round) => round.status === 'frozen' && !intermediateSourceRoundIds.has(round.id))
+    .reduce((s, round) => s + Math.max(0, round.remainingBalance ?? 0), 0);
+  const frozenStock = recordedFrozenStock + legacyFrozenRoundStock;
   const unexplainedMilk = activeMilkLot
     ? activeMilkLot.litresReceived - milkAccounting.consumed - milkAccounting.remaining
       - activeMilkLot.litresRejected - activeMilkLot.litresSpilled - milkAccounting.sold
@@ -149,19 +163,32 @@ export default function Dashboard() {
                   style={{ width: `${Math.min(100, (milkAccounting.consumed / activeMilkLot.litresReceived) * 100)}%` }}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-2 mt-3 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-3 text-center">
                 <div>
                   <p className="text-xs text-slate-400">Received</p>
                   <p className="text-sm font-bold text-slate-900">{activeMilkLot.litresReceived.toLocaleString()}L</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Consumed</p>
+                  <p className="text-sm font-bold text-slate-900">{milkAccounting.consumed.toLocaleString()}L</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Rejected</p>
+                  <p className="text-sm font-bold text-slate-700">{activeMilkLot.litresRejected.toLocaleString()}L</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-400">Spilled</p>
                   <p className="text-sm font-bold text-red-600">{activeMilkLot.litresSpilled}L</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400">Unexplained</p>
-                    <p className="text-sm font-bold text-amber-600">{unexplainedMilk.toLocaleString()}L</p>
+                  <p className="text-xs text-slate-400">Sold</p>
+                  <p className="text-sm font-bold text-slate-700">{milkAccounting.sold.toLocaleString()}L</p>
                 </div>
+              </div>
+              <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                <div className="font-semibold">Remaining = Received − Consumed − Rejected − Spilled − Sold</div>
+                <div className="mt-1 font-mono">{activeMilkLot.litresReceived.toLocaleString()} − {milkAccounting.consumed.toLocaleString()} − {activeMilkLot.litresRejected.toLocaleString()} − {activeMilkLot.litresSpilled.toLocaleString()} − {milkAccounting.sold.toLocaleString()} = {milkAccounting.remaining.toLocaleString()} L</div>
+                {Math.abs(unexplainedMilk) > 0.01 && <div className="mt-1 text-amber-700">Unexplained variance: {unexplainedMilk.toFixed(2)} L</div>}
               </div>
             </div>
           )}
@@ -186,7 +213,7 @@ export default function Dashboard() {
             <div className="flex items-start gap-2 p-2 bg-amber-50 rounded-lg">
               <ClipboardList className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
               <div>
-                <p className="text-xs font-medium text-amber-700">{activeRounds.filter(r => !['handed_over', 'packed'].includes(r.status)).length} rounds in production</p>
+                <p className="text-xs font-medium text-amber-700">{activeRounds.length} rounds in production</p>
                 <p className="text-xs text-amber-600">{activeRounds.filter((r) => r.status === 'pressing').length} pressing, {activeRounds.filter((r) => r.status === 'in_production').length} in production, {activeRounds.filter((r) => r.status === 'scheduled').length} scheduled</p>
               </div>
             </div>
@@ -194,7 +221,7 @@ export default function Dashboard() {
               <Package className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
               <div>
                 <p className="text-xs font-medium text-blue-700">{totalCases} cases awaiting handover</p>
-                <p className="text-xs text-blue-600">{awaitingHandover.map((item) => item.sku).join(', ') || 'None'}</p>
+                <p className="text-xs text-blue-600">{readyHandoverSkus.join(', ') || 'None'}</p>
               </div>
             </div>
             <div className="flex items-start gap-2 p-2 bg-emerald-50 rounded-lg">
