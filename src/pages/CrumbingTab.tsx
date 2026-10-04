@@ -12,6 +12,7 @@ type CrumbingStatus =
   | 'frozen'
   | 'frying'
   | 'packed'
+  | 'clubbed'
   | 'handed_over';
 
 type CrumbingType = 'SPP' | 'JP' | 'HCP';
@@ -22,6 +23,7 @@ const crumbingStatusLabels: Record<CrumbingStatus, string> = {
   frozen: 'Frozen',
   frying: 'Frying',
   packed: 'Packed',
+  clubbed: 'Clubbed into another SPP batch',
   handed_over: 'Handed Over',
 };
 
@@ -31,6 +33,7 @@ const crumbingStatusColors: Record<CrumbingStatus, string> = {
   frozen: 'bg-blue-500',
   frying: 'bg-red-500',
   packed: 'bg-emerald-500',
+  clubbed: 'bg-slate-500',
   handed_over: 'bg-emerald-700',
 };
 
@@ -40,6 +43,10 @@ interface CrumbingBatch {
   type: CrumbingType;
   sourceBatchId: string;
   sourceBatchCode: string;
+  clubbedInto?: string;
+  clubbedAt?: string;
+  clubbedBatchIds?: string[];
+  clubbedBatchCodes?: string[];
   // Manual SPP batches may come from paneer that is not represented by a
   // production round. Keep the origin on the batch for traceability.
   origin?: string;
@@ -91,7 +98,9 @@ export default function CrumbingTab() {
   const [showNewBatchModal, setShowNewBatchModal] = useState(false);
   const [showTrayModal, setShowTrayModal] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
+  const [showClubSppModal, setShowClubSppModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
+  const [clubSppBatchIds, setClubSppBatchIds] = useState<string[]>([]);
   const [activeType, setActiveType] = useState<CrumbingType>('SPP');
 
   // Forms
@@ -137,11 +146,13 @@ export default function CrumbingTab() {
   // recipe deliberately locks the source until its balance is recorded.
   const getSppAvailableWeight = (round: typeof productionRounds[number] | undefined) => {
     if (!round) return 0;
+    const allSourceBatches = crumbingBatches
+      .filter(batch => batch.type === 'SPP' && batch.sourceBatchId === round.id);
     const sourceBatches = crumbingBatches
-      .filter(batch => batch.type === 'SPP' && batch.sourceBatchId === round.id)
+      .filter(batch => batch.type === 'SPP' && batch.sourceBatchId === round.id && !batch.clubbedInto && !batch.clubbedBatchIds?.length)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const latestBatch = sourceBatches[sourceBatches.length - 1];
-    if (!latestBatch) return getSppSourceWeight(round);
+    if (!latestBatch) return allSourceBatches.length > 0 ? 0 : getSppSourceWeight(round);
     return latestBatch.balanceWeightKg === undefined ? 0 : Math.max(0, latestBatch.balanceWeightKg);
   };
 
@@ -366,6 +377,102 @@ export default function CrumbingTab() {
       });
     }
     setNewBatchForm({ type: 'SPP', sourceBatchId: '', manualPaneerWeightKg: 0, manualOrigin: '', halloumiWeightKg: 0, traysCrumbed: 0, crumbingTeam: '' });
+  };
+
+  const getClubEligibleSppBatches = () => crumbingBatches
+    .filter(batch =>
+      batch.type === 'SPP' &&
+      batch.status === 'crumbing' &&
+      !batch.clubbedInto &&
+      !batch.clubbedBatchIds?.length &&
+      Boolean(batch.productionCompletedAt) &&
+      Boolean(batch.recipe) &&
+      batch.traysFried === 0 &&
+      batch.traysPacked === 0
+    )
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  const handleClubSppBatches = () => {
+    const selected = getClubEligibleSppBatches().filter(batch => clubSppBatchIds.includes(batch.id));
+    if (selected.length < 2) {
+      showToast('error', 'Select at least two completed SPP batches to club');
+      return;
+    }
+
+    const primary = selected[0];
+    const now = new Date().toISOString();
+    const sum = (read: (batch: CrumbingBatch) => number) => selected.reduce((total, batch) => total + (read(batch) || 0), 0);
+    const flavourMultiplier = sum(batch => batch.recipe?.flavourMultiplier || 0);
+    const batterMultiplier = sum(batch => batch.recipe?.batterMultiplier || 0);
+    const breadingMultiplier = sum(batch => batch.recipe?.breadingMultiplier || 0);
+    const sourceWeightKg = sum(batch => batch.sourceWeightKg || 0);
+    const balanceWeightKg = sum(batch => batch.balanceWeightKg || 0);
+    const weightCrumbedKg = sum(batch => batch.weightCrumbedKg || 0);
+    const wastageKg = sum(batch => batch.wastageKg || 0);
+    const traysCrumbed = sum(batch => batch.traysCrumbed);
+    const clubbedBatchIds = selected.map(batch => batch.id);
+    const clubbedBatchCodes = selected.map(batch => batch.batchCode);
+
+    setCrumbingBatches(current => current.map(batch => {
+      if (batch.id === primary.id) {
+        return {
+          ...batch,
+          status: 'crumbing',
+          sourceBatchCode: clubbedBatchCodes.join(' + '),
+          sourceWeightKg,
+          balanceWeightKg,
+          weightCrumbedKg,
+          wastageKg,
+          traysCrumbed,
+          traysRemaining: traysCrumbed,
+          traysFried: 0,
+          traysPacked: 0,
+          packedSkus: undefined,
+          recipe: {
+            flavourMultiplier,
+            batterMultiplier,
+            breadingMultiplier,
+            flavourIyababKg: sum(batch => batch.recipe?.flavourIyababKg || 0),
+            flavourPredustKg: sum(batch => batch.recipe?.flavourPredustKg || 0),
+            batterIyababaKg: sum(batch => batch.recipe?.batterIyababaKg || 0),
+            batterWaterL: sum(batch => batch.recipe?.batterWaterL || 0),
+            breadingAdajioKg: sum(batch => batch.recipe?.breadingAdajioKg || 0),
+          },
+          recipeRecordedAt: now,
+          recipeAutosavedAt: now,
+          balanceRecordedAt: now,
+          productionCompletedAt: now,
+          clubbedAt: now,
+          clubbedBatchIds,
+          clubbedBatchCodes,
+          notes: `${batch.notes ? `${batch.notes}\n` : ''}Clubbed SPP batches: ${clubbedBatchCodes.join(', ')}`,
+        };
+      }
+      if (clubbedBatchIds.includes(batch.id)) {
+        return {
+          ...batch,
+          status: 'clubbed',
+          clubbedInto: primary.id,
+          clubbedAt: now,
+        };
+      }
+      return batch;
+    }));
+
+    setSelectedBatch(primary.id);
+    setRecipeForm({
+      sourceWeightKg,
+      balanceWeightKg,
+      balanceRecorded: true,
+      wastageKg,
+      traysCrumbed,
+      flavourMultiplier,
+      batterMultiplier,
+      breadingMultiplier,
+    });
+    setClubSppBatchIds([]);
+    setShowClubSppModal(false);
+    showToast('success', `Clubbed ${selected.length} SPP batches · ${traysCrumbed} trays ready for combined packing`);
   };
 
   const handleCompleteProduction = () => {
@@ -697,24 +804,36 @@ export default function CrumbingTab() {
                 {type === 'HCP' && 'Halloumi Cheese Poppers - 250g packets, 12 packets/case'}
               </p>
             </div>
-            <button
-              onClick={() => {
-                setActiveType(type);
-                setNewBatchForm({
-                  ...newBatchForm,
-                  type,
-                  sourceBatchId: '',
-                  manualPaneerWeightKg: 0,
-                  manualOrigin: '',
-                  halloumiWeightKg: 0,
-                  traysCrumbed: 0,
-                });
-                setShowNewBatchModal(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-pink-600 text-white hover:bg-pink-700"
-            >
-              <Plus className="w-4 h-4" /> New Batch
-            </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {type === 'SPP' && (
+                <button
+                  type="button"
+                  disabled={getClubEligibleSppBatches().length < 2}
+                  onClick={() => { setClubSppBatchIds([]); setShowClubSppModal(true); }}
+                  className="rounded-lg border border-pink-300 bg-white px-3 py-2 text-sm font-medium text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Club completed batches
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setActiveType(type);
+                  setNewBatchForm({
+                    ...newBatchForm,
+                    type,
+                    sourceBatchId: '',
+                    manualPaneerWeightKg: 0,
+                    manualOrigin: '',
+                    halloumiWeightKg: 0,
+                    traysCrumbed: 0,
+                  });
+                  setShowNewBatchModal(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-pink-600 text-white hover:bg-pink-700"
+              >
+                <Plus className="w-4 h-4" /> New Batch
+              </button>
+            </div>
           </div>
         </div>
 
@@ -745,6 +864,7 @@ export default function CrumbingTab() {
                     <td className="px-4 py-3">
                       <div className="text-xs text-slate-600">{batch.sourceBatchCode}</div>
                       {batch.origin && <div className="mt-1 text-[11px] text-slate-500">Origin: {batch.origin}</div>}
+                      {batch.clubbedBatchCodes && <div className="mt-1 text-[11px] font-medium text-pink-700">Clubbed from {batch.clubbedBatchCodes.length} SPP batches</div>}
                       {(batch.type === 'SPP' || batch.type === 'HCP') && batch.sourceWeightKg !== undefined && <div className="mt-1 text-[11px] text-pink-700">{batch.sourceWeightKg.toFixed(2)} kg source</div>}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">
@@ -765,13 +885,13 @@ export default function CrumbingTab() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600 text-xs">
-                      {batch.traysCrumbed} trays
+                      {batch.status === 'clubbed' ? '—' : `${batch.traysCrumbed} trays`}
                       {batch.crumbingTeam && (
                         <div className="text-slate-400">by {batch.crumbingTeam}</div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-600 text-xs">
-                      {batch.traysFried} trays
+                      {batch.status === 'clubbed' ? '—' : `${batch.traysFried} trays`}
                       {batch.fryingTeam && (
                         <div className="text-slate-400">by {batch.fryingTeam}</div>
                       )}
@@ -780,7 +900,7 @@ export default function CrumbingTab() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-orange-600 text-xs font-medium">
-                      {batch.traysRemaining} trays
+                      {batch.status === 'clubbed' ? '—' : `${batch.traysRemaining} trays`}
                     </td>
                     <td className="px-4 py-3">
                       {batch.packedSkus && batch.packedSkus.length > 0 ? (
@@ -861,8 +981,8 @@ export default function CrumbingTab() {
         <div className="grid grid-cols-3 gap-2" role="tablist" aria-label="Crumbing product">
           {productTabs.map(tab => {
             const isActive = activeType === tab.type;
-            const openCount = tab.batches.filter(batch => batch.status !== 'handed_over').length;
-            const needsAttention = tab.batches.some(batch => batch.status !== 'handed_over');
+            const openCount = tab.batches.filter(batch => !['handed_over', 'clubbed'].includes(batch.status)).length;
+            const needsAttention = tab.batches.some(batch => !['handed_over', 'clubbed'].includes(batch.status));
             return (
               <button
                 key={tab.type}
@@ -885,6 +1005,46 @@ export default function CrumbingTab() {
       {activeType === 'SPP' && renderBatchSection('SPP - Spicy Paneer Poppers', sppBatches, 'SPP')}
       {activeType === 'JP' && renderBatchSection('JP - Jalapeño Poppers', jpBatches, 'JP')}
       {activeType === 'HCP' && renderBatchSection('HCP - Halloumi Cheese Poppers', hcpBatches, 'HCP')}
+
+      <Modal isOpen={showClubSppModal} onClose={() => setShowClubSppModal(false)} title="Club SPP batches">
+        <div className="space-y-4">
+          <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-sm text-pink-950">
+            Select two or more completed SPP batches that have not been fried or packed. Their source weights, recipe additions, wastage, and tray counts will be added into one combined batch for frying and packing.
+          </div>
+          <div className="space-y-2">
+            {getClubEligibleSppBatches().map(batch => {
+              const checked = clubSppBatchIds.includes(batch.id);
+              return (
+                <label key={batch.id} className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${checked ? 'border-pink-300 bg-pink-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => setClubSppBatchIds(current => event.target.checked ? [...current, batch.id] : current.filter(id => id !== batch.id))}
+                    className="mt-1"
+                  />
+                  <span className="min-w-0 flex-1 text-sm text-slate-700">
+                    <span className="font-semibold text-slate-900">{batch.batchCode}</span>
+                    <span className="block text-xs text-slate-500">{(batch.sourceWeightKg || 0).toFixed(2)} kg source · {batch.traysCrumbed} trays · F {batch.recipe?.flavourMultiplier || 0} · B {batch.recipe?.batterMultiplier || 0} · A {batch.recipe?.breadingMultiplier || 0}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {clubSppBatchIds.length >= 2 && (() => {
+            const selected = getClubEligibleSppBatches().filter(batch => clubSppBatchIds.includes(batch.id));
+            const sum = (read: (batch: CrumbingBatch) => number) => selected.reduce((total, batch) => total + (read(batch) || 0), 0);
+            return (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                Combined: <strong>{sum(batch => batch.sourceWeightKg || 0).toFixed(2)} kg source</strong> · <strong>{sum(batch => batch.traysCrumbed)} trays</strong> · F {sum(batch => batch.recipe?.flavourMultiplier || 0)} · B {sum(batch => batch.recipe?.batterMultiplier || 0)} · A {sum(batch => batch.recipe?.breadingMultiplier || 0)}
+              </div>
+            );
+          })()}
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={handleClubSppBatches} disabled={clubSppBatchIds.length < 2} className="flex-1 rounded-lg bg-pink-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-pink-700 disabled:cursor-not-allowed disabled:bg-slate-300">Club selected batches</button>
+            <button type="button" onClick={() => setShowClubSppModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button>
+          </div>
+        </div>
+      </Modal>
 
       {/* New Batch Modal */}
       <Modal isOpen={showNewBatchModal} onClose={() => setShowNewBatchModal(false)} title={`Create New ${activeType} Batch`}>
