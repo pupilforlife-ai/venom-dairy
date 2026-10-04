@@ -41,6 +41,29 @@ export interface PackedSku {
 // preserving type-safe access everywhere rounds are displayed or audited.
 export type ProductionPackedSku = PackedSku & { loose: number };
 
+export interface ProductionRoundTypeChange {
+  from: 'D' | 'C/S';
+  to: 'D' | 'C/S';
+  changedAt: string;
+  changedBy: string;
+  reason: string;
+  requestedBy?: string;
+  requestedAt?: string;
+  decision?: 'approved' | 'rejected';
+}
+
+export interface ProductionRoundTypeChangeRequest {
+  status: 'pending' | 'approved' | 'rejected';
+  from: 'D' | 'C/S';
+  to: 'D' | 'C/S';
+  reason: string;
+  requestedAt: string;
+  requestedBy: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  decisionReason?: string;
+}
+
 export interface CreamLot {
   id: string;
   lotCode: string; // e.g. "02-160626"
@@ -314,6 +337,11 @@ export interface ProductionRound {
   shiftNumber: number;
   roundNumber: number;
   type: 'D' | 'C/S' | 'Halloumi' | 'Butter' | 'Ghee' | 'Amassi';
+  // Admin/owner-only corrections between the two Paneer workflows. Keeping
+  // this audit trail makes the correction visible without changing the round
+  // ID or any recorded production measurements.
+  typeChangeHistory?: ProductionRoundTypeChange[];
+  typeChangeRequest?: ProductionRoundTypeChangeRequest;
   // Status flow varies by product type - using string for flexibility
   status: string;
   team: string[];

@@ -17,6 +17,7 @@ import {
   History,
   Trash2,
   XCircle,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -87,12 +88,13 @@ export default function ProductionBoard() {
     cipRecords,
     advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
     addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot, updateIntermediateLot,
-    removeProductionRound, cancelProductionRound, addWasteEvent,
+    removeProductionRound, cancelProductionRound, addWasteEvent, requestProductionRoundTypeChange, reviewProductionRoundTypeChange,
     updateMilkLot, addFinishedStock, updateFinishedStock, addCipRecord, updateCipRecord
   } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
+  const canRequestTypeChange = ['staff', 'admin', 'owner'].includes(currentRole);
   const canEditCream = canForceStage;
   const isOwner = currentRole === 'owner';
   const editableStageOptions = [...statusFlow, 'chiller_storage', 'spp_pending', 'pan111_pending', 'spoilage_pending', 'spoiled', 'cancelled'] as string[];
@@ -120,6 +122,12 @@ export default function ProductionBoard() {
   const [showTemperatureModal, setShowTemperatureModal] = useState(false);
   const [showSppModal, setShowSppModal] = useState(false);
   const [showSpoilageModal, setShowSpoilageModal] = useState(false);
+  const [showTypeChangeModal, setShowTypeChangeModal] = useState(false);
+  const [typeChangeRoundId, setTypeChangeRoundId] = useState<string | null>(null);
+  const [typeChangeTarget, setTypeChangeTarget] = useState<'D' | 'C/S'>('D');
+  const [typeChangeReason, setTypeChangeReason] = useState('');
+  const [typeChangeReviewReason, setTypeChangeReviewReason] = useState('');
+  const [typeChangeConfirmed, setTypeChangeConfirmed] = useState(false);
   const [startingTemperature, setStartingTemperature] = useState<number | null>(null);
   const [selectedVat, setSelectedVat] = useState<'vat2' | 'vat3' | null>(null);
   const [collapsedShifts, setCollapsedShifts] = useState<Set<string>>(new Set());
@@ -1127,6 +1135,98 @@ export default function ProductionBoard() {
     if (cancelProductionRound(roundId, reason)) showToast('success', `${roundDisplayCode(round)} cancelled`);
   };
 
+  const openTypeChangeModal = (roundId: string) => {
+    if (!canRequestTypeChange) {
+      showToast('error', 'Approved staff, admins, and owners can submit a type-change request');
+      return;
+    }
+    const round = productionRounds.find(item => item.id === roundId);
+    if (!round || (round.type !== 'D' && round.type !== 'C/S')) return;
+    if (round.locked || ['handed_over', 'cancelled', 'spoiled'].includes(round.status)) {
+      showToast('error', 'Locked or closed rounds cannot be reclassified');
+      return;
+    }
+    if (round.typeChangeRequest?.status === 'pending') {
+      if (!canForceStage) return;
+      setTypeChangeTarget(round.typeChangeRequest.to);
+      setTypeChangeReason(round.typeChangeRequest.reason);
+      setTypeChangeReviewReason('');
+      setTypeChangeConfirmed(false);
+      setTypeChangeRoundId(roundId);
+      setShowTypeChangeModal(true);
+      return;
+    }
+    setTypeChangeRoundId(roundId);
+    setTypeChangeTarget(round.type === 'D' ? 'C/S' : 'D');
+    setTypeChangeReason('');
+    setTypeChangeReviewReason('');
+    setTypeChangeConfirmed(false);
+    setShowTypeChangeModal(true);
+  };
+
+  const handleTypeChangeRequest = async () => {
+    if (!typeChangeRoundId || !typeChangeConfirmed || typeChangeReason.trim().length < 5) {
+      showToast('error', 'Confirm the correction and enter a reason of at least 5 characters');
+      return;
+    }
+    const round = productionRounds.find(item => item.id === typeChangeRoundId);
+    if (!round) return;
+    try {
+      await requestProductionRoundTypeChange(typeChangeRoundId, typeChangeTarget, typeChangeReason);
+      showToast('success', `Type-change request submitted for ${roundDisplayCode(round)}; production can continue`);
+      setShowTypeChangeModal(false);
+      setTypeChangeRoundId(null);
+      setTypeChangeReason('');
+      setTypeChangeReviewReason('');
+      setTypeChangeConfirmed(false);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'The type-change request could not be submitted';
+      showToast('error', message);
+    }
+  };
+
+  const handleApproveTypeChange = async () => {
+    if (!typeChangeRoundId || !canForceStage || !typeChangeConfirmed) {
+      showToast('error', 'Confirm the approval before applying the type change');
+      return;
+    }
+    const round = productionRounds.find(item => item.id === typeChangeRoundId);
+    if (!round) return;
+    try {
+      await reviewProductionRoundTypeChange(typeChangeRoundId, 'approve', typeChangeReviewReason);
+      showToast('success', `${roundDisplayCode(round)} approved as ${round.typeChangeRequest?.to || typeChangeTarget}`);
+      setShowTypeChangeModal(false);
+      setTypeChangeRoundId(null);
+      setTypeChangeReason('');
+      setTypeChangeReviewReason('');
+      setTypeChangeConfirmed(false);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'The type-change request could not be approved';
+      showToast('error', message);
+    }
+  };
+
+  const handleRejectTypeChange = async () => {
+    if (!typeChangeRoundId || !canForceStage || typeChangeReviewReason.trim().length < 5) {
+      showToast('error', 'Enter a rejection note of at least 5 characters');
+      return;
+    }
+    const round = productionRounds.find(item => item.id === typeChangeRoundId);
+    if (!round) return;
+    try {
+      await reviewProductionRoundTypeChange(typeChangeRoundId, 'reject', typeChangeReviewReason);
+      showToast('success', `Type-change request for ${roundDisplayCode(round)} rejected; production can continue as ${round.type}`);
+      setShowTypeChangeModal(false);
+      setTypeChangeRoundId(null);
+      setTypeChangeReason('');
+      setTypeChangeReviewReason('');
+      setTypeChangeConfirmed(false);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'The type-change request could not be rejected';
+      showToast('error', message);
+    }
+  };
+
   const getLatestActiveShift = () => {
     return productionShifts
       .filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId && !pendingCipForShift(s))
@@ -1817,6 +1917,9 @@ export default function ProductionBoard() {
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             <span className="inline-flex rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm font-bold text-slate-700">{round.type}</span>
+                            {canRequestTypeChange && (round.type === 'D' || round.type === 'C/S') && round.typeChangeRequest?.status === 'pending' && canForceStage && <button type="button" onClick={() => openTypeChangeModal(round.id)} className="mt-1 flex w-fit items-center gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800 hover:bg-amber-100"><ArrowLeftRight className="h-3 w-3" /> Review request</button>}
+                            {canRequestTypeChange && (round.type === 'D' || round.type === 'C/S') && round.typeChangeRequest?.status === 'pending' && !canForceStage && <span className="mt-1 flex w-fit items-center gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800"><Clock className="h-3 w-3" /> Change pending · production continues</span>}
+                            {canRequestTypeChange && (round.type === 'D' || round.type === 'C/S') && round.typeChangeRequest?.status !== 'pending' && <button type="button" onClick={() => openTypeChangeModal(round.id)} className="mt-1 flex w-fit items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-semibold text-indigo-700 hover:bg-indigo-100"><ArrowLeftRight className="h-3 w-3" /> Request type change</button>}
                             {round.creamRecovered !== undefined && <button type="button" onClick={() => openCreamDetails(round.id)} className="mt-1 flex w-fit whitespace-nowrap rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Cream {round.creamRecovered.toFixed(2)} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</button>}
                             {renderCreamAction(round)}
                           </td>
@@ -1956,6 +2059,53 @@ export default function ProductionBoard() {
       {/* Modals - only show for paneer tab */}
       {activeTab === 'paneer' && (
       <>
+      {/* Paneer type-change request/review */}
+      <Modal isOpen={showTypeChangeModal} onClose={() => { setShowTypeChangeModal(false); setTypeChangeRoundId(null); }} title="Paneer type-change request">
+        {typeChangeRoundId && (() => {
+          const round = productionRounds.find(item => item.id === typeChangeRoundId);
+          if (!round) return <p className="text-sm text-slate-500">Round not found.</p>;
+          const pendingRequest = round.typeChangeRequest?.status === 'pending' ? round.typeChangeRequest : undefined;
+          const hasDownstreamEvidence = Boolean(
+            round.outputWeight > 0 ||
+            round.blockWeights?.length ||
+            round.packedSkus?.length ||
+            round.creamRecovered !== undefined ||
+            round.sppRecordedWeight !== undefined ||
+            round.cuttingType ||
+            round.remainingBalance !== undefined ||
+            intermediateLots.some(lot => lot.sourceBatchId === round.id)
+          );
+          return <div className="space-y-4">
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
+              <p className="font-semibold">{roundDisplayCode(round)} · Milk lot {round.milkLotCode}</p>
+              <p className="mt-1 text-xs">The current type remains <strong>{round.type}</strong> while the request is reviewed. Production can continue normally.</p>
+            </div>
+            {pendingRequest && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><strong>Pending request:</strong> {pendingRequest.from} → {pendingRequest.to} · requested by {pendingRequest.requestedBy} · {new Date(pendingRequest.requestedAt).toLocaleString('en-GB')}</div>}
+            {hasDownstreamEvidence && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">This round already has cutting, output, packing, cream, or downstream stock data. Admin/owner approval is blocked to protect ingredient and stock genealogy; the request can be rejected while production continues.</div>}
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Requested type</label>
+              <select value={typeChangeTarget} onChange={(event) => setTypeChangeTarget(event.target.value as 'D' | 'C/S')} disabled={Boolean(pendingRequest)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50">
+                <option value="D">D · Direct / Malai Paneer</option>
+                <option value="C/S">C/S · Rozana Paneer</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Request reason</label>
+              <textarea value={typeChangeReason} onChange={(event) => setTypeChangeReason(event.target.value)} disabled={Boolean(pendingRequest)} rows={3} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50" placeholder="e.g. Round was entered as C/S by mistake before production started" />
+            </div>
+            {pendingRequest && canForceStage && <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Admin/owner review note {hasDownstreamEvidence ? '(required to reject)' : '(optional for approval)'}</label><textarea value={typeChangeReviewReason} onChange={(event) => setTypeChangeReviewReason(event.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Record the approval or rejection note" /></div>}
+            <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <input type="checkbox" checked={typeChangeConfirmed} onChange={(event) => setTypeChangeConfirmed(event.target.checked)} className="mt-0.5" />
+              <span>{pendingRequest && canForceStage ? 'I confirm I reviewed the request and the ingredient/stock implications.' : 'I confirm this is a data-entry correction request; production must continue using the current type until approval.'}</span>
+            </label>
+            <div className="flex gap-2 pt-2">
+              {pendingRequest && canForceStage ? <><button type="button" onClick={() => void handleApproveTypeChange()} disabled={hasDownstreamEvidence || !typeChangeConfirmed} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Approve request</button><button type="button" onClick={() => void handleRejectTypeChange()} disabled={typeChangeReviewReason.trim().length < 5} className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300">Reject</button></> : <button type="button" onClick={() => void handleTypeChangeRequest()} disabled={Boolean(pendingRequest) || !typeChangeConfirmed || typeChangeReason.trim().length < 5} className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">Submit for approval</button>}
+              <button type="button" onClick={() => { setShowTypeChangeModal(false); setTypeChangeRoundId(null); }} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button>
+            </div>
+          </div>;
+        })()}
+      </Modal>
+
       {/* Cut Modal */}
       <Modal isOpen={showCutModal} onClose={() => setShowCutModal(false)} title={selectedRound && productionRounds.find(item => item.id === selectedRound)?.status === 'clingwrapped' ? 'Record Final Cutting' : 'Record Cutting'} size="lg">
         <div className="space-y-4">
@@ -2311,6 +2461,25 @@ export default function ProductionBoard() {
             stage: 'Scheduled',
             time: new Date(round.startTime).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
             details: `Round created for ${round.plannedInput}L`
+          });
+
+          if (round.typeChangeRequest) {
+            const request = round.typeChangeRequest;
+            history.push({
+              stage: `Type-change request ${request.status}`,
+              time: request.decidedAt || request.requestedAt
+                ? new Date(request.decidedAt || request.requestedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                : '',
+              details: `${request.from} → ${request.to} · ${request.reason} · Requested by ${request.requestedBy}${request.decidedBy ? ` · Reviewed by ${request.decidedBy}` : ''}${request.decisionReason ? ` · ${request.decisionReason}` : ''}`,
+            });
+          }
+
+          round.typeChangeHistory?.forEach(change => {
+            history.push({
+              stage: `Type corrected: ${change.from} → ${change.to}`,
+              time: change.changedAt ? new Date(change.changedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
+              details: `${change.reason} · By ${change.changedBy || 'Admin'}`,
+            });
           });
           
           if (round.vat) {

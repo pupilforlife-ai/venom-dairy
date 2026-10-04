@@ -55,6 +55,8 @@ interface AppContextType extends AppState {
   removeProductionRound: (id: string) => boolean;
   cancelProductionRound: (id: string, reason?: string) => boolean;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
+  requestProductionRoundTypeChange: (id: string, newType: 'D' | 'C/S', reason: string) => Promise<boolean>;
+  reviewProductionRoundTypeChange: (id: string, decision: 'approve' | 'reject', decisionReason?: string) => Promise<boolean>;
   advanceRoundStatus: (id: string) => void;
   forceAdvanceRoundStatus: (id: string) => Promise<boolean>;
   recordRoundOutput: (id: string, outputWeight: number, notes?: string) => void;
@@ -259,6 +261,113 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ));
   };
 
+  const hasRoundTypeDownstreamEvidence = (round: ProductionRound) => Boolean(
+    round.outputWeight > 0 ||
+    round.blockWeights?.length ||
+    round.packedSkus?.length ||
+    round.creamRecovered !== undefined ||
+    round.sppRecordedWeight !== undefined ||
+    round.cuttingType ||
+    round.remainingBalance !== undefined ||
+    intermediateLots.some(lot => lot.sourceBatchId === round.id)
+  );
+
+  const requestProductionRoundTypeChange = async (id: string, newType: 'D' | 'C/S', reason: string) => {
+    const round = productionRounds.find(item => item.id === id);
+    if (!round || (round.type !== 'D' && round.type !== 'C/S')) {
+      throw new Error('Only Paneer rounds can be changed between C/S and Direct');
+    }
+    if (round.type === newType) {
+      throw new Error('The round already has that type');
+    }
+    if (round.locked || ['handed_over', 'cancelled', 'spoiled'].includes(round.status)) {
+      throw new Error('Locked or closed rounds cannot be reclassified');
+    }
+    if (round.typeChangeRequest?.status === 'pending') {
+      throw new Error('This round already has a pending type-change request');
+    }
+    if (reason.trim().length < 5) {
+      throw new Error('Enter a reason of at least 5 characters');
+    }
+
+    if (supabase) {
+      const { data, error } = await supabase.rpc('request_production_round_type_change', {
+        round_id: id,
+        new_type: newType,
+        reason: reason.trim(),
+      });
+      if (error) {
+        console.error('Error changing production round type:', error);
+        throw new Error(error.message || 'The server could not submit this type-change request');
+      }
+      if (!data) throw new Error('The server returned no updated round');
+      setProductionRounds(current => current.map(item => item.id === id ? data as ProductionRound : item));
+      return true;
+    }
+
+    const changedAt = new Date().toISOString();
+    const changedBy = typeof window === 'undefined' ? 'local user' : window.localStorage.getItem('vejoy_user_username') || 'local user';
+    setProductionRounds(current => current.map(item => item.id === id ? {
+      ...item,
+      typeChangeRequest: {
+        status: 'pending',
+        from: item.type as 'D' | 'C/S',
+        to: newType,
+        reason: reason.trim(),
+        requestedAt: changedAt,
+        requestedBy: changedBy,
+      },
+    } : item));
+    return true;
+  };
+
+  const reviewProductionRoundTypeChange = async (id: string, decision: 'approve' | 'reject', decisionReason = '') => {
+    const round = productionRounds.find(item => item.id === id);
+    const request = round?.typeChangeRequest;
+    if (!round || !request || request.status !== 'pending') {
+      throw new Error('There is no pending type-change request for this round');
+    }
+    if (decision === 'approve' && hasRoundTypeDownstreamEvidence(round)) {
+      throw new Error('Approval is blocked because cutting, output, cream, packing, or downstream stock is already recorded');
+    }
+
+    if (supabase) {
+      const { data, error } = await supabase.rpc('review_production_round_type_change', {
+        round_id: id,
+        decision,
+        decision_reason: decisionReason.trim() || null,
+      });
+      if (error) {
+        console.error('Error reviewing production round type change:', error);
+        throw new Error(error.message || 'The server could not review this type-change request');
+      }
+      if (!data) throw new Error('The server returned no reviewed round');
+      setProductionRounds(current => current.map(item => item.id === id ? data as ProductionRound : item));
+      return true;
+    }
+
+    const now = new Date().toISOString();
+    const decidedBy = typeof window === 'undefined' ? 'local admin' : window.localStorage.getItem('vejoy_user_username') || 'local admin';
+    if (decision === 'reject') {
+      setProductionRounds(current => current.map(item => item.id === id ? {
+        ...item,
+        typeChangeRequest: { ...request, status: 'rejected', decidedAt: now, decidedBy, decisionReason: decisionReason.trim() || undefined },
+      } : item));
+      return true;
+    }
+
+    setProductionRounds(current => current.map(item => item.id === id ? {
+      ...item,
+      type: request.to,
+      typeChangeRequest: { ...request, status: 'approved', decidedAt: now, decidedBy, decisionReason: decisionReason.trim() || undefined },
+      typeChangeHistory: [
+        ...(item.typeChangeHistory || []),
+        { from: request.from, to: request.to, changedAt: now, changedBy: decidedBy, reason: request.reason, requestedBy: request.requestedBy, requestedAt: request.requestedAt, decision: 'approved' },
+      ],
+    } : item));
+    return true;
+  };
+
   const advanceRoundStatus = (id: string) => {
     setProductionRounds(currentRounds => currentRounds.map(round => {
       if (round.id !== id) return round;
@@ -377,6 +486,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeProductionRound,
     cancelProductionRound,
     updateProductionRound,
+    requestProductionRoundTypeChange,
+    reviewProductionRoundTypeChange,
     advanceRoundStatus,
     forceAdvanceRoundStatus,
     recordRoundOutput,
