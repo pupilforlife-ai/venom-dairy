@@ -3,6 +3,8 @@ import {
   AlertCircle,
   ArrowRightLeft,
   Clock,
+  ChevronDown,
+  ChevronRight,
   GitBranch,
   Package,
   Snowflake,
@@ -11,6 +13,7 @@ import {
 import { Modal } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { useApp } from '../store/AppContext';
+import { FinishedStockLot, ProductionRound } from '../data/mockData';
 
 type Tab = 'intermediate' | 'finished';
 type TransferKind = 'intermediate' | 'finished';
@@ -34,10 +37,36 @@ function isCurrentFinishedStock(status: string) {
   return status !== 'handed_over';
 }
 
+function roundMatchesBatchCode(round: ProductionRound, sourceBatchCode: string) {
+  const source = sourceBatchCode.trim().toLowerCase();
+  if (!source) return false;
+  const candidates = [
+    round.batchCode,
+    round.sourceBatchCode,
+    `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}`,
+    `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`,
+  ].filter(Boolean).map(value => String(value).toLowerCase());
+  return candidates.includes(source);
+}
+
+interface FinishedSkuGroup {
+  sku: string;
+  productName: string;
+  cases: number;
+  loosePackets: number;
+  totalPackets: number;
+  weightKg: number;
+  looseWeightKg: number;
+  hasWeightKg: boolean;
+  hasLooseWeightKg: boolean;
+  lines: FinishedStockLot[];
+}
+
 export default function Inventory() {
   const {
     intermediateLots,
     finishedStock,
+    productionRounds,
     updateIntermediateLot,
     updateFinishedStock,
   } = useApp();
@@ -62,11 +91,55 @@ export default function Inventory() {
   const filteredFinished = finishedStock.filter(
     (stock) => locationFilter === 'all' || stock.storageLocation === locationFilter,
   );
+  const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
 
   const currentIntermediate = filteredIntermediate.filter((lot) =>
     isCurrentIntermediateStock(lot.status, lot.currentQuantity),
   );
   const currentFinished = filteredFinished.filter((stock) => isCurrentFinishedStock(stock.status));
+
+  const groupedFinished = useMemo<FinishedSkuGroup[]>(() => {
+    const groups = new Map<string, FinishedSkuGroup>();
+    filteredFinished.forEach((stock) => {
+      const existing = groups.get(stock.sku) || {
+        sku: stock.sku,
+        productName: stock.productName,
+        cases: 0,
+        loosePackets: 0,
+        totalPackets: 0,
+        weightKg: 0,
+        looseWeightKg: 0,
+        hasWeightKg: false,
+        hasLooseWeightKg: false,
+        lines: [],
+      };
+      existing.lines.push(stock);
+      if (isCurrentFinishedStock(stock.status)) {
+        existing.cases += stock.cases || 0;
+        existing.loosePackets += stock.loosePackets || 0;
+        existing.totalPackets += stock.totalPackets || 0;
+        if (stock.weightKg !== undefined) {
+          existing.weightKg += stock.weightKg;
+          existing.hasWeightKg = true;
+        }
+        if (stock.looseWeightKg !== undefined) {
+          existing.looseWeightKg += stock.looseWeightKg;
+          existing.hasLooseWeightKg = true;
+        }
+      }
+      groups.set(stock.sku, existing);
+    });
+    return [...groups.values()].sort((a, b) => a.productName.localeCompare(b.productName) || a.sku.localeCompare(b.sku));
+  }, [filteredFinished]);
+
+  const toggleSku = (sku: string) => {
+    setExpandedSkus(current => {
+      const next = new Set(current);
+      if (next.has(sku)) next.delete(sku);
+      else next.add(sku);
+      return next;
+    });
+  };
 
   const totalIntermediateKg = currentIntermediate
     .filter((lot) => lot.uom === 'kg')
@@ -236,6 +309,9 @@ export default function Inventory() {
 
       {activeTab === 'finished' && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 bg-indigo-50">
+            <p className="text-xs text-indigo-800"><strong>SKU summary:</strong> click any SKU to expand its packing runs, source batches, and linked production rounds.</p>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="bg-slate-50 text-left border-b border-slate-200">
@@ -245,28 +321,64 @@ export default function Inventory() {
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Loose</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Total Pkts</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Location</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Status</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Source Batches</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Action</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Batch History</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredFinished.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-medium">{item.sku}</code></td>
-                    <td className="px-4 py-3 font-medium text-slate-900">{item.productName}</td>
-                    <td className="px-4 py-3 text-slate-700 font-medium">{item.cases || 0}</td>
-                    <td className="px-4 py-3 text-slate-700">{item.loosePackets || 0}</td>
-                    <td className="px-4 py-3 text-slate-900 font-bold">{item.totalPackets || 0}{item.weightKg !== undefined ? ` · ${formatQuantity(item.weightKg)} kg` : item.looseWeightKg !== undefined ? ` · ${formatQuantity(item.looseWeightKg)} kg loose` : ''}</td>
-                    <td className="px-4 py-3"><span className="text-xs font-medium text-blue-600">{item.storageLocation}</span></td>
-                    <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${item.status === 'awaiting_handover' ? 'bg-amber-100 text-amber-700' : item.status === 'handed_over' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{item.status === 'awaiting_handover' ? 'Awaiting' : item.status === 'handed_over' ? 'Handed Over' : 'Returned'}</span></td>
-                    <td className="px-4 py-3"><div className="text-xs text-slate-500">{(item.sourceBatchCodes || []).map((code) => <code key={code} className="bg-slate-50 px-1 py-0.5 rounded mr-1">{code}</code>)}</div></td>
-                    <td className="px-4 py-3"><button type="button" onClick={() => openTransferModal('finished', item.id)} disabled={!isCurrentFinishedStock(item.status)} className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"><ArrowRightLeft className="w-3 h-3" />Move</button></td>
-                  </tr>
-                ))}
+                {groupedFinished.map((group) => {
+                  const isExpanded = expandedSkus.has(group.sku);
+                  const currentLines = group.lines.filter(item => isCurrentFinishedStock(item.status));
+                  const locationsForSku = [...new Set(currentLines.map(item => item.storageLocation))];
+                  const roundsForSku = [...new Map(group.lines.flatMap(item => (item.sourceBatchCodes || []).flatMap(code => productionRounds.filter(round => roundMatchesBatchCode(round, code)))).map(round => [round.id, round])).values()];
+                  return (
+                    <>
+                      <tr key={group.sku} className="cursor-pointer hover:bg-indigo-50" onClick={() => toggleSku(group.sku)} aria-expanded={isExpanded}>
+                        <td className="px-4 py-3"><div className="flex items-center gap-2"><span className="text-slate-400">{isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</span><code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700">{group.sku}</code></div></td>
+                        <td className="px-4 py-3 font-medium text-slate-900">{group.productName}</td>
+                        <td className="px-4 py-3 font-medium text-slate-700">{group.cases}</td>
+                        <td className="px-4 py-3 text-slate-700">{group.loosePackets}</td>
+                        <td className="px-4 py-3 font-bold text-slate-900">{group.totalPackets}{group.hasWeightKg ? ` · ${formatQuantity(group.weightKg)} kg` : group.hasLooseWeightKg ? ` · ${formatQuantity(group.looseWeightKg)} kg loose` : ''}</td>
+                        <td className="px-4 py-3"><div className="flex max-w-xs flex-wrap gap-1">{locationsForSku.length > 0 ? locationsForSku.map(location => <span key={location} className="text-xs font-medium text-blue-600">{location}</span>) : <span className="text-xs text-slate-400">No current stock</span>}</div></td>
+                        <td className="px-4 py-3"><span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700">{group.lines.length} batch{group.lines.length === 1 ? '' : 'es'} · {roundsForSku.length} round{roundsForSku.length === 1 ? '' : 's'}</span></td>
+                      </tr>
+                      {isExpanded && (
+                        <tr key={`${group.sku}-history`} className="bg-slate-50">
+                          <td colSpan={7} className="px-4 py-4">
+                            <div className="space-y-4">
+                              <div>
+                                <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Packing and batch history</h4>
+                                <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                                  <table className="w-full text-xs">
+                                    <thead><tr className="border-b border-slate-200 bg-slate-100 text-left text-slate-500"><th className="px-3 py-2">Packed</th><th className="px-3 py-2">Source batch(es)</th><th className="px-3 py-2">Quantity</th><th className="px-3 py-2">Location / status</th><th className="px-3 py-2">Action</th></tr></thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {group.lines.map(item => {
+                                        const lineRounds = [...new Map((item.sourceBatchCodes || []).flatMap(code => productionRounds.filter(round => roundMatchesBatchCode(round, code))).map(round => [round.id, round])).values()];
+                                        return <tr key={item.id} className="align-top">
+                                          <td className="px-3 py-2 text-slate-600">{new Date(item.createdAt).toLocaleString()}<div className="mt-1 font-mono text-[10px] text-slate-400">{item.packingRunId}</div></td>
+                                          <td className="px-3 py-2"><div className="flex max-w-sm flex-wrap gap-1">{(item.sourceBatchCodes || []).map((code, index) => <code key={`${code}-${index}`} className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-700">{code}</code>)}</div>{lineRounds.length > 0 && <div className="mt-1 text-[10px] text-indigo-700">Linked to {lineRounds.length} production round{lineRounds.length === 1 ? '' : 's'}</div>}</td>
+                                          <td className="px-3 py-2 font-medium text-slate-700">{item.cases || 0} cases · {item.loosePackets || 0} loose<div className="text-slate-500">{item.totalPackets || 0} packets{item.weightKg !== undefined ? ` · ${formatQuantity(item.weightKg)} kg` : item.looseWeightKg !== undefined ? ` · ${formatQuantity(item.looseWeightKg)} kg loose` : ''}</div></td>
+                                          <td className="px-3 py-2"><div className="text-slate-600">{item.storageLocation}</div><span className={`mt-1 inline-flex rounded-full px-2 py-0.5 font-medium ${item.status === 'awaiting_handover' ? 'bg-amber-100 text-amber-700' : item.status === 'handed_over' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{item.status === 'awaiting_handover' ? 'Awaiting' : item.status === 'handed_over' ? 'Handed Over' : 'Returned'}</span></td>
+                                          <td className="px-3 py-2"><button type="button" onClick={(event) => { event.stopPropagation(); openTransferModal('finished', item.id); }} disabled={!isCurrentFinishedStock(item.status)} className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"><ArrowRightLeft className="h-3 w-3" />Move</button></td>
+                                        </tr>;
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                              <div>
+                                <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Linked production rounds</h4>
+                                {roundsForSku.length > 0 ? <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{roundsForSku.map(round => <div key={round.id} className="rounded-lg border border-indigo-100 bg-indigo-50 p-3"><div className="font-mono text-xs font-semibold text-indigo-800">{round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}</div><div className="mt-1 text-xs text-indigo-700">{round.type} · {round.status}</div><div className="mt-1 text-xs text-indigo-600">Output: {formatQuantity(round.outputWeight || 0)} kg</div></div>)}</div> : <p className="mt-2 text-xs text-slate-500">No matching production-round record was found for these batch codes.</p>}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          {filteredFinished.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">No finished stock at this location.</div>}
+          {groupedFinished.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">No finished stock at this location.</div>}
         </div>
       )}
 
