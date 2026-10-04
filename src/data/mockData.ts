@@ -517,11 +517,15 @@ export interface UtilityLog {
 
 export type CipFrequency = 'daily' | 'weekly';
 export type CipCycle = 'sh8000' | 'acid' | 'caustic' | 'weekly_full';
+export type CipStatus = 'completed' | 'handed_over';
 
 export interface CipRecord {
   id: string;
   frequency: CipFrequency;
   cycle: CipCycle;
+  // Older records pre-date the handover workflow and are treated as completed
+  // when this field is absent.
+  status?: CipStatus;
   milkLotId: string;
   milkLotCode: string;
   shiftId?: string;
@@ -543,6 +547,15 @@ export interface CipRecord {
   acidExtensionMinutes?: number;
   supervisorName?: string;
   supervisorSignedOffAt?: string;
+  handedOverAt?: string;
+  handedOverBy?: string;
+  handoverToShiftId?: string;
+  handoverToShiftNumber?: number;
+  handoverAcceptedAt?: string;
+  handoverAcceptedBy?: string;
+  completionShiftId?: string;
+  completionShiftNumber?: number;
+  completedBy?: string;
 }
 
 // ============================================================

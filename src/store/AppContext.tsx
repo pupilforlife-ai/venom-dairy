@@ -78,6 +78,7 @@ interface AppContextType extends AppState {
 
   // CIP actions
   addCipRecord: (record: Omit<CipRecord, 'id'>) => void;
+  updateCipRecord: (id: string, updates: Partial<CipRecord>) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -347,6 +348,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const updateCipRecord = (id: string, updates: Partial<CipRecord>) => {
+    setCipRecords(currentRecords => currentRecords.map(record =>
+      record.id === id ? { ...record, ...updates } : record
+    ));
+  };
+
   const value: AppContextType = {
     milkLots,
     creamLots,
@@ -381,6 +388,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateFinishedStock,
     addUtilityLog,
     addCipRecord,
+    updateCipRecord,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

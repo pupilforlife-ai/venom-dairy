@@ -298,6 +298,7 @@ export default function MilkReceiving() {
       addCipRecord({
         frequency: 'weekly',
         cycle: 'weekly_full',
+        status: 'completed',
         milkLotId: lot.id,
         milkLotCode: lot.lotCode,
         performedAt: new Date().toISOString(),

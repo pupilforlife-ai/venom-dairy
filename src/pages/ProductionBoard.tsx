@@ -21,8 +21,8 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getCreamBatchCode, milkProductionVessels, statusFlow, statusLabels, statusColors } from '../data/mockData';
-import { dailyCipChecklist, dailyCipOptionalSteps } from '../data/cip';
+import { getCreamBatchCode, milkProductionVessels, statusFlow, statusLabels, statusColors, CipRecord } from '../data/mockData';
+import { CipChecklistStep, dailyCipChecklist, dailyCipOptionalSteps, weeklyAcidCipChecklist, weeklyAcidCipOptionalSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import HalloumiTab from './HalloumiTab';
 import AmassiTab from './AmassiTab';
@@ -57,6 +57,30 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
   );
 }
 
+function CipAuditChecklist({ title, steps, completedSteps }: { title: string; steps: CipChecklistStep[]; completedSteps: string[] }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">{title}</p>
+      {steps.map(step => {
+        const complete = completedSteps.includes(step.id);
+        return (
+          <div key={step.id} className={`flex items-start gap-2 rounded-lg border p-2.5 text-sm ${complete ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+            {complete ? <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <Circle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
+            <span>{step.label}{step.required === false ? ' (optional)' : ''}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function cipCycleLabel(record: CipRecord) {
+  if (record.frequency === 'weekly') return 'Weekly SH8000 + Scale Bright';
+  if (record.cycle === 'acid') return 'Scale Bright acid cycle';
+  if (record.cycle === 'caustic') return 'Caustic cycle';
+  return 'SH8000 cycle';
+}
+
 export default function ProductionBoard() {
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots, finishedStock,
@@ -64,7 +88,7 @@ export default function ProductionBoard() {
     advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
     addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot, updateIntermediateLot,
     removeProductionRound, cancelProductionRound, addWasteEvent,
-    updateMilkLot, addFinishedStock, updateFinishedStock, addCipRecord
+    updateMilkLot, addFinishedStock, updateFinishedStock, addCipRecord, updateCipRecord
   } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
@@ -81,6 +105,12 @@ export default function ProductionBoard() {
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
   const [showDailyCipModal, setShowDailyCipModal] = useState(false);
   const [dailyCipShiftId, setDailyCipShiftId] = useState<string | null>(null);
+  const [dailyCipMode, setDailyCipMode] = useState<'complete' | 'handover' | 'resume'>('complete');
+  const [dailyCipRecordId, setDailyCipRecordId] = useState<string | null>(null);
+  const [dailyCipHandoverToShiftId, setDailyCipHandoverToShiftId] = useState('');
+  const [dailyCipHandoverToShiftNumber, setDailyCipHandoverToShiftNumber] = useState('');
+  const [showCipDetailsModal, setShowCipDetailsModal] = useState(false);
+  const [selectedCipRecordId, setSelectedCipRecordId] = useState<string | null>(null);
   const [showCutModal, setShowCutModal] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
   const [showPan111Modal, setShowPan111Modal] = useState(false);
@@ -175,6 +205,14 @@ export default function ProductionBoard() {
     .sort((a, b) => new Date(b.performedAt).getTime() - new Date(a.performedAt).getTime());
   const selectedLotDailyCips = selectedLotCipRecords.filter(record => record.frequency === 'daily');
   const selectedLotWeeklyCip = selectedLotCipRecords.find(record => record.frequency === 'weekly');
+  const selectedCipRecord = cipRecords.find(record => record.id === selectedCipRecordId) || null;
+  const selectedLotPendingCip = selectedLotDailyCips.find(record => record.status === 'handed_over') || null;
+  const dailyCipShift = productionShifts.find(shift => shift.id === dailyCipShiftId) || null;
+  const dailyCipHandoverTargets = dailyCipShift
+    ? productionShifts
+      .filter(shift => shift.id !== dailyCipShift.id && shift.milkLotId === dailyCipShift.milkLotId && (shift.status === 'active' || shift.status === 'scheduled'))
+      .sort((a, b) => a.shiftNumber - b.shiftNumber)
+    : [];
 
   useEffect(() => {
     if (selectedMilkLotId && filters.milkLot !== selectedMilkLotId) {
@@ -882,8 +920,34 @@ export default function ProductionBoard() {
     const shift = productionShifts.find(item => item.id === shiftId);
     if (!shift || shift.status !== 'active') return;
 
+    const pendingHandover = cipRecords.find(record =>
+      record.frequency === 'daily' &&
+      record.status === 'handed_over' &&
+      record.milkLotId === shift.milkLotId &&
+      (record.handoverToShiftId === shift.id || record.handoverToShiftNumber === shift.shiftNumber)
+    );
+    if (pendingHandover) {
+      setDailyCipShiftId(shift.id);
+      setDailyCipRecordId(pendingHandover.id);
+      setDailyCipMode('resume');
+      setDailyCipHandoverToShiftId('');
+      setDailyCipHandoverToShiftNumber('');
+      setDailyCipForm(current => ({
+        ...current,
+        recordedBy: typeof window === 'undefined' ? current.recordedBy : window.localStorage.getItem('vejoy_user_username') || current.recordedBy,
+        supervisorName: '',
+        supervisorConfirmed: false,
+        completedSteps: pendingHandover.completedSteps || [],
+        notes: pendingHandover.notes || '',
+      }));
+      setShowDailyCipModal(true);
+      return;
+    }
+
     const existingCip = cipRecords.some(record =>
-      record.frequency === 'daily' && record.shiftId === shift.id
+      record.frequency === 'daily' &&
+      record.status !== 'handed_over' &&
+      (record.shiftId === shift.id || record.completionShiftId === shift.id)
     );
     if (existingCip) {
       updateProductionShift(shift.id, { status: 'completed', endedAt: new Date().toISOString() });
@@ -892,6 +956,10 @@ export default function ProductionBoard() {
     }
 
     setDailyCipShiftId(shift.id);
+    setDailyCipRecordId(null);
+    setDailyCipMode('complete');
+    setDailyCipHandoverToShiftId('');
+    setDailyCipHandoverToShiftNumber('');
     setDailyCipForm(current => ({
       ...current,
       recordedBy: current.recordedBy || (typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_username') || ''),
@@ -906,10 +974,51 @@ export default function ProductionBoard() {
   const handleRecordDailyCip = () => {
     const shift = productionShifts.find(item => item.id === dailyCipShiftId);
     if (!shift) return;
+    const now = new Date().toISOString();
     if (!dailyCipForm.recordedBy.trim()) {
       showToast('error', 'Enter the person who verified the CIP cycle');
       return;
     }
+
+    if (dailyCipMode === 'handover') {
+      const targetShift = productionShifts.find(item => item.id === dailyCipHandoverToShiftId);
+      const handoverToShiftNumber = targetShift?.shiftNumber || Number(dailyCipHandoverToShiftNumber);
+      if (!handoverToShiftNumber || !Number.isInteger(handoverToShiftNumber) || handoverToShiftNumber <= shift.shiftNumber) {
+        showToast('error', 'Select the next shift or enter a valid later shift number');
+        return;
+      }
+
+      addCipRecord({
+        frequency: 'daily',
+        cycle: 'sh8000',
+        status: 'handed_over',
+        milkLotId: shift.milkLotId,
+        milkLotCode: shift.milkLotCode,
+        shiftId: shift.id,
+        shiftNumber: shift.shiftNumber,
+        performedAt: now,
+        recordedBy: dailyCipForm.recordedBy.trim(),
+        completedSteps: dailyCipForm.completedSteps,
+        waterVolumeLitres: 200,
+        waterTemperatureC: 80,
+        chemicalName: 'SH8000',
+        chemicalVolumeLitres: 5,
+        circulationMinutes: 45,
+        extensionMinutes: dailyCipForm.completedSteps.includes('daily-extra-10-minutes') ? 10 : 0,
+        handedOverAt: now,
+        handedOverBy: dailyCipForm.recordedBy.trim(),
+        handoverToShiftId: targetShift?.id,
+        handoverToShiftNumber,
+        notes: dailyCipForm.notes.trim() || undefined,
+      });
+      updateProductionShift(shift.id, { status: 'completed', endedAt: now });
+      setShowDailyCipModal(false);
+      setDailyCipShiftId(null);
+      setDailyCipRecordId(null);
+      showToast('success', `Shift ${shift.shiftNumber} ended; CIP handed over to Shift ${handoverToShiftNumber}`);
+      return;
+    }
+
     const missingSteps = dailyCipChecklist
       .filter(step => step.required !== false && !dailyCipForm.completedSteps.includes(step.id))
       .map(step => step.label);
@@ -922,29 +1031,53 @@ export default function ProductionBoard() {
       return;
     }
 
+    const completedFields = {
+      status: 'completed' as const,
+      completedSteps: dailyCipForm.completedSteps,
+      performedAt: now,
+      recordedBy: dailyCipForm.recordedBy.trim(),
+      completedBy: dailyCipForm.recordedBy.trim(),
+      completionShiftId: shift.id,
+      completionShiftNumber: shift.shiftNumber,
+      supervisorName: dailyCipForm.supervisorName.trim(),
+      supervisorSignedOffAt: now,
+      notes: dailyCipForm.notes.trim() || undefined,
+    };
+
+    if (dailyCipMode === 'resume' && dailyCipRecordId) {
+      const handedOverRecord = cipRecords.find(record => record.id === dailyCipRecordId);
+      updateCipRecord(dailyCipRecordId, {
+        ...completedFields,
+        notes: dailyCipForm.notes.trim() || handedOverRecord?.notes,
+        handoverAcceptedAt: now,
+        handoverAcceptedBy: dailyCipForm.recordedBy.trim(),
+      });
+      setShowDailyCipModal(false);
+      setDailyCipShiftId(null);
+      setDailyCipRecordId(null);
+      showToast('success', `CIP handover accepted and completed by Shift ${shift.shiftNumber}`);
+      return;
+    }
+
     addCipRecord({
       frequency: 'daily',
       cycle: 'sh8000',
+      ...completedFields,
       milkLotId: shift.milkLotId,
       milkLotCode: shift.milkLotCode,
       shiftId: shift.id,
       shiftNumber: shift.shiftNumber,
-      performedAt: new Date().toISOString(),
-      recordedBy: dailyCipForm.recordedBy.trim(),
-      completedSteps: dailyCipForm.completedSteps,
       waterVolumeLitres: 200,
       waterTemperatureC: 80,
       chemicalName: 'SH8000',
       chemicalVolumeLitres: 5,
       circulationMinutes: 45,
       extensionMinutes: dailyCipForm.completedSteps.includes('daily-extra-10-minutes') ? 10 : 0,
-      supervisorName: dailyCipForm.supervisorName.trim(),
-      supervisorSignedOffAt: new Date().toISOString(),
-      notes: dailyCipForm.notes.trim() || undefined,
     });
-    updateProductionShift(shift.id, { status: 'completed', endedAt: new Date().toISOString() });
+    updateProductionShift(shift.id, { status: 'completed', endedAt: now });
     setShowDailyCipModal(false);
     setDailyCipShiftId(null);
+    setDailyCipRecordId(null);
     showToast('success', `Daily SH8000 CIP recorded; Shift ${shift.shiftNumber} ended`);
   };
 
@@ -1443,7 +1576,7 @@ export default function ProductionBoard() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Cleaning & CIP</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Lot {activeMilkLot?.lotCode || '—'} · daily CIP is recorded at each shift change.</p>
+            <p className="text-xs text-slate-500 mt-0.5">Lot {activeMilkLot?.lotCode || '—'} · daily CIP is recorded at each shift change. Click a record to audit its checklist.</p>
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700">Daily records: {selectedLotDailyCips.length}</span>
@@ -1452,12 +1585,57 @@ export default function ProductionBoard() {
             </span>
           </div>
         </div>
+        {selectedLotPendingCip && (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-amber-900">
+              <p className="font-semibold">CIP handed over from Shift {selectedLotPendingCip.shiftNumber || '—'}</p>
+              <p className="text-xs mt-0.5">{selectedLotPendingCip.completedSteps?.length || 0} checklist step(s) recorded. It must be accepted and completed before the receiving shift is closed.</p>
+            </div>
+            {(() => {
+              const targetShift = productionShifts.find(shift =>
+                shift.milkLotId === selectedLotPendingCip.milkLotId &&
+                shift.status === 'active' &&
+                (shift.id === selectedLotPendingCip.handoverToShiftId || shift.shiftNumber === selectedLotPendingCip.handoverToShiftNumber)
+              );
+              return targetShift ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDailyCipShiftId(targetShift.id);
+                    setDailyCipRecordId(selectedLotPendingCip.id);
+                    setDailyCipMode('resume');
+                    setDailyCipForm(current => ({
+                      ...current,
+                      recordedBy: typeof window === 'undefined' ? current.recordedBy : window.localStorage.getItem('vejoy_user_username') || current.recordedBy,
+                      supervisorName: '',
+                      supervisorConfirmed: false,
+                      completedSteps: selectedLotPendingCip.completedSteps || [],
+                      notes: selectedLotPendingCip.notes || '',
+                    }));
+                    setShowDailyCipModal(true);
+                  }}
+                  className="px-3 py-2 rounded-lg bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700"
+                >
+                  Accept & resume CIP
+                </button>
+              ) : (
+                <span className="text-xs font-medium text-amber-800">Waiting for Shift {selectedLotPendingCip.handoverToShiftNumber || 'next'} to open</span>
+              );
+            })()}
+          </div>
+        )}
         {selectedLotCipRecords.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {selectedLotCipRecords.slice(0, 4).map(record => (
-              <span key={record.id} className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-600">
-                {record.frequency === 'daily' ? `Shift ${record.shiftNumber || '—'} · ${record.cycle === 'acid' ? 'Scale Bright' : record.cycle === 'caustic' ? 'Caustic' : 'SH8000'}` : 'Weekly · SH8000 + Scale Bright'} · {record.recordedBy}
-              </span>
+          <div className="mt-3 flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+            {selectedLotCipRecords.map(record => (
+              <button
+                key={record.id}
+                type="button"
+                onClick={() => { setSelectedCipRecordId(record.id); setShowCipDetailsModal(true); }}
+                className="text-left text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 transition-colors"
+                title="Open CIP audit record"
+              >
+                {record.frequency === 'daily' ? `Shift ${record.shiftNumber || '—'} · ` : ''}{cipCycleLabel(record)} · {record.status === 'handed_over' ? 'Handed over' : 'Complete'}
+              </button>
             ))}
           </div>
         ) : (
@@ -2242,14 +2420,22 @@ export default function ProductionBoard() {
       {/* Daily CIP Modal */}
       <Modal
         isOpen={showDailyCipModal}
-        onClose={() => { setShowDailyCipModal(false); setDailyCipShiftId(null); }}
-        title={`Daily CIP · Shift ${productionShifts.find(shift => shift.id === dailyCipShiftId)?.shiftNumber || ''}`}
+        onClose={() => { setShowDailyCipModal(false); setDailyCipShiftId(null); setDailyCipRecordId(null); }}
+        title={`${dailyCipMode === 'handover' ? 'Hand over CIP' : dailyCipMode === 'resume' ? 'Resume handed-over CIP' : 'Daily CIP'} · Shift ${productionShifts.find(shift => shift.id === dailyCipShiftId)?.shiftNumber || ''}`}
       >
         <div className="space-y-4">
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <p className="text-sm font-medium text-amber-900">CIP is required before the shift can be closed.</p>
+            <p className="text-sm font-medium text-amber-900">
+              {dailyCipMode === 'handover' ? 'The outgoing shift can hand over an unfinished CIP.' : dailyCipMode === 'resume' ? 'This CIP was handed over by the previous shift.' : 'CIP is required before the shift can be closed.'}
+            </p>
             <p className="text-xs text-amber-800 mt-1">Daily SH8000 cycle: 200 L water at 80°C + 5 L SH8000, circulated for 45 minutes. Tick each step actually completed.</p>
           </div>
+          {dailyCipMode !== 'resume' && (
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setDailyCipMode('complete')} className={`px-3 py-2 rounded-lg border text-xs font-semibold ${dailyCipMode === 'complete' ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}>Complete CIP</button>
+              <button type="button" onClick={() => setDailyCipMode('handover')} className={`px-3 py-2 rounded-lg border text-xs font-semibold ${dailyCipMode === 'handover' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600'}`}>Hand over to next shift</button>
+            </div>
+          )}
           <div className="space-y-2">
             <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Daily checklist</p>
             {[...dailyCipChecklist, ...dailyCipOptionalSteps].map(step => (
@@ -2273,23 +2459,87 @@ export default function ProductionBoard() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Verified / recorded by</label>
             <input value={dailyCipForm.recordedBy} onChange={(e) => setDailyCipForm({ ...dailyCipForm, recordedBy: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Name or username" />
           </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Supervisor sign-off</label>
-            <input value={dailyCipForm.supervisorName} onChange={(e) => setDailyCipForm({ ...dailyCipForm, supervisorName: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Supervisor name" />
-            <label className="flex items-start gap-2 mt-2 text-xs text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={dailyCipForm.supervisorConfirmed} onChange={(e) => setDailyCipForm({ ...dailyCipForm, supervisorConfirmed: e.target.checked })} className="mt-0.5" />
-              <span>I confirm the CIP checks were reviewed and signed off.</span>
-            </label>
-          </div>
+          {dailyCipMode === 'handover' ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-3">
+              <div>
+                <label className="text-xs font-medium text-amber-900 uppercase tracking-wide">Hand over to</label>
+                <select value={dailyCipHandoverToShiftId} onChange={(e) => { setDailyCipHandoverToShiftId(e.target.value); setDailyCipHandoverToShiftNumber(''); }} className="mt-1 w-full px-3 py-2 border border-amber-200 rounded-lg text-sm bg-white">
+                  <option value="">Select an existing next shift</option>
+                  {dailyCipHandoverTargets.map(target => <option key={target.id} value={target.id}>Shift {target.shiftNumber} · {target.status === 'active' ? 'active' : 'scheduled'}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-amber-900 uppercase tracking-wide">Or enter the next shift number</label>
+                <input type="number" min={1} value={dailyCipHandoverToShiftNumber} onChange={(e) => { setDailyCipHandoverToShiftNumber(e.target.value); setDailyCipHandoverToShiftId(''); }} className="mt-1 w-full px-3 py-2 border border-amber-200 rounded-lg text-sm" placeholder="e.g. 2" />
+              </div>
+              <p className="text-xs text-amber-800">The receiving shift will see this pending CIP and must accept it, finish the checklist, and obtain supervisor sign-off.</p>
+            </div>
+          ) : (
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Supervisor sign-off</label>
+              <input value={dailyCipForm.supervisorName} onChange={(e) => setDailyCipForm({ ...dailyCipForm, supervisorName: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Supervisor name" />
+              <label className="flex items-start gap-2 mt-2 text-xs text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={dailyCipForm.supervisorConfirmed} onChange={(e) => setDailyCipForm({ ...dailyCipForm, supervisorConfirmed: e.target.checked })} className="mt-0.5" />
+                <span>I confirm the CIP checks were reviewed and signed off.</span>
+              </label>
+            </div>
+          )}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Notes (optional)</label>
             <textarea value={dailyCipForm.notes} onChange={(e) => setDailyCipForm({ ...dailyCipForm, notes: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={3} placeholder="Observations or corrective action" />
           </div>
           <div className="flex gap-2 pt-2">
-            <button onClick={handleRecordDailyCip} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Record CIP & end shift</button>
-            <button onClick={() => { setShowDailyCipModal(false); setDailyCipShiftId(null); }} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+            <button onClick={handleRecordDailyCip} className={`flex-1 px-4 py-2.5 text-white rounded-lg text-sm font-medium ${dailyCipMode === 'handover' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>{dailyCipMode === 'handover' ? 'Save handover & end shift' : dailyCipMode === 'resume' ? 'Complete CIP handover' : 'Record CIP & end shift'}</button>
+            <button onClick={() => { setShowDailyCipModal(false); setDailyCipShiftId(null); setDailyCipRecordId(null); }} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
+      </Modal>
+
+      {/* CIP Audit Details Modal */}
+      <Modal
+        isOpen={showCipDetailsModal}
+        onClose={() => { setShowCipDetailsModal(false); setSelectedCipRecordId(null); }}
+        title={selectedCipRecord ? `CIP audit · ${cipCycleLabel(selectedCipRecord)}` : 'CIP audit'}
+        size="lg"
+      >
+        {selectedCipRecord && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs">
+              <div><p className="text-slate-500 uppercase tracking-wide">Milk lot</p><p className="font-semibold text-slate-900 mt-1">{selectedCipRecord.milkLotCode}</p></div>
+              <div><p className="text-slate-500 uppercase tracking-wide">Frequency</p><p className="font-semibold text-slate-900 mt-1 capitalize">{selectedCipRecord.frequency}</p></div>
+              {selectedCipRecord.shiftNumber && <div><p className="text-slate-500 uppercase tracking-wide">Shift</p><p className="font-semibold text-slate-900 mt-1">{selectedCipRecord.shiftNumber}</p></div>}
+              <div><p className="text-slate-500 uppercase tracking-wide">Status</p><p className={`font-semibold mt-1 ${selectedCipRecord.status === 'handed_over' ? 'text-amber-700' : 'text-emerald-700'}`}>{selectedCipRecord.status === 'handed_over' ? 'Handed over · pending' : 'Completed'}</p></div>
+              <div><p className="text-slate-500 uppercase tracking-wide">Performed</p><p className="font-semibold text-slate-900 mt-1">{new Date(selectedCipRecord.performedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</p></div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="rounded-lg border border-slate-200 p-3"><p className="text-slate-500">SH8000 water</p><p className="font-semibold text-slate-900 mt-1">{selectedCipRecord.waterVolumeLitres || '—'} L at {selectedCipRecord.waterTemperatureC || '—'} deg C</p></div>
+              <div className="rounded-lg border border-slate-200 p-3"><p className="text-slate-500">SH8000 chemical</p><p className="font-semibold text-slate-900 mt-1">{selectedCipRecord.chemicalVolumeLitres || '—'} L {selectedCipRecord.chemicalName || ''}</p></div>
+              <div className="rounded-lg border border-slate-200 p-3"><p className="text-slate-500">Circulation</p><p className="font-semibold text-slate-900 mt-1">{selectedCipRecord.circulationMinutes || '—'} min{selectedCipRecord.extensionMinutes ? ` + ${selectedCipRecord.extensionMinutes} min` : ''}</p></div>
+              {selectedCipRecord.frequency === 'weekly' && <div className="rounded-lg border border-slate-200 p-3"><p className="text-slate-500">Acid cycle</p><p className="font-semibold text-slate-900 mt-1">{selectedCipRecord.acidChemicalVolumeLitres || '—'} L {selectedCipRecord.acidChemicalName || 'Scale Bright'} at {selectedCipRecord.acidWaterTemperatureC || '—'} deg C</p></div>}
+            </div>
+
+            {selectedCipRecord.frequency === 'weekly' ? (
+              <>
+                <CipAuditChecklist title="Part 1 · Daily SH8000 cycle" steps={[...dailyCipChecklist, ...dailyCipOptionalSteps]} completedSteps={selectedCipRecord.completedSteps || []} />
+                <CipAuditChecklist title="Part 2 · Weekly acid cycle" steps={[...weeklyAcidCipChecklist, ...weeklyAcidCipOptionalSteps]} completedSteps={selectedCipRecord.completedSteps || []} />
+              </>
+            ) : (
+              <CipAuditChecklist title="Daily SH8000 checklist" steps={[...dailyCipChecklist, ...dailyCipOptionalSteps]} completedSteps={selectedCipRecord.completedSteps || []} />
+            )}
+
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+              <p><strong>Recorded by:</strong> {selectedCipRecord.recordedBy}</p>
+              {selectedCipRecord.handedOverAt && <p><strong>Handed over:</strong> Shift {selectedCipRecord.handoverToShiftNumber || 'next'} by {selectedCipRecord.handedOverBy || selectedCipRecord.recordedBy} on {new Date(selectedCipRecord.handedOverAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</p>}
+              {selectedCipRecord.handoverAcceptedAt && <p><strong>Accepted by:</strong> {selectedCipRecord.handoverAcceptedBy || '—'} on {new Date(selectedCipRecord.handoverAcceptedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</p>}
+              {selectedCipRecord.completedBy && <p><strong>Completed by:</strong> {selectedCipRecord.completedBy}{selectedCipRecord.completionShiftNumber ? ` · Shift ${selectedCipRecord.completionShiftNumber}` : ''}</p>}
+              <p><strong>Supervisor:</strong> {selectedCipRecord.supervisorName || 'Not recorded'}</p>
+              {selectedCipRecord.supervisorSignedOffAt && <p><strong>Signed off:</strong> {new Date(selectedCipRecord.supervisorSignedOffAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</p>}
+            </div>
+            {selectedCipRecord.notes && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"><strong>Notes:</strong> {selectedCipRecord.notes}</div>}
+            <button onClick={() => { setShowCipDetailsModal(false); setSelectedCipRecordId(null); }} className="w-full px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Close audit</button>
+          </div>
+        )}
       </Modal>
 
       {/* New Shift Modal */}
