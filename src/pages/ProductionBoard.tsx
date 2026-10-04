@@ -218,9 +218,10 @@ export default function ProductionBoard() {
   const dailyCipShift = productionShifts.find(shift => shift.id === dailyCipShiftId) || null;
   const dailyCipHandoverTargets = dailyCipShift
     ? productionShifts
-      .filter(shift => shift.id !== dailyCipShift.id && shift.milkLotId === dailyCipShift.milkLotId && (shift.status === 'active' || shift.status === 'scheduled'))
+      .filter(shift => shift.id !== dailyCipShift.id && shift.milkLotId === dailyCipShift.milkLotId && shift.shiftNumber > dailyCipShift.shiftNumber && (shift.status === 'active' || shift.status === 'scheduled'))
       .sort((a, b) => a.shiftNumber - b.shiftNumber)
     : [];
+  const dailyCipNextShiftNumber = dailyCipShift ? dailyCipShift.shiftNumber + 1 : null;
 
   const pendingCipForShift = (shift: typeof productionShifts[number]) => cipRecords.find(record =>
     record.frequency === 'daily' &&
@@ -2631,7 +2632,7 @@ export default function ProductionBoard() {
           {dailyCipMode !== 'resume' && (
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => setDailyCipMode('complete')} className={`px-3 py-2 rounded-lg border text-xs font-semibold ${dailyCipMode === 'complete' ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}>Complete CIP</button>
-              <button type="button" onClick={() => setDailyCipMode('handover')} className={`px-3 py-2 rounded-lg border text-xs font-semibold ${dailyCipMode === 'handover' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600'}`}>Hand over to next shift</button>
+              <button type="button" onClick={() => { setDailyCipMode('handover'); setDailyCipHandoverToShiftId(''); setDailyCipHandoverToShiftNumber(dailyCipNextShiftNumber ? String(dailyCipNextShiftNumber) : ''); }} className={`px-3 py-2 rounded-lg border text-xs font-semibold ${dailyCipMode === 'handover' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600'}`}>Hand over to next shift</button>
             </div>
           )}
           <div className="space-y-2">
@@ -2660,17 +2661,26 @@ export default function ProductionBoard() {
           {dailyCipMode === 'handover' ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-3">
               <div>
-                <label className="text-xs font-medium text-amber-900 uppercase tracking-wide">Hand over to</label>
-                <select value={dailyCipHandoverToShiftId} onChange={(e) => { setDailyCipHandoverToShiftId(e.target.value); setDailyCipHandoverToShiftNumber(''); }} className="mt-1 w-full px-3 py-2 border border-amber-200 rounded-lg text-sm bg-white">
-                  <option value="">Select an existing next shift</option>
+                <label className="text-xs font-medium text-amber-900 uppercase tracking-wide">Hand over to a later shift</label>
+                <select value={dailyCipHandoverToShiftId || (dailyCipHandoverToShiftNumber === String(dailyCipNextShiftNumber) ? '__future_next__' : '')} onChange={(e) => {
+                  if (e.target.value === '__future_next__') {
+                    setDailyCipHandoverToShiftId('');
+                    setDailyCipHandoverToShiftNumber(dailyCipNextShiftNumber ? String(dailyCipNextShiftNumber) : '');
+                  } else {
+                    setDailyCipHandoverToShiftId(e.target.value);
+                    setDailyCipHandoverToShiftNumber('');
+                  }
+                }} className="mt-1 w-full px-3 py-2 border border-amber-200 rounded-lg text-sm bg-white">
+                  <option value="">Select an existing later shift</option>
                   {dailyCipHandoverTargets.map(target => <option key={target.id} value={target.id}>Shift {target.shiftNumber} · {target.status === 'active' ? 'active' : 'scheduled'}</option>)}
+                  {dailyCipNextShiftNumber !== null && !dailyCipHandoverTargets.some(target => target.shiftNumber === dailyCipNextShiftNumber) && <option value="__future_next__">Shift {dailyCipNextShiftNumber} · not created yet</option>}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-medium text-amber-900 uppercase tracking-wide">Or enter the next shift number</label>
+                <label className="text-xs font-medium text-amber-900 uppercase tracking-wide">Next shift number (can be created later)</label>
                 <input type="number" min={1} value={dailyCipHandoverToShiftNumber} onChange={(e) => { setDailyCipHandoverToShiftNumber(e.target.value); setDailyCipHandoverToShiftId(''); }} className="mt-1 w-full px-3 py-2 border border-amber-200 rounded-lg text-sm" placeholder="e.g. 2" />
               </div>
-              <p className="text-xs text-amber-800">The receiving shift will see this pending CIP and must accept it, finish the checklist, and obtain supervisor sign-off.</p>
+              <p className="text-xs text-amber-800">You can select an existing later shift or record the next shift number before it is created. The receiving shift will see this pending CIP and must accept it, finish the checklist, and obtain supervisor sign-off.</p>
             </div>
           ) : (
             <div>
