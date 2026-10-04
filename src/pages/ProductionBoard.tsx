@@ -22,7 +22,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getCreamBatchCode, milkProductionVessels, statusFlow, statusLabels, statusColors, CipRecord } from '../data/mockData';
-import { CipChecklistStep, dailyCipChecklist, dailyCipOptionalSteps, weeklyAcidCipChecklist, weeklyAcidCipOptionalSteps } from '../data/cip';
+import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import HalloumiTab from './HalloumiTab';
 import AmassiTab from './AmassiTab';
@@ -2467,7 +2467,7 @@ export default function ProductionBoard() {
           )}
           <div className="space-y-2">
             <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Daily checklist</p>
-            {[...dailyCipChecklist, ...dailyCipOptionalSteps].map(step => (
+            {dailyCipSteps.map(step => (
               <label key={step.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-2.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50">
                 <input
                   type="checkbox"
@@ -2550,11 +2550,11 @@ export default function ProductionBoard() {
 
             {selectedCipRecord.frequency === 'weekly' ? (
               <>
-                <CipAuditChecklist title="Part 1 · Daily SH8000 cycle" steps={[...dailyCipChecklist, ...dailyCipOptionalSteps]} completedSteps={selectedCipRecord.completedSteps || []} />
-                <CipAuditChecklist title="Part 2 · Weekly acid cycle" steps={[...weeklyAcidCipChecklist, ...weeklyAcidCipOptionalSteps]} completedSteps={selectedCipRecord.completedSteps || []} />
+                <CipAuditChecklist title="Part 1 · Daily SH8000 cycle" steps={dailyCipSteps} completedSteps={selectedCipRecord.completedSteps || []} />
+                <CipAuditChecklist title="Part 2 · Weekly acid cycle" steps={weeklyAcidCipSteps} completedSteps={selectedCipRecord.completedSteps || []} />
               </>
             ) : (
-              <CipAuditChecklist title="Daily SH8000 checklist" steps={[...dailyCipChecklist, ...dailyCipOptionalSteps]} completedSteps={selectedCipRecord.completedSteps || []} />
+              <CipAuditChecklist title="Daily SH8000 checklist" steps={dailyCipSteps} completedSteps={selectedCipRecord.completedSteps || []} />
             )}
 
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">

@@ -20,6 +20,14 @@ export const dailyCipOptionalSteps: CipChecklistStep[] = [
   { id: 'daily-extra-10-minutes', label: 'If vats were not clean, run SH8000 for an additional 10 minutes', required: false },
 ];
 
+// The conditional extension belongs immediately after checking Vat 1 and
+// Vat 2, before the solution is drained or the vats are rinsed.
+export const dailyCipSteps: CipChecklistStep[] = [
+  ...dailyCipChecklist.slice(0, 5),
+  ...dailyCipOptionalSteps,
+  ...dailyCipChecklist.slice(5),
+];
+
 // The weekly acid cycle repeats the same checks with Scale Bright in place of
 // SH8000, using 200 L water at 65°C and 2 L Scale Bright.
 export const weeklyAcidCipChecklist: CipChecklistStep[] = [
@@ -33,4 +41,10 @@ export const weeklyAcidCipChecklist: CipChecklistStep[] = [
 
 export const weeklyAcidCipOptionalSteps: CipChecklistStep[] = [
   { id: 'weekly-acid-extra-10-minutes', label: 'If vats were not clean, run Scale Bright for an additional 10 minutes', required: false },
+];
+
+export const weeklyAcidCipSteps: CipChecklistStep[] = [
+  ...weeklyAcidCipChecklist.slice(0, 3),
+  ...weeklyAcidCipOptionalSteps,
+  ...weeklyAcidCipChecklist.slice(3),
 ];

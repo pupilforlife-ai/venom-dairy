@@ -4,7 +4,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, milkStorageVessels } from '../data/mockData';
-import { dailyCipChecklist, dailyCipOptionalSteps, weeklyAcidCipChecklist, weeklyAcidCipOptionalSteps } from '../data/cip';
+import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
@@ -886,7 +886,7 @@ export default function MilkReceiving() {
           </div>
           <div className="space-y-2">
             <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Part 1 · Daily SH8000 cycle</p>
-            {[...dailyCipChecklist, ...dailyCipOptionalSteps].map(step => (
+            {dailyCipSteps.map(step => (
               <label key={step.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-2.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50">
                 <input
                   type="checkbox"
@@ -900,7 +900,7 @@ export default function MilkReceiving() {
           </div>
           <div className="space-y-2">
             <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Part 2 · Weekly acid cycle</p>
-            {[...weeklyAcidCipChecklist, ...weeklyAcidCipOptionalSteps].map(step => (
+            {weeklyAcidCipSteps.map(step => (
               <label key={step.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-2.5 text-sm text-slate-700 cursor-pointer hover:bg-slate-50">
                 <input
                   type="checkbox"
