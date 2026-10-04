@@ -27,6 +27,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/instructions', label: 'Instructions', icon: ClipboardCheck },
   { path: '/production-board', label: 'Production Board', icon: ClipboardList },
   { path: '/milk-receiving', label: 'Milk Receiving', icon: Milk },
   { path: '/inventory', label: 'Inventory & Stock', icon: Package },
@@ -37,7 +38,6 @@ const navItems = [
   { path: '/waste', label: 'Waste & Yield', icon: AlertTriangle },
   { path: '/utilities', label: 'Utilities', icon: Truck },
   { path: '/distribution', label: 'Distribution', icon: Truck },
-  { path: '/instructions', label: 'Instructions', icon: ClipboardCheck },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
