@@ -1163,6 +1163,10 @@ export default function ProductionBoard() {
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
     if (!shift) return;
+    if (shift.status !== 'active') {
+      showToast('error', `Shift ${shift.shiftNumber} is closed. Create a round on the current active shift instead.`);
+      return;
+    }
     if (pendingCipForShift(shift)) {
       showToast('error', `Complete the handed-over CIP before adding rounds to Shift ${shift.shiftNumber}`);
       return;

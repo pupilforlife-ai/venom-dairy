@@ -143,12 +143,44 @@ declare
   new_round jsonb;
   next_number integer;
   shift_id text;
+  shift_item jsonb;
 begin
   if not public.is_approved_user() then
     raise exception 'Approved access required';
   end if;
   shift_id := round_input->>'shiftId';
   if shift_id is null or shift_id = '' then raise exception 'Shift is required'; end if;
+  select item into shift_item
+  from public.app_state state
+  cross join lateral jsonb_array_elements(
+    case when jsonb_typeof(state.value) = 'array' then state.value else '[]'::jsonb end
+  ) as rows(item)
+  where state.key = 'vejoy_productionShifts'
+    and item->>'id' = shift_id
+  limit 1;
+  if shift_item is null then
+    raise exception 'Shift not found';
+  end if;
+  if coalesce(shift_item->>'status', '') <> 'active' then
+    raise exception 'Cannot create a round on a closed or scheduled shift';
+  end if;
+  if exists (
+    select 1
+    from public.app_state state
+    cross join lateral jsonb_array_elements(
+      case when jsonb_typeof(state.value) = 'array' then state.value else '[]'::jsonb end
+    ) as rows(item)
+    where state.key = 'vejoy_cipRecords'
+      and item->>'frequency' = 'daily'
+      and item->>'status' = 'handed_over'
+      and item->>'milkLotId' = shift_item->>'milkLotId'
+      and (
+        item->>'handoverToShiftId' = shift_id
+        or item->>'handoverToShiftNumber' = shift_item->>'shiftNumber'
+      )
+  ) then
+    raise exception 'Complete the handed-over CIP before creating rounds on this shift';
+  end if;
   -- A new project may not have loaded the frontend state row yet. Seed the
   -- collection here so the first round can be created without a race against
   -- the client's asynchronous state bootstrap.
