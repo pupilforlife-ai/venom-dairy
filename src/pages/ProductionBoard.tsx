@@ -214,6 +214,23 @@ export default function ProductionBoard() {
       .sort((a, b) => a.shiftNumber - b.shiftNumber)
     : [];
 
+  const pendingCipForShift = (shift: typeof productionShifts[number]) => cipRecords.find(record =>
+    record.frequency === 'daily' &&
+    record.status === 'handed_over' &&
+    record.milkLotId === shift.milkLotId &&
+    (record.handoverToShiftId === shift.id || record.handoverToShiftNumber === shift.shiftNumber)
+  );
+
+  const hasResolvedCipForShift = (shift: typeof productionShifts[number]) => cipRecords.some(record =>
+    record.frequency === 'daily' &&
+    record.status !== 'handed_over' &&
+    (record.shiftId === shift.id || record.completionShiftId === shift.id)
+  ) || cipRecords.some(record =>
+    record.frequency === 'daily' &&
+    record.status === 'handed_over' &&
+    record.shiftId === shift.id
+  );
+
   useEffect(() => {
     if (selectedMilkLotId && filters.milkLot !== selectedMilkLotId) {
       setFilters(current => ({ ...current, milkLot: selectedMilkLotId, shift: 'all' }));
@@ -897,6 +914,15 @@ export default function ProductionBoard() {
       showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
       return;
     }
+    const unresolvedShift = productionShifts.find(shift =>
+      shift.status === 'active' &&
+      shift.milkLotId === milkLotId &&
+      !hasResolvedCipForShift(shift)
+    );
+    if (unresolvedShift) {
+      showToast('error', `Complete or hand over CIP for Shift ${unresolvedShift.shiftNumber} before creating another shift`);
+      return;
+    }
 
     const created = addProductionShift({
       milkLotId,
@@ -920,12 +946,7 @@ export default function ProductionBoard() {
     const shift = productionShifts.find(item => item.id === shiftId);
     if (!shift || shift.status !== 'active') return;
 
-    const pendingHandover = cipRecords.find(record =>
-      record.frequency === 'daily' &&
-      record.status === 'handed_over' &&
-      record.milkLotId === shift.milkLotId &&
-      (record.handoverToShiftId === shift.id || record.handoverToShiftNumber === shift.shiftNumber)
-    );
+    const pendingHandover = pendingCipForShift(shift);
     if (pendingHandover) {
       setDailyCipShiftId(shift.id);
       setDailyCipRecordId(pendingHandover.id);
@@ -1108,12 +1129,12 @@ export default function ProductionBoard() {
 
   const getLatestActiveShift = () => {
     return productionShifts
-      .filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId)
+      .filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId && !pendingCipForShift(s))
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0] || null;
   };
 
   const availableRoundShifts = productionShifts
-    .filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId)
+    .filter(s => s.status === 'active' && s.milkLotId === selectedMilkLotId && !pendingCipForShift(s))
     .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
   const openNewRoundModal = () => {
@@ -1142,6 +1163,10 @@ export default function ProductionBoard() {
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
     if (!shift) return;
+    if (pendingCipForShift(shift)) {
+      showToast('error', `Complete the handed-over CIP before adding rounds to Shift ${shift.shiftNumber}`);
+      return;
+    }
     const milkLot = milkLots.find(m => m.id === shift.milkLotId);
     if (milkLot?.productionClosed) {
       showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
