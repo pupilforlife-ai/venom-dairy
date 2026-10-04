@@ -35,7 +35,7 @@ const wasteReasons = [
 ];
 
 export default function WasteAndYield() {
-  const { wasteEvents, addWasteEvent } = useApp();
+  const { wasteEvents, milkLots, addWasteEvent } = useApp();
   const { showToast } = useToast();
   const [showLogModal, setShowLogModal] = useState(false);
 
@@ -66,6 +66,10 @@ export default function WasteAndYield() {
   const handleLogWaste = () => {
     if (!newWaste.product || !newWaste.quantity || !newWaste.recordedBy) {
       showToast('error', 'Please fill in all required fields');
+      return;
+    }
+    if (newWaste.unit === 'L' && /milk/i.test(newWaste.product) && !newWaste.batchCode) {
+      showToast('error', 'Select the affected milk lot for liquid milk waste');
       return;
     }
     addWasteEvent({
@@ -292,14 +296,27 @@ export default function WasteAndYield() {
             </select>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Batch Code (optional)</label>
-            <input
-              type="text"
-              value={newWaste.batchCode}
-              onChange={(e) => setNewWaste({ ...newWaste, batchCode: e.target.value })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              placeholder="e.g. 160626/S1/R1/D"
-            />
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
+              {newWaste.unit === 'L' && /milk/i.test(newWaste.product) ? 'Affected Milk Lot *' : 'Batch Code (optional)'}
+            </label>
+            {newWaste.unit === 'L' && /milk/i.test(newWaste.product) ? (
+              <select
+                value={newWaste.batchCode}
+                onChange={(e) => setNewWaste({ ...newWaste, batchCode: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+              >
+                <option value="">Select milk lot</option>
+                {milkLots.map(lot => <option key={lot.id} value={lot.lotCode}>{lot.lotCode} · {lot.litresReceived.toLocaleString()} L received</option>)}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={newWaste.batchCode}
+                onChange={(e) => setNewWaste({ ...newWaste, batchCode: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                placeholder="e.g. 160626/S1/R1/D"
+              />
+            )}
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded By</label>

@@ -15,6 +15,7 @@ import {
   Factory,
   LogOut,
   Download,
+  ClipboardCheck,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../store/AppContext';
@@ -36,6 +37,7 @@ const navItems = [
   { path: '/waste', label: 'Waste & Yield', icon: AlertTriangle },
   { path: '/utilities', label: 'Utilities', icon: Truck },
   { path: '/distribution', label: 'Distribution', icon: Truck },
+  { path: '/instructions', label: 'Instructions', icon: ClipboardCheck },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 

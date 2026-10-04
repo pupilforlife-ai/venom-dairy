@@ -15,6 +15,7 @@ import Utilities from './pages/Utilities';
 import Distribution from './pages/Distribution';
 import Reconciliation from './pages/Reconciliation';
 import Settings from './pages/Settings';
+import Instructions from './pages/Instructions';
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="/waste" element={<WasteAndYield />} />
               <Route path="/utilities" element={<Utilities />} />
               <Route path="/distribution" element={<Distribution />} />
+              <Route path="/instructions" element={<Instructions />} />
               {/* Keep the old bookmark working while the page is now called Distribution. */}
               <Route path="/handover" element={<Navigate to="/distribution" replace />} />
               <Route path="/reconciliation" element={<Reconciliation />} />

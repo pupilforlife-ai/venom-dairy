@@ -21,7 +21,8 @@ import {
   UtilityLog,
   CipRecord,
   cipRecords as initialCipRecords,
-  statusFlow
+  statusFlow,
+  getMilkLotAccounting,
 } from '../data/mockData';
 
 interface AppState {
@@ -410,6 +411,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addWasteEvent = (event: Omit<WasteEvent, 'id'>) => {
     const newEvent = { ...event, id: `w-${Date.now()}` };
     setWasteEvents([...wasteEvents, newEvent]);
+
+    // Liquid raw-milk waste must reduce the linked receiving lot. The waste
+    // event remains the audit record, while these lot counters keep the
+    // receiving balance and its reconciliation view in sync.
+    const isMilkWaste = event.unit.toLowerCase() === 'l'
+      && /milk/i.test(event.product)
+      && Boolean(event.batchCode?.trim());
+    if (isMilkWaste) {
+      const isSpillage = /spill/i.test(event.reason);
+      setMilkLots(currentLots => currentLots.map(lot => {
+        const batchCode = event.batchCode?.trim();
+        if (lot.id !== batchCode && lot.lotCode !== batchCode) return lot;
+        const updatedLot = {
+          ...lot,
+          litresRejected: isSpillage ? lot.litresRejected : lot.litresRejected + event.quantity,
+          litresSpilled: isSpillage ? lot.litresSpilled + event.quantity : lot.litresSpilled,
+        };
+        return {
+          ...updatedLot,
+          litresRemaining: getMilkLotAccounting(updatedLot, productionRounds).remaining,
+        };
+      }));
+    }
   };
 
   // Intermediate lot actions
