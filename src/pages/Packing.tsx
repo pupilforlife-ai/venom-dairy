@@ -89,7 +89,7 @@ export default function Packing() {
       cases: packForm.cases,
       loosePackets: packForm.loosePackets,
       totalPackets,
-      storageLocation: 'Finished Production Stock',
+      storageLocation: 'Dairy Container (Finished Stock)',
       status: 'awaiting_handover',
       createdAt: new Date().toISOString(),
       sourceBatchCodes: [lot.sourceBatchCode],

@@ -688,7 +688,7 @@ export default function ProductionBoard() {
       totalPackets: definition.packMode === 'units'
         ? packForm.cases * (definition.unitsPerCase || 0) + packForm.loose
         : 0,
-      storageLocation: 'Finished Production Stock',
+      storageLocation: 'Dairy Container (Finished Stock)',
       status: 'awaiting_handover' as const,
       createdAt: new Date().toISOString(),
       sourceBatchCodes: [sourceBatchCode],

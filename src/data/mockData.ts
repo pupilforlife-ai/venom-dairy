@@ -148,6 +148,9 @@ export interface DistributionHandover {
   destination: string;
   handedOverBy: string;
   handedOverAt: string;
+  quantityVerified?: boolean;
+  quantityVerifiedBy?: string;
+  quantityVerifiedAt?: string;
   notes?: string;
 }
 
@@ -1198,7 +1201,7 @@ export const finishedStock: FinishedStockLot[] = [
     cases: 15,
     loosePackets: 0,
     totalPackets: 225, // 15 cases × 15 packets/case (wait, 24 packets/case for MPAN400)
-    storageLocation: 'Finished Production Stock',
+    storageLocation: 'Dairy Container (Finished Stock)',
     status: 'awaiting_handover',
     createdAt: '2026-06-17T04:00:00',
     sourceBatchCodes: ['160626/S1/R1/D'],
@@ -1211,7 +1214,7 @@ export const finishedStock: FinishedStockLot[] = [
     cases: 22,
     loosePackets: 3,
     totalPackets: 531, // 22 × 24 + 3
-    storageLocation: 'Finished Production Stock',
+    storageLocation: 'Dairy Container (Finished Stock)',
     status: 'awaiting_handover',
     createdAt: '2026-06-17T21:00:00',
     sourceBatchCodes: ['160626/S3/R2/C/S'],
@@ -1224,7 +1227,7 @@ export const finishedStock: FinishedStockLot[] = [
     cases: 37,
     loosePackets: 6,
     totalPackets: 450, // 37 × 12 + 6
-    storageLocation: 'Dairy Container (Intermediate Freezer)',
+    storageLocation: 'Dairy Container (Finished Stock)',
     status: 'awaiting_handover',
     createdAt: '2026-06-17T10:00:00',
     sourceBatchCodes: ['160626/S1/R2/C/S'],

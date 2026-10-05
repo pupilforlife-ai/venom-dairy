@@ -94,7 +94,7 @@ export default function Settings() {
       title: 'Temperature Profiles',
       description: 'Cold chain target ranges and alert thresholds',
       icon: Thermometer,
-      items: ['Chiller: 0–5°C', 'Dairy Container (Intermediate Freezer): -25 to -10°C', 'Coldroom: -25 to -10°C', 'Alert Thresholds'],
+      items: ['Chiller: 0–5°C', 'Dairy Container (Intermediate Freezer): -25 to -10°C', 'Distribution Coldroom: -25 to -10°C', 'Rental Cold Storage: -25 to -10°C', 'Alert Thresholds'],
     },
     {
       title: 'Waste Reasons',

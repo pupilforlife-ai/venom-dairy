@@ -22,8 +22,10 @@ type TransferKind = 'intermediate' | 'finished';
 const standardLocations = [
   'Chiller',
   'Dairy Container (Intermediate Freezer)',
+  'Dairy Container (Finished Stock)',
   'Coldroom',
-  'Finished Production Stock',
+  'Distribution Coldroom',
+  'Rental Cold Storage',
 ];
 
 function formatQuantity(value: number) {
@@ -108,7 +110,7 @@ export default function Inventory() {
             totalPackets: paneerSkuByCode[entry.sku]?.packMode === 'units'
               ? (entry.cases || 0) * (paneerSkuByCode[entry.sku]?.unitsPerCase || 0) + (entry.loose || 0)
               : 0,
-            storageLocation: 'Finished Production Stock',
+            storageLocation: 'Dairy Container (Finished Stock)',
             status: 'awaiting_handover',
             createdAt: round.completedAt || round.startTime,
             sourceBatchCodes: [sourceBatchCode],

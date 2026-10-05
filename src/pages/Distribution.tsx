@@ -13,7 +13,8 @@ import {
 import { Modal } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { useSupabaseState } from '../hooks/useSupabaseState';
-import { DistributionHandover, DistributionHandoverSource } from '../data/mockData';
+import { DistributionHandover, DistributionHandoverSource, FinishedStockLot } from '../data/mockData';
+import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import { useApp } from '../store/AppContext';
 
 type CandidateUnit = 'kg' | 'packets' | 'bottles';
@@ -30,6 +31,9 @@ interface DistributionCandidate {
   looseQuantity?: number;
   storageLocation?: string;
   detail: string;
+  sku?: string;
+  sourceIds?: string[];
+  sourceBatchCodes?: string[];
 }
 
 interface DistributionCrumbingBatch {
@@ -48,16 +52,27 @@ interface HandoverForm {
   unit: CandidateUnit;
   destination: string;
   handedOverBy: string;
+  verifiedCases: number;
+  verifiedLoose: number;
+  quantityVerified: boolean;
+  extraSourceRoundId: string;
   notes: string;
 }
+
+const finishedStockOrigin = 'Dairy Container (Finished Stock)';
+const distributionStorageLocations = ['Distribution Coldroom', 'Rental Cold Storage'] as const;
 
 const emptyForm: HandoverForm = {
   productName: '',
   batchCode: '',
   quantity: 0,
   unit: 'kg',
-  destination: 'Distribution',
+  destination: distributionStorageLocations[0],
   handedOverBy: '',
+  verifiedCases: 0,
+  verifiedLoose: 0,
+  quantityVerified: false,
+  extraSourceRoundId: '',
   notes: '',
 };
 
@@ -76,6 +91,7 @@ export default function Distribution() {
     finishedStock,
     milkLots,
     productionRounds,
+    addFinishedStock,
     updateFinishedStock,
     updateMilkLot,
     updateProductionRound,
@@ -88,27 +104,44 @@ export default function Distribution() {
   const [form, setForm] = useState<HandoverForm>(emptyForm);
 
   const candidates = useMemo<DistributionCandidate[]>(() => {
-    const finishedCandidates: DistributionCandidate[] = finishedStock
+    const finishedBySku = new Map<string, FinishedStockLot[]>();
+    finishedStock
       .filter(stock => stock.status === 'awaiting_handover')
-      .map(stock => {
-        const weight = stock.weightKg ?? stock.looseWeightKg;
-        const isWeightStock = weight !== undefined;
-        return {
-          id: `finished:${stock.id}`,
-          sourceType: 'finished_stock',
-          sourceId: stock.id,
-          productName: stock.productName,
-          batchCode: (stock.sourceBatchCodes || [])[0] || stock.sku,
-          quantity: isWeightStock ? weight : stock.totalPackets,
-          unit: isWeightStock ? 'kg' : 'packets',
-          cases: stock.cases,
-          looseQuantity: stock.loosePackets,
-          storageLocation: stock.storageLocation,
-          detail: isWeightStock
-            ? `${weight.toFixed(2)} kg finished stock`
-            : `${stock.cases} cases · ${stock.loosePackets} loose packets`,
-        };
+      .forEach(stock => {
+        const existing = finishedBySku.get(stock.sku) || [];
+        existing.push(stock);
+        finishedBySku.set(stock.sku, existing);
       });
+
+    const finishedCandidates: DistributionCandidate[] = [...finishedBySku.entries()].map(([sku, stocks]) => {
+      const first = stocks[0];
+      const sourceBatchCodes = [...new Set(stocks.flatMap(stock => stock.sourceBatchCodes || []).filter(Boolean))];
+      const locations = [...new Set(stocks.map(stock => stock.storageLocation === 'Finished Production Stock' ? finishedStockOrigin : stock.storageLocation).filter(Boolean))];
+      const isWeightStock = stocks.some(stock => stock.weightKg !== undefined || stock.looseWeightKg !== undefined);
+      const quantity = isWeightStock
+        ? stocks.reduce((sum, stock) => sum + (stock.weightKg ?? stock.looseWeightKg ?? 0), 0)
+        : stocks.reduce((sum, stock) => sum + (stock.totalPackets || 0), 0);
+      const cases = stocks.reduce((sum, stock) => sum + (stock.cases || 0), 0);
+      const loose = stocks.reduce((sum, stock) => sum + (stock.loosePackets || 0), 0);
+      return {
+        id: `finished-sku:${sku}`,
+        sourceType: 'finished_stock',
+        sourceId: first.id,
+        sourceIds: stocks.map(stock => stock.id),
+        sourceBatchCodes,
+        sku,
+        productName: first.productName,
+        batchCode: sourceBatchCodes.length === 1 ? sourceBatchCodes[0] : `${sku} · ${stocks.length} packed batches`,
+        quantity,
+        unit: isWeightStock ? 'kg' : 'packets',
+        cases,
+        looseQuantity: loose,
+        storageLocation: locations.length === 1 ? locations[0] : `${locations.length} locations`,
+        detail: isWeightStock
+          ? `${cases} cases · ${quantity.toFixed(2)} kg · ${stocks.length} packed batches`
+          : `${cases} cases · ${loose} loose · ${quantity} packets · ${stocks.length} packed batches`,
+      };
+    });
 
     const halloumiCandidates: DistributionCandidate[] = milkLots
       .filter(lot => {
@@ -200,6 +233,19 @@ export default function Distribution() {
     return [...finishedCandidates, ...halloumiCandidates, ...crumbingCandidates, ...productionCandidates];
   }, [crumbingBatches, finishedStock, milkLots, productionRounds]);
 
+  const extraSourceRounds = useMemo(() => {
+    if (selectedCandidate?.sourceType !== 'finished_stock' || !selectedCandidate.sku) return [];
+    return productionRounds
+      .filter(round => {
+        if (round.type !== 'D' && round.type !== 'C/S') return false;
+        if (['scheduled', 'cancelled', 'spoiled', 'handed_over'].includes(round.status)) return false;
+        const balance = round.remainingBalance ?? round.intermediateBalance ?? 0;
+        if (balance <= 0) return false;
+        return getAllowedPaneerSkus(round.type, round.cuttingType).some(definition => definition.sku === selectedCandidate.sku);
+      })
+      .sort((a, b) => b.shiftNumber - a.shiftNumber || b.roundNumber - a.roundNumber);
+  }, [productionRounds, selectedCandidate]);
+
   const pendingKg = candidates.filter(candidate => candidate.unit === 'kg').reduce((sum, candidate) => sum + candidate.quantity, 0);
   const pendingPackets = candidates.filter(candidate => candidate.unit === 'packets').reduce((sum, candidate) => sum + candidate.quantity, 0);
 
@@ -210,8 +256,12 @@ export default function Distribution() {
       batchCode: candidate.batchCode,
       quantity: candidate.quantity,
       unit: candidate.unit,
-      destination: 'Distribution',
+  destination: distributionStorageLocations[0],
       handedOverBy: '',
+      verifiedCases: candidate.cases || 0,
+      verifiedLoose: candidate.looseQuantity || 0,
+      quantityVerified: false,
+      extraSourceRoundId: '',
       notes: '',
     });
     setShowHandoverModal(true);
@@ -221,6 +271,32 @@ export default function Distribution() {
     setSelectedCandidate(null);
     setForm(emptyForm);
     setShowHandoverModal(true);
+  };
+
+  const selectedFinishedDefinition = selectedCandidate?.sku ? paneerSkuByCode[selectedCandidate.sku] : undefined;
+  const selectedFinishedExtraCases = selectedCandidate?.sourceType === 'finished_stock'
+    ? Math.max(0, form.verifiedCases - (selectedCandidate.cases || 0))
+    : 0;
+  const selectedFinishedExtraLoose = selectedCandidate?.sourceType === 'finished_stock'
+    ? Math.max(0, form.verifiedLoose - (selectedCandidate.looseQuantity || 0))
+    : 0;
+  const selectedFinishedExtraWeight = selectedCandidate?.sourceType !== 'finished_stock'
+    ? 0
+    : !selectedFinishedDefinition
+      ? 0
+      : selectedFinishedDefinition.packMode === 'units'
+        ? getPaneerPackWeight(selectedFinishedDefinition, selectedFinishedExtraCases, selectedFinishedExtraLoose, 0, 0)
+        : Math.max(0, form.quantity - selectedCandidate.quantity);
+
+  const updateVerifiedPackedCounts = (changes: Partial<Pick<HandoverForm, 'verifiedCases' | 'verifiedLoose'>>) => {
+    setForm(current => {
+      const next = { ...current, ...changes };
+      next.quantityVerified = false;
+      if (selectedFinishedDefinition?.packMode === 'units') {
+        next.quantity = Math.max(0, next.verifiedCases) * (selectedFinishedDefinition.unitsPerCase || 0) + Math.max(0, next.verifiedLoose);
+      }
+      return next;
+    });
   };
 
   const closeModal = () => {
@@ -233,21 +309,86 @@ export default function Distribution() {
     const productName = form.productName.trim();
     const batchCode = form.batchCode.trim();
     const handedOverBy = form.handedOverBy.trim();
-    if (!productName || !batchCode || !handedOverBy || form.quantity <= 0) {
-      showToast('error', 'Enter the product, batch, quantity, and person handing it over');
+    const isFinishedStockCandidate = selectedCandidate?.sourceType === 'finished_stock';
+    if (!productName || !batchCode || !handedOverBy || !form.destination || form.quantity <= 0) {
+      showToast('error', 'Enter the product, batch, quantity, receiving location, and person handing it over');
       return;
     }
-    if (selectedCandidate && form.quantity > selectedCandidate.quantity + 0.01) {
+    if (selectedCandidate && !isFinishedStockCandidate && form.quantity > selectedCandidate.quantity + 0.01) {
       showToast('error', `Only ${formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)} is available`);
       return;
     }
-    if (selectedCandidate?.sourceType === 'finished_stock' && Math.abs(form.quantity - selectedCandidate.quantity) > 0.01) {
-      showToast('error', 'Finished stock must be handed over as a complete packed stock line');
-      return;
+    if (isFinishedStockCandidate) {
+      if (!form.quantityVerified) {
+        showToast('error', 'Confirm that the packed SKU quantity was physically verified before handover');
+        return;
+      }
+      if (form.quantity < selectedCandidate.quantity - 0.01) {
+        showToast('error', 'The verified quantity cannot be below the recorded packed SKU total');
+        return;
+      }
+      if (form.quantity > selectedCandidate.quantity + 0.01 && !selectedFinishedDefinition) {
+        showToast('error', 'This SKU is not configured for balance allocation; add its pack definition before recording a surplus');
+        return;
+      }
+      if (selectedFinishedExtraWeight > 0) {
+        const extraRound = productionRounds.find(round => round.id === form.extraSourceRoundId);
+        if (!extraRound || !extraSourceRounds.some(round => round.id === form.extraSourceRoundId) || !selectedFinishedDefinition) {
+          showToast('error', 'Select the production round whose balance paneer covers the extra quantity');
+          return;
+        }
+        const currentBalance = extraRound.remainingBalance ?? extraRound.intermediateBalance ?? 0;
+        if (selectedFinishedExtraWeight > currentBalance + 0.01) {
+          showToast('error', `The extra quantity exceeds ${extraRound.milkLotCode}/S${extraRound.shiftNumber}/R${extraRound.roundNumber}'s balance of ${currentBalance.toFixed(2)} kg`);
+          return;
+        }
+        const sourceBatchCode = extraRound.batchCode || extraRound.sourceBatchCode || `${extraRound.milkLotCode}/S${extraRound.shiftNumber}/R${extraRound.roundNumber}/${extraRound.type}`;
+        const packingRunId = `pb-${extraRound.id}-distribution-${Date.now()}`;
+        const extraEntry = {
+          sku: selectedCandidate.sku!,
+          cases: selectedFinishedDefinition.packMode === 'units' ? selectedFinishedExtraCases : 0,
+          loose: selectedFinishedDefinition.packMode === 'units' ? selectedFinishedExtraLoose : 0,
+          packingRunId,
+          reason: 'Physical distribution count adjustment',
+          ...(selectedFinishedDefinition.packMode === 'weight_only'
+            ? { weightKg: selectedFinishedExtraWeight }
+            : selectedFinishedDefinition.packMode === 'weight_loose'
+              ? { looseWeightKg: selectedFinishedExtraWeight }
+              : {}),
+        };
+        addFinishedStock({
+          sku: selectedCandidate.sku!,
+          productName: selectedCandidate.productName,
+          packingRunId,
+          cases: extraEntry.cases,
+          loosePackets: extraEntry.loose,
+          totalPackets: selectedFinishedDefinition.packMode === 'units'
+            ? selectedFinishedExtraCases * (selectedFinishedDefinition.unitsPerCase || 0) + selectedFinishedExtraLoose
+            : 0,
+          storageLocation: form.destination,
+          status: 'handed_over',
+          createdAt: new Date().toISOString(),
+          sourceBatchCodes: [sourceBatchCode],
+          ...(selectedFinishedDefinition.packMode === 'weight_only'
+            ? { weightKg: selectedFinishedExtraWeight }
+            : selectedFinishedDefinition.packMode === 'weight_loose'
+              ? { looseWeightKg: selectedFinishedExtraWeight }
+              : {}),
+        });
+        const newBalance = currentBalance - selectedFinishedExtraWeight;
+        updateProductionRound(extraRound.id, {
+          status: newBalance <= 0 ? 'packed' : extraRound.status,
+          packedSkus: [...(extraRound.packedSkus || []), extraEntry],
+          remainingBalance: newBalance,
+          intermediateBalance: newBalance,
+        });
+      }
     }
 
     if (selectedCandidate?.sourceType === 'finished_stock') {
-      updateFinishedStock(selectedCandidate.sourceId, { status: 'handed_over' });
+      (selectedCandidate.sourceIds || [selectedCandidate.sourceId]).forEach(sourceId => {
+        updateFinishedStock(sourceId, { status: 'handed_over', storageLocation: form.destination });
+      });
     }
 
     if (selectedCandidate?.sourceType === 'halloumi_pool') {
@@ -282,6 +423,16 @@ export default function Distribution() {
       ));
     }
 
+    const now = new Date().toISOString();
+    const sourceNote = isFinishedStockCandidate && selectedCandidate?.sourceBatchCodes?.length
+      ? `Packed source batches: ${selectedCandidate.sourceBatchCodes.join(', ')}`
+      : '';
+    const extraRound = isFinishedStockCandidate && selectedFinishedExtraWeight > 0
+      ? productionRounds.find(round => round.id === form.extraSourceRoundId)
+      : undefined;
+    const extraNote = extraRound
+      ? `Extra quantity recorded against ${extraRound.milkLotCode}/S${extraRound.shiftNumber}/R${extraRound.roundNumber} balance`
+      : '';
     const record: DistributionHandover = {
       id: `dist-${Date.now()}`,
       sourceType: selectedCandidate?.sourceType || 'manual',
@@ -290,13 +441,16 @@ export default function Distribution() {
       batchCode,
       quantity: form.quantity,
       unit: form.unit,
-      cases: selectedCandidate?.cases,
-      looseQuantity: selectedCandidate?.looseQuantity,
-      storageLocation: selectedCandidate?.storageLocation,
-      destination: form.destination.trim() || 'Distribution',
+      cases: isFinishedStockCandidate ? form.verifiedCases : selectedCandidate?.cases,
+      looseQuantity: isFinishedStockCandidate ? form.verifiedLoose : selectedCandidate?.looseQuantity,
+      storageLocation: form.destination,
+      destination: form.destination,
       handedOverBy,
-      handedOverAt: new Date().toISOString(),
-      notes: form.notes.trim() || undefined,
+      handedOverAt: now,
+      quantityVerified: isFinishedStockCandidate ? form.quantityVerified : undefined,
+      quantityVerifiedBy: isFinishedStockCandidate ? handedOverBy : undefined,
+      quantityVerifiedAt: isFinishedStockCandidate ? now : undefined,
+      notes: [sourceNote, extraNote, form.notes.trim()].filter(Boolean).join(' · ') || undefined,
     };
     setHandovers(current => [...current, record]);
     showToast('success', `${productName} recorded as handed over to ${record.destination}`);
@@ -308,7 +462,7 @@ export default function Distribution() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Distribution</h2>
-          <p className="mt-0.5 text-sm text-slate-500">Record finished products transferred from Production to Distribution, including vacuumed Halloumi.</p>
+          <p className="mt-0.5 text-sm text-slate-500">Packed stock is staged in the dairy container. Record its handover to the Distribution coldroom or rental cold storage.</p>
         </div>
         <button type="button" onClick={openManualHandover} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
           <Plus className="h-4 w-4" /> Record product handover
@@ -332,12 +486,12 @@ export default function Distribution() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-sm">
-              <thead><tr className="border-b border-slate-100 text-left"><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Product</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Batch / source</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Quantity</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Location</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Action</th></tr></thead>
+              <thead><tr className="border-b border-slate-100 text-left"><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Product / SKU</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Packed sources</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Quantity</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Current location</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Action</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {candidates.map(candidate => (
                   <tr key={candidate.id} className="hover:bg-slate-50">
-                    <td className="px-3 py-3"><div className="font-medium text-slate-900">{candidate.productName}</div><div className="mt-1 text-xs text-slate-500">{candidate.detail}</div></td>
-                    <td className="px-3 py-3"><div className="inline-flex items-center gap-1 text-xs text-slate-600"><GitBranch className="h-3 w-3" /><code>{candidate.batchCode}</code></div></td>
+                    <td className="px-3 py-3"><div className="font-medium text-slate-900">{candidate.productName}</div>{candidate.sku && <div className="mt-1 inline-flex rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-indigo-700">{candidate.sku}</div>}<div className="mt-1 text-xs text-slate-500">{candidate.detail}</div></td>
+                    <td className="px-3 py-3"><div className="inline-flex items-center gap-1 text-xs text-slate-600"><GitBranch className="h-3 w-3" /><code>{candidate.batchCode}</code></div>{candidate.sourceBatchCodes && candidate.sourceBatchCodes.length > 1 && <div className="mt-1 text-[11px] text-slate-500">{candidate.sourceBatchCodes.length} source batches grouped</div>}</td>
                     <td className="px-3 py-3 font-semibold text-slate-900">{formatQuantity(candidate.quantity, candidate.unit)}{candidate.cases !== undefined && <div className="text-xs font-normal text-slate-500">{candidate.cases} cases · {candidate.looseQuantity || 0} loose</div>}</td>
                     <td className="px-3 py-3 text-xs text-slate-600">{candidate.storageLocation || '—'}</td>
                     <td className="px-3 py-3"><button type="button" onClick={() => openCandidate(candidate)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">Hand over <ArrowRight className="h-3 w-3" /></button></td>
@@ -351,22 +505,20 @@ export default function Distribution() {
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3"><div><h3 className="text-sm font-semibold text-slate-900">Distribution handover history</h3><p className="mt-0.5 text-xs text-slate-500">Every new transfer is stored as a traceable record.</p></div><ClipboardCheck className="h-5 w-5 text-slate-400" /></div>
-        {handovers.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">No new distribution handovers recorded yet.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-sm"><thead><tr className="border-b border-slate-100 text-left"><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Product</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Batch</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Quantity</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Destination</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Recorded by</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Date</th></tr></thead><tbody className="divide-y divide-slate-100">{[...handovers].reverse().map(record => <tr key={record.id} className="hover:bg-slate-50"><td className="px-4 py-3 font-medium text-slate-900">{record.productName}</td><td className="px-4 py-3 font-mono text-xs text-slate-600">{record.batchCode}</td><td className="px-4 py-3 font-semibold text-slate-900">{formatQuantity(record.quantity, record.unit)}</td><td className="px-4 py-3 text-slate-700">{record.destination}</td><td className="px-4 py-3 text-slate-600">{record.handedOverBy}</td><td className="px-4 py-3 text-xs text-slate-500">{new Date(record.handedOverAt).toLocaleString()}</td></tr>)}</tbody></table></div>}
+        {handovers.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">No new distribution handovers recorded yet.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead><tr className="border-b border-slate-100 text-left"><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Product</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Batch</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Quantity</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Physical check</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Receiving location</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Recorded by</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Date</th></tr></thead><tbody className="divide-y divide-slate-100">{[...handovers].reverse().map(record => <tr key={record.id} className="hover:bg-slate-50"><td className="px-4 py-3 font-medium text-slate-900">{record.productName}</td><td className="px-4 py-3 font-mono text-xs text-slate-600">{record.batchCode}</td><td className="px-4 py-3 font-semibold text-slate-900">{formatQuantity(record.quantity, record.unit)}{record.cases !== undefined && <div className="text-xs font-normal text-slate-500">{record.cases} cases · {record.looseQuantity || 0} loose</div>}</td><td className="px-4 py-3 text-xs text-slate-600">{record.quantityVerified ? <span className="font-semibold text-emerald-700">Verified{record.quantityVerifiedBy ? ` · ${record.quantityVerifiedBy}` : ''}</span> : '—'}</td><td className="px-4 py-3 text-slate-700">{record.storageLocation || record.destination}</td><td className="px-4 py-3 text-slate-600">{record.handedOverBy}</td><td className="px-4 py-3 text-xs text-slate-500">{new Date(record.handedOverAt).toLocaleString()}</td></tr>)}</tbody></table></div>}
       </div>
 
       <Modal isOpen={showHandoverModal} onClose={closeModal} title={selectedCandidate ? `Hand over ${selectedCandidate.productName}` : 'Record product handover'}>
         <div className="space-y-4">
-          <p className="text-xs text-slate-500">This records a physical transfer to Distribution. It is separate from recording a Halloumi sale; vacuumed Halloumi remains chilled stock until an explicit transfer or allocation is recorded.</p>
+          <p className="text-xs text-slate-500">Packed stock is held in the dairy container before handover. Choose the cold store that physically receives it; this location is saved on the stock line and handover history.</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Product</label><input value={form.productName} disabled={Boolean(selectedCandidate)} onChange={event => setForm({ ...form, productName: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50" placeholder="e.g. Halloumi" /></div>
             <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Batch / lot</label><input value={form.batchCode} disabled={Boolean(selectedCandidate)} onChange={event => setForm({ ...form, batchCode: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm disabled:bg-slate-50" placeholder="Batch code" /></div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Quantity</label><input type="number" min="0" step={form.unit === 'kg' ? '0.01' : '1'} max={selectedCandidate?.quantity} value={form.quantity || ''} onChange={event => setForm({ ...form, quantity: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />{selectedCandidate && <p className="mt-1 text-[11px] text-slate-500">Available: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}</p>}</div>
-            <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Unit</label><select value={form.unit} disabled={Boolean(selectedCandidate)} onChange={event => setForm({ ...form, unit: event.target.value as CandidateUnit })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50"><option value="kg">kg</option><option value="packets">packets</option><option value="bottles">bottles</option></select></div>
-          </div>
+          {selectedCandidate?.sourceType === 'finished_stock' && selectedFinishedDefinition?.packMode === 'units' ? <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Physical packed quantity</p><p className="mt-1 text-xs text-indigo-700">Check the actual cases and loose packets. Any surplus will be attributed to a production round balance below.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified cases</label><input type="number" min="0" step="1" value={form.verifiedCases || ''} onChange={event => updateVerifiedPackedCounts({ verifiedCases: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified loose packets</label><input type="number" min="0" step="1" value={form.verifiedLoose || ''} onChange={event => updateVerifiedPackedCounts({ verifiedLoose: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div></div><div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-sm text-slate-700"><span className="font-semibold">Verified total:</span> {form.quantity} packets ({getPaneerPackWeight(selectedFinishedDefinition, form.verifiedCases, form.verifiedLoose, 0, 0).toFixed(2)} kg) · {form.verifiedCases} cases + {form.verifiedLoose} loose packets</div></div> : <div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">{selectedCandidate?.sourceType === 'finished_stock' ? 'Verified quantity' : 'Quantity'}</label><input type="number" min="0" step={form.unit === 'kg' ? '0.01' : '1'} max={selectedCandidate && selectedCandidate.sourceType !== 'finished_stock' ? selectedCandidate.quantity : undefined} value={form.quantity || ''} onChange={event => setForm({ ...form, quantity: Number(event.target.value) || 0, quantityVerified: false })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />{selectedCandidate && <p className="mt-1 text-[11px] text-slate-500">Recorded: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}</p>}</div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Unit</label><select value={form.unit} disabled={Boolean(selectedCandidate)} onChange={event => setForm({ ...form, unit: event.target.value as CandidateUnit })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50"><option value="kg">kg</option><option value="packets">packets</option><option value="bottles">bottles</option></select></div></div>}
+          {selectedCandidate?.sourceType === 'finished_stock' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Handover quantity check</p><div className="mt-1 space-y-1 text-xs text-amber-800"><p>Recorded on board: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}{selectedCandidate.cases !== undefined && ` · ${selectedCandidate.cases} cases + ${selectedCandidate.looseQuantity || 0} loose`}</p><p>Physical count: {formatQuantity(form.quantity, form.unit)}{selectedFinishedDefinition?.packMode === 'units' && ` · ${form.verifiedCases} cases + ${form.verifiedLoose} loose`}</p>{selectedFinishedExtraWeight > 0 && <p className="font-semibold">Extra to record against a production balance: {selectedFinishedExtraWeight.toFixed(2)} kg</p>}</div>{selectedFinishedExtraWeight > 0 && <div className="mt-3"><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Source round for extra quantity</label><select value={form.extraSourceRoundId} onChange={event => setForm({ ...form, extraSourceRoundId: event.target.value })} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"><option value="">Select a round with remaining balance</option>{extraSourceRounds.map(round => <option key={round.id} value={round.id}>{round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber} · {(round.remainingBalance ?? round.intermediateBalance ?? 0).toFixed(2)} kg balance</option>)}</select><p className="mt-1 text-[11px] text-amber-700">This adds the surplus packing entry to that round and reduces its remaining paneer balance.</p></div>}<label className="mt-3 flex items-start gap-2 text-xs text-amber-900"><input type="checkbox" checked={form.quantityVerified} onChange={event => setForm({ ...form, quantityVerified: event.target.checked })} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-emerald-600" /><span>I physically verified the packed quantity and confirm it is ready for transfer.</span></label></div>}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Destination</label><input value={form.destination} onChange={event => setForm({ ...form, destination: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Distribution" /></div>
+            <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Receiving storage location</label><select value={form.destination} onChange={event => setForm({ ...form, destination: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select receiving location</option>{distributionStorageLocations.map(location => <option key={location} value={location}>{location}</option>)}</select></div>
             <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Handed over by</label><input value={form.handedOverBy} onChange={event => setForm({ ...form, handedOverBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Staff name" /></div>
           </div>
           <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Notes (optional)</label><textarea value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} rows={2} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Condition, recipient, or delivery note" /></div>

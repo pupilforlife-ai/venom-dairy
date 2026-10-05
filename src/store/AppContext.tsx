@@ -100,6 +100,8 @@ const temperatureProfiles: Record<string, { location: string; targetMin: number;
   },
   'Finished Stock Chiller': { location: 'Coldroom', targetMin: -25, targetMax: -10 },
   Coldroom: { location: 'Coldroom', targetMin: -25, targetMax: -10 },
+  'Distribution Coldroom': { location: 'Distribution Coldroom', targetMin: -25, targetMax: -10 },
+  'Rental Cold Storage': { location: 'Rental Cold Storage', targetMin: -25, targetMax: -10 },
 };
 
 function normalizeTemperatureReading(reading: TemperatureReading): TemperatureReading {
@@ -125,9 +127,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ? { ...lot, storageLocation: 'Dairy Container (Intermediate Freezer)' }
     : lot);
   const [storedFinishedStock, setFinishedStock] = useSupabaseState<FinishedStockLot[]>('vejoy_finishedStock', initialFinished);
-  const finishedStock = storedFinishedStock.map(stock => stock.storageLocation === 'Intermediate Freezer'
-    ? { ...stock, storageLocation: 'Dairy Container (Intermediate Freezer)' }
-    : stock);
+  const finishedStock = storedFinishedStock.map(stock => {
+    // Packed finished goods are staged in the dairy container until a
+    // Distribution handover assigns the receiving cold store. Keep older
+    // awaiting-handover snapshots using either former staging label visible
+    // under the correct location without changing completed transfer history.
+    if (stock.status === 'awaiting_handover' && [
+      'Finished Production Stock',
+      'Intermediate Freezer',
+      'Dairy Container (Intermediate Freezer)',
+    ].includes(stock.storageLocation)) {
+      return { ...stock, storageLocation: 'Dairy Container (Finished Stock)' };
+    }
+    return stock;
+  });
   const [storedTemperatureReadings, setTemperatureReadings] = useSupabaseState<TemperatureReading[]>('vejoy_temperatureReadings', initialTemps);
   const temperatureReadings = storedTemperatureReadings.map(normalizeTemperatureReading);
   const [wasteEvents, setWasteEvents] = useSupabaseState<WasteEvent[]>('vejoy_wasteEvents', initialWaste);

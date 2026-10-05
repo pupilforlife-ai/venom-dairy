@@ -26,6 +26,8 @@ const tempProfiles = [
   { location: 'Chiller', targetMin: 0, targetMax: 5 },
   { location: 'Dairy Container (Intermediate Freezer)', targetMin: -25, targetMax: -10 },
   { location: 'Coldroom', targetMin: -25, targetMax: -10 },
+  { location: 'Distribution Coldroom', targetMin: -25, targetMax: -10 },
+  { location: 'Rental Cold Storage', targetMin: -25, targetMax: -10 },
 ];
 
 export default function ColdChain() {
@@ -144,6 +146,8 @@ export default function ColdChain() {
               <Line type="monotone" dataKey="Chiller" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="Dairy Container (Intermediate Freezer)" name="Dairy Container" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="Coldroom" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="Distribution Coldroom" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="Rental Cold Storage" stroke="#ec4899" strokeWidth={2} dot={{ r: 3 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
