@@ -217,11 +217,6 @@ export default function ButterTab() {
       showToast('error', 'Milk lot not found');
       return;
     }
-    if (sourceMilkLot?.productionClosed) {
-      showToast('error', `Production for milk lot ${sourceMilkLot.lotCode} is closed`);
-      return;
-    }
-
     // For internal cream, deduct from the cream pool
     if (newRound.creamSource === 'internal') {
       const milkLot = milkLots.find(m => m.id === newRound.creamLotId);
@@ -862,17 +857,20 @@ export default function ButterTab() {
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk lot context</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Source milk lot</label>
             <select
               value={newRound.milkLotId}
               onChange={(e) => setNewRound({ ...newRound, milkLotId: e.target.value, creamLotId: newRound.creamSource === 'internal' ? e.target.value : newRound.creamLotId })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
               <option value="">Select milk lot</option>
-              {milkLots.filter(l => l.status === 'active').map(lot => (
-                <option key={lot.id} value={lot.id}>{lot.lotCode}</option>
+              {milkLots.map(lot => (
+                <option key={lot.id} value={lot.id}>
+                  {lot.lotCode}{lot.productionClosed ? ' · milk processing closed' : ''}
+                </option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-slate-500">Closing milk processing does not close downstream cream-to-butter production.</p>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Source</label>

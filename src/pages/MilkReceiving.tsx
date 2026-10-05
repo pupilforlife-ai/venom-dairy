@@ -930,7 +930,7 @@ export default function MilkReceiving() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Notes (optional)</label>
             <textarea value={weeklyCipNotes} onChange={(e) => setWeeklyCipNotes(e.target.value)} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={3} placeholder="Weekly cleaning observations or corrective action" />
           </div>
-          <p className="text-xs text-slate-500">Closing prevents new production shifts and rounds from being created for this lot. Existing records remain available.</p>
+          <p className="text-xs text-slate-500">Closing stops new raw-milk shifts and rounds for this lot. Existing rounds, cream-to-butter processing, cutting, packing, crumbing and distribution remain available.</p>
           <div className="flex gap-2 pt-2"><button onClick={handleCloseLot} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium">Record weekly CIP & close</button><button onClick={() => setShowCloseModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>
         </div>
       </Modal>
