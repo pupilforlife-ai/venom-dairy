@@ -299,6 +299,59 @@ export function getMilkLotProductionReconciliation(lot: MilkLot, rounds: Product
   };
 }
 
+/**
+ * Reconcile the internal cream pool from auditable production records.
+ *
+ * Cream recovery and butter input are recorded on production rounds. Those
+ * records are the source of truth; the historical `MilkLot.creamPool` object
+ * is only retained for its batch metadata. Keeping a second incremented total
+ * allowed stale browser writes to omit otherwise valid cream recoveries.
+ */
+export function getMilkLotCreamPool(lot: MilkLot, rounds: ProductionRound[]): CreamPool | undefined {
+  const contributedRounds = rounds.filter(round =>
+    (round.milkLotId === lot.id || round.milkLotCode === lot.lotCode) &&
+    !['cancelled', 'spoiled'].includes(round.status) &&
+    (round.creamRecovered || 0) > 0
+  );
+  const totalCream = contributedRounds.reduce(
+    (total, round) => total + Math.max(0, round.creamRecovered || 0),
+    0,
+  );
+
+  const creamBatchCode = getCreamBatchCode(lot.lotCode);
+  const internalButterRounds = rounds.filter(round =>
+    round.type === 'Butter' &&
+    round.status !== 'cancelled' &&
+    (
+      round.creamSource === 'internal' ||
+      round.sourceBatchCode === creamBatchCode
+    ) &&
+    (round.creamLotId === lot.id || round.milkLotId === lot.id || round.milkLotCode === lot.lotCode)
+  );
+  const usedInButter = internalButterRounds.reduce(
+    (total, round) => total + Math.max(0, round.actualInput || round.plannedInput || 0),
+    0,
+  );
+
+  if (contributedRounds.length === 0 && internalButterRounds.length === 0 && !lot.creamPool) {
+    return undefined;
+  }
+
+  const roundToTwo = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+  const reconciledTotal = roundToTwo(totalCream);
+  const reconciledUsed = roundToTwo(usedInButter);
+
+  return {
+    milkLotId: lot.id,
+    milkLotCode: lot.lotCode,
+    batchId: lot.creamPool?.batchId || creamBatchCode,
+    totalCream: reconciledTotal,
+    usedInButter: reconciledUsed,
+    availableBalance: roundToTwo(Math.max(0, reconciledTotal - reconciledUsed)),
+    roundsContributed: contributedRounds.map(round => round.id),
+  };
+}
+
 export interface MilkStorageVessel {
   id: string;
   label: string;

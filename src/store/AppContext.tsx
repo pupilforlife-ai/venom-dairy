@@ -1,4 +1,4 @@
-import { createContext, useContext, ReactNode } from 'react';
+import { createContext, useContext, ReactNode, useEffect } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { supabase } from '../lib/supabase';
 import { 
@@ -22,6 +22,7 @@ import {
   CipRecord,
   cipRecords as initialCipRecords,
   statusFlow,
+  getMilkLotCreamPool,
   getMilkLotAccounting,
   isMilkProductionRound,
 } from '../data/mockData';
@@ -119,10 +120,30 @@ function normalizeTemperatureReading(reading: TemperatureReading): TemperatureRe
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [milkLots, setMilkLots] = useSupabaseState<MilkLot[]>('vejoy_milkLots', initialMilkLots);
+  const [storedMilkLots, setMilkLots, milkLotsLoaded] = useSupabaseState<MilkLot[]>('vejoy_milkLots', initialMilkLots);
   const [creamLots, setCreamLots] = useSupabaseState<CreamLot[]>('vejoy_creamLots', []);
   const [productionShifts, setProductionShifts] = useSupabaseState<ProductionShift[]>('vejoy_productionShifts', initialShifts);
-  const [productionRounds, setProductionRounds] = useSupabaseState<ProductionRound[]>('vejoy_productionRounds', initialRounds);
+  const [productionRounds, setProductionRounds, productionRoundsLoaded] = useSupabaseState<ProductionRound[]>('vejoy_productionRounds', initialRounds);
+  const milkLots = storedMilkLots.map(lot => ({
+    ...lot,
+    creamPool: getMilkLotCreamPool(lot, productionRounds),
+  }));
+  useEffect(() => {
+    // Keep the persisted pool snapshot correct for exports and direct database
+    // audits, while every screen continues to calculate from the round ledger.
+    // Wait for both collections to load so a slow initial rounds request can
+    // never replace a valid pool with an empty total.
+    if (!milkLotsLoaded || !productionRoundsLoaded) return;
+    const needsReconciliation = storedMilkLots.some(lot =>
+      JSON.stringify(lot.creamPool) !== JSON.stringify(getMilkLotCreamPool(lot, productionRounds))
+    );
+    if (!needsReconciliation) return;
+
+    setMilkLots(currentLots => currentLots.map(lot => ({
+      ...lot,
+      creamPool: getMilkLotCreamPool(lot, productionRounds),
+    })));
+  }, [milkLotsLoaded, productionRounds, productionRoundsLoaded, storedMilkLots]);
   const [storedIntermediateLots, setIntermediateLots] = useSupabaseState<IntermediateLot[]>('vejoy_intermediateLots', initialIntermediate);
   const intermediateLots = storedIntermediateLots.map(lot => lot.storageLocation === 'Intermediate Freezer'
     ? { ...lot, storageLocation: 'Dairy Container (Intermediate Freezer)' }

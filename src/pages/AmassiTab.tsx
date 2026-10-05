@@ -78,7 +78,6 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
     productionShifts,
     milkLots,
     updateProductionRound,
-    updateMilkLot,
     addProductionRound,
     addProductionShift,
     addIntermediateLot,
@@ -325,30 +324,6 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
       creamRecoveredAt: new Date().toISOString(),
       creamRecoveredBy: creamForm.recordedBy,
     });
-
-    const milkLot = milkLots.find(lot => lot.id === round.milkLotId);
-    if (milkLot) {
-      const existingPool = milkLot.creamPool || {
-        milkLotId: milkLot.id,
-        milkLotCode: milkLot.lotCode,
-        batchId: getCreamBatchCode(milkLot.lotCode),
-        totalCream: 0,
-        usedInButter: 0,
-        availableBalance: 0,
-        roundsContributed: [],
-      };
-      updateMilkLot(milkLot.id, {
-        creamPool: {
-          ...existingPool,
-          batchId: existingPool.batchId || getCreamBatchCode(milkLot.lotCode),
-          totalCream: existingPool.totalCream + totalWeight,
-          availableBalance: existingPool.availableBalance + totalWeight,
-          roundsContributed: existingPool.roundsContributed.includes(round.id)
-            ? existingPool.roundsContributed
-            : [...existingPool.roundsContributed, round.id],
-        },
-      });
-    }
 
     addIntermediateLot({
       lotCode: `CREAM-${round.milkLotCode}-S${round.shiftNumber}-R${round.roundNumber}`,

@@ -22,7 +22,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getCreamBatchCode, milkProductionVessels, statusFlow, statusLabels, statusColors, CipRecord } from '../data/mockData';
+import { milkProductionVessels, statusFlow, statusLabels, statusColors, CipRecord } from '../data/mockData';
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import HalloumiTab from './HalloumiTab';
@@ -91,7 +91,7 @@ export default function ProductionBoard() {
     advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
     addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot, updateIntermediateLot,
     removeProductionRound, cancelProductionRound, addWasteEvent, requestProductionRoundTypeChange, reviewProductionRoundTypeChange,
-    updateMilkLot, addFinishedStock, updateFinishedStock, addCipRecord, updateCipRecord
+    addFinishedStock, updateFinishedStock, addCipRecord, updateCipRecord
   } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
@@ -835,32 +835,6 @@ export default function ProductionBoard() {
       creamRecoveredAt: new Date().toISOString(),
       creamRecoveredBy: recoveredBy,
     });
-
-    // Update the milk lot's cream pool
-    const milkLot = milkLots.find(m => m.id === round.milkLotId);
-    if (milkLot) {
-      const existingPool = milkLot.creamPool || {
-        milkLotId: milkLot.id,
-        milkLotCode: milkLot.lotCode,
-        batchId: getCreamBatchCode(milkLot.lotCode),
-        totalCream: 0,
-        usedInButter: 0,
-        availableBalance: 0,
-        roundsContributed: [],
-      };
-      
-      updateMilkLot(milkLot.id, {
-        creamPool: {
-          ...existingPool,
-          batchId: existingPool.batchId || getCreamBatchCode(milkLot.lotCode),
-          totalCream: roundToTwo(Math.max(0, existingPool.totalCream + weightDelta)),
-          availableBalance: roundToTwo(Math.max(0, existingPool.availableBalance + weightDelta)),
-          roundsContributed: existingPool.roundsContributed.includes(round.id)
-            ? existingPool.roundsContributed
-            : [...existingPool.roundsContributed, round.id],
-        },
-      });
-    }
 
     // Also create or update the intermediate cream lot. Editing a recovery
     // must adjust the existing lot rather than create a duplicate.

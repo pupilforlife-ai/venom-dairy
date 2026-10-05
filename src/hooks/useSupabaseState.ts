@@ -100,6 +100,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const [storedValue, setStoredValue] = useState<T>(() => supabase
     ? (Array.isArray(initialValue) ? [] as T : initialValue)
     : readLocalValue(key, initialValue));
+  const [hasLoaded, setHasLoaded] = useState(!supabase);
   const valueRef = useRef(storedValue);
   // Supabase writes replace the complete JSON document for a key. Serialise
   // them so a slower request cannot finish after a newer edit and restore an
@@ -164,16 +165,21 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
       if (data) {
         // Do not let a slow initial read overwrite an edit made while that
         // read was in flight. The edit is already queued for persistence.
-        if (localWriteVersionRef.current !== loadVersion) return;
+        if (localWriteVersionRef.current !== loadVersion) {
+          setHasLoaded(true);
+          return;
+        }
         serverValueRef.current = data.value;
         valueRef.current = data.value;
         setStoredValue(data.value);
+        setHasLoaded(true);
         window.localStorage.setItem(key, JSON.stringify(data.value));
         return;
       }
 
       // Do not seed a missing production key with mock/demo data. The first
       // real user edit will create the row through setValue/queuePersist.
+      setHasLoaded(true);
     };
 
     void loadValue();
@@ -200,5 +206,5 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
     queuePersist(baseValue, nextValue, localVersion);
   };
 
-  return [storedValue, setValue] as const;
+  return [storedValue, setValue, hasLoaded] as const;
 }

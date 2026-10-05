@@ -231,18 +231,6 @@ export default function ButterTab() {
           return;
         }
         
-        const previousBalance = milkLot.creamPool.availableBalance;
-        
-        // Update the cream pool
-        updateMilkLot(milkLot.id, {
-          creamPool: {
-            ...milkLot.creamPool,
-            usedInButter: milkLot.creamPool.usedInButter + newRound.inputQuantity,
-            availableBalance: milkLot.creamPool.availableBalance - newRound.inputQuantity,
-          },
-        });
-        
-        console.log(`Cream pool updated: ${previousBalance} kg → ${previousBalance - newRound.inputQuantity} kg (used ${newRound.inputQuantity} kg)`);
       } else {
         console.warn('Milk lot or cream pool not found:', { milkLotId: newRound.creamLotId, milkLot });
       }
