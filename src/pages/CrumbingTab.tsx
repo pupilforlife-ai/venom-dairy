@@ -207,8 +207,11 @@ export default function CrumbingTab() {
     };
     if (nextForm.balanceRecorded) {
       const balanceWeightKg = Math.min(sourceWeightKg, Math.max(0, Number(nextForm.balanceWeightKg) || 0));
+      const wastageKg = Math.max(0, Number(nextForm.wastageKg) || 0);
       updates.balanceWeightKg = balanceWeightKg;
-      updates.weightCrumbedKg = Math.max(0, sourceWeightKg - balanceWeightKg);
+      // Dry paneer has three mutually exclusive destinations.  Wastage must
+      // be removed from the source before calculating the crumbed output.
+      updates.weightCrumbedKg = Math.max(0, sourceWeightKg - balanceWeightKg - wastageKg);
       updates.balanceRecordedAt = batch.balanceRecordedAt || new Date().toISOString();
     }
     return updates;
@@ -503,7 +506,12 @@ export default function CrumbingTab() {
     }
 
     const normalizedBalanceWeightKg = Math.min(sourceWeightKg, Math.max(0, balanceWeightKg));
-    const normalizedWeightCrumbedKg = Math.max(0, sourceWeightKg - normalizedBalanceWeightKg);
+    const normalizedWastageKg = Math.max(0, wastageKg);
+    if (normalizedBalanceWeightKg + normalizedWastageKg > sourceWeightKg + 0.01) {
+      showToast('error', 'Balance plus wastage cannot exceed the source paneer weight');
+      return;
+    }
+    const normalizedWeightCrumbedKg = Math.max(0, sourceWeightKg - normalizedBalanceWeightKg - normalizedWastageKg);
     updateCrumbingBatch(selectedBatch, {
       status: 'crumbing',
       traysCrumbed: recipeForm.traysCrumbed,
@@ -511,7 +519,7 @@ export default function CrumbingTab() {
       sourceWeightKg,
       balanceWeightKg: normalizedBalanceWeightKg,
       weightCrumbedKg: normalizedWeightCrumbedKg,
-      wastageKg,
+      wastageKg: normalizedWastageKg,
       recipe: {
         flavourMultiplier: recipeForm.flavourMultiplier,
         batterMultiplier: recipeForm.batterMultiplier,
@@ -719,10 +727,11 @@ export default function CrumbingTab() {
 
   const renderSppRecipeDetails = (batch: CrumbingBatch) => {
     const sourceWeightKg = batch.sourceWeightKg || recipeForm.sourceWeightKg;
-    const weightCrumbedKg = Math.max(0, sourceWeightKg - recipeForm.balanceWeightKg);
+    const weightCrumbedKg = Math.max(0, sourceWeightKg - recipeForm.balanceWeightKg - recipeForm.wastageKg);
     const canComplete = recipeForm.balanceRecorded
       && recipeForm.balanceWeightKg >= 0
       && recipeForm.balanceWeightKg <= sourceWeightKg + 0.01
+      && recipeForm.balanceWeightKg + recipeForm.wastageKg <= sourceWeightKg + 0.01
       && recipeForm.traysCrumbed > 0
       && recipeForm.wastageKg >= 0
       && recipeForm.flavourMultiplier > 0
@@ -773,7 +782,7 @@ export default function CrumbingTab() {
             <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">No. of trays</span><input type="number" min="1" step="1" value={recipeForm.traysCrumbed} onChange={(event) => updateRecipeDraft({ traysCrumbed: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm"><span className="text-slate-600">Weight crumbed (auto)</span><strong className="text-emerald-700">{weightCrumbedKg.toFixed(2)} kg</strong></div>
-          <div className="mt-1 text-xs text-slate-500">Weight crumbed = source weight − recorded balance. Water is excluded from dry ingredient totals. The balance returns to the source pool for the next batch.</div>
+          <div className="mt-1 text-xs text-slate-500">Mass balance: source weight = crumbed weight + recorded balance + wastage. Water is excluded from dry ingredient totals. The balance returns to the source pool for the next batch.</div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-pink-200 bg-white p-3">

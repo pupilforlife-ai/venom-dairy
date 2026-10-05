@@ -267,6 +267,15 @@ export default function Distribution() {
       .filter(round => {
         if (!roundProductNames[round.type] || round.status === 'handed_over') return false;
         if (!['packed', 'stored_in_chiller'].includes(round.status)) return false;
+        // Paneer packing creates a FinishedStock row linked by packingRunId.
+        // Do not expose the same packed quantity again as a production-round
+        // candidate; that would make one physical stock line transferable
+        // twice. Keep the round fallback only for legacy rows with no linked
+        // FinishedStock record.
+        if (round.type === 'D' || round.type === 'C/S') {
+          const packingRunIds = new Set((round.packedSkus || []).map(pack => pack.packingRunId).filter(Boolean));
+          if ([...packingRunIds].some(id => finishedStock.some(stock => stock.packingRunId === id))) return false;
+        }
         if (round.type === 'Amassi') return Boolean(round.amassiPacked?.length);
         return round.outputWeight > 0;
       })
@@ -289,6 +298,14 @@ export default function Distribution() {
           };
         }
         const productSku = round.packedSkus?.length === 1 ? round.packedSkus[0].sku : undefined;
+        const packedPaneerWeight = (round.type === 'D' || round.type === 'C/S')
+          ? (round.packedSkus || []).reduce((sum, pack) => {
+              const definition = paneerSkuByCode[pack.sku];
+              return definition
+                ? sum + getPaneerPackWeight(definition, pack.cases || 0, pack.loose || 0, pack.looseWeightKg || 0, pack.weightKg || 0)
+                : sum;
+            }, 0)
+          : 0;
         const receiptDate = getReceiptDateForRound(round, productSku, milkLots, creamLots);
         const generatedFinishedCode = productSku ? buildFinishedGoodsBatchCode(productSku, receiptDate) : undefined;
         return {
@@ -297,7 +314,7 @@ export default function Distribution() {
           sourceId: round.id,
           productName: roundProductNames[round.type],
           batchCode,
-          quantity: round.outputWeight,
+          quantity: packedPaneerWeight > 0 ? packedPaneerWeight : round.outputWeight,
           unit: 'kg',
           storageLocation: round.type === 'Ghee' ? 'Coldroom' : 'Chiller',
           detail: `${round.type} production round · Milk lot ${round.milkLotCode}`,

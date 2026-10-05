@@ -21,7 +21,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { yieldTrends } from '../data/mockData';
+import { getRoundMilkInput } from '../data/mockData';
 
 const wasteReasons = [
   'Texture defect',
@@ -35,23 +35,55 @@ const wasteReasons = [
 ];
 
 export default function WasteAndYield() {
-  const { wasteEvents, milkLots, addWasteEvent } = useApp();
+  const { wasteEvents, milkLots, productionRounds, addWasteEvent } = useApp();
   const { showToast } = useToast();
   const [showLogModal, setShowLogModal] = useState(false);
 
-  const totalWasteKg = wasteEvents.filter(w => w.unit === 'kg').reduce((s, w) => s + w.quantity, 0);
-  const totalWasteL = wasteEvents.filter(w => w.unit === 'L').reduce((s, w) => s + w.quantity, 0);
+  const totalWasteKg = wasteEvents.filter(w => w.unit.toLowerCase() === 'kg').reduce((s, w) => s + w.quantity, 0);
+  const totalWasteL = wasteEvents.filter(w => w.unit.toLowerCase() === 'l').reduce((s, w) => s + w.quantity, 0);
 
-  // Group waste by reason
+  const paneerRounds = productionRounds.filter(round =>
+    (round.type === 'D' || round.type === 'C/S') &&
+    !['scheduled', 'cancelled'].includes(round.status) &&
+    getRoundMilkInput(round) > 0
+  );
+  const malaiRounds = paneerRounds.filter(round => round.type === 'D');
+  const rozanaRounds = paneerRounds.filter(round => round.type === 'C/S');
+  const yieldForRounds = (rounds: typeof paneerRounds) => {
+    const input = rounds.reduce((sum, round) => sum + getRoundMilkInput(round), 0);
+    const output = rounds.reduce((sum, round) => sum + Math.max(0, round.outputWeight), 0);
+    return input > 0 ? (output / input) * 100 : 0;
+  };
+  const malaiYield = yieldForRounds(malaiRounds);
+  const rozanaYield = yieldForRounds(rozanaRounds);
+  const gheeRounds = productionRounds.filter(round => round.type === 'Ghee' && !['scheduled', 'cancelled'].includes(round.status));
+  const gheeInput = gheeRounds.reduce((sum, round) => sum + Math.max(0, round.butterInput || round.actualInput || 0) + Math.max(0, round.afOilInput || 0), 0);
+  const gheeOutput = gheeRounds.reduce((sum, round) => sum + Math.max(0, round.outputWeight), 0);
+  const gheeYield = gheeInput > 0 ? (gheeOutput / gheeInput) * 100 : 0;
+  const yieldTrends = [{
+    week: 'Live production',
+    target: 14.5,
+    malai: malaiYield,
+    rozana: rozanaYield,
+  }];
+
+  // Keep solid and liquid waste as separate dimensions. They must never be
+  // added together or displayed under a single kg total.
   const wasteByReason = wasteEvents.reduce((acc, event) => {
     const existing = acc.find(w => w.reason === event.reason);
     if (existing) {
-      existing.kg += event.quantity;
+      if (event.unit.toLowerCase() === 'kg') existing.kg += event.quantity;
+      if (event.unit.toLowerCase() === 'l') existing.litres += event.quantity;
     } else {
-      acc.push({ reason: event.reason, kg: event.quantity, color: `hsl(${Math.random() * 360}, 70%, 50%)` });
+      acc.push({
+        reason: event.reason,
+        kg: event.unit.toLowerCase() === 'kg' ? event.quantity : 0,
+        litres: event.unit.toLowerCase() === 'l' ? event.quantity : 0,
+        color: `hsl(${(acc.length * 67) % 360}, 70%, 50%)`,
+      });
     }
     return acc;
-  }, [] as { reason: string; kg: number; color: string }[]);
+  }, [] as { reason: string; kg: number; litres: number; color: string }[]);
 
   // New waste form
   const [newWaste, setNewWaste] = useState({
@@ -134,16 +166,16 @@ export default function WasteAndYield() {
             <Scale className="w-4 h-4 text-emerald-500" />
             <span className="text-xs font-medium uppercase tracking-wide">Malai Yield</span>
           </div>
-          <p className="text-2xl font-bold text-emerald-600">14.4%</p>
-          <p className="text-xs text-slate-400">kg per 100L (target: 14.5%)</p>
+          <p className="text-2xl font-bold text-emerald-600">{malaiYield.toFixed(2)}%</p>
+          <p className="text-xs text-slate-400">live D-round kg per 100L (target: 14.5%)</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex items-center gap-2 text-slate-500 mb-1">
             <Scale className="w-4 h-4 text-indigo-500" />
             <span className="text-xs font-medium uppercase tracking-wide">Ghee Yield</span>
           </div>
-          <p className="text-2xl font-bold text-indigo-600">70.0%</p>
-          <p className="text-xs text-slate-400">actual vs 70% target</p>
+          <p className="text-2xl font-bold text-indigo-600">{gheeYield.toFixed(2)}%</p>
+          <p className="text-xs text-slate-400">live ghee output/input (target: 70%)</p>
         </div>
       </div>
 
@@ -156,8 +188,8 @@ export default function WasteAndYield() {
             <div className="flex items-center gap-4">
               <ResponsiveContainer width="50%" height={180}>
                 <PieChart>
-                  <Pie data={wasteByReason} cx="50%" cy="50%" innerRadius={40} outerRadius={70} dataKey="kg" nameKey="reason">
-                    {wasteByReason.map((entry, index) => (
+                  <Pie data={wasteByReason.filter(entry => entry.kg > 0)} cx="50%" cy="50%" innerRadius={40} outerRadius={70} dataKey="kg" nameKey="reason">
+                    {wasteByReason.filter(entry => entry.kg > 0).map((entry, index) => (
                       <Cell key={index} fill={entry.color} />
                     ))}
                   </Pie>
@@ -169,7 +201,7 @@ export default function WasteAndYield() {
                   <div key={item.reason} className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
                     <span className="text-xs text-slate-600 flex-1">{item.reason}</span>
-                    <span className="text-xs font-medium text-slate-900">{item.kg.toFixed(1)}</span>
+                    <span className="text-xs font-medium text-slate-900">{item.kg > 0 ? `${item.kg.toFixed(1)} kg` : ''}{item.kg > 0 && item.litres > 0 ? ' · ' : ''}{item.litres > 0 ? `${item.litres.toFixed(1)} L` : ''}</span>
                   </div>
                 ))}
               </div>

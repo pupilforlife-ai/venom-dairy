@@ -94,7 +94,12 @@ function readLocalValue<T>(key: string, initialValue: T): T {
 }
 
 export function useSupabaseState<T>(key: string, initialValue: T) {
-  const [storedValue, setStoredValue] = useState<T>(() => readLocalValue(key, initialValue));
+  // When Supabase is enabled, browser localStorage is only a cache. Never use
+  // an old demo/cache snapshot as the initial production source of truth.
+  // Local demo mode is the only path that intentionally reads localStorage.
+  const [storedValue, setStoredValue] = useState<T>(() => supabase
+    ? (Array.isArray(initialValue) ? [] as T : initialValue)
+    : readLocalValue(key, initialValue));
   const valueRef = useRef(storedValue);
   // Supabase writes replace the complete JSON document for a key. Serialise
   // them so a slower request cannot finish after a newer edit and restore an
@@ -167,9 +172,8 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
         return;
       }
 
-      if (localWriteVersionRef.current !== loadVersion) return;
-      const localValue = valueRef.current;
-      queuePersist(localValue, localValue, loadVersion);
+      // Do not seed a missing production key with mock/demo data. The first
+      // real user edit will create the row through setValue/queuePersist.
     };
 
     void loadValue();

@@ -1258,8 +1258,8 @@ export default function ProductionBoard() {
   };
 
   const handleCreateRound = () => {
-    if (!newRound.shiftId || !newRound.sourceVessel) {
-      showToast('error', 'Please select a shift and milk vessel');
+    if (!newRound.shiftId || !newRound.sourceVessel || newRound.plannedInput <= 0) {
+      showToast('error', 'Please select a shift, milk vessel, and a positive milk quantity');
       return;
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
@@ -1909,7 +1909,7 @@ export default function ProductionBoard() {
                             )}
                           </td>
                           <td className="px-1 py-1.5 text-slate-600 text-sm">
-                            <input type="number" min="0" value={(round.actualInput > 0 ? round.actualInput : round.plannedInput) || ''} onChange={(e) => { const quantity = parseInt(e.target.value) || 0; updateProductionRound(round.id, { plannedInput: quantity, actualInput: quantity }); }} className="w-20 px-2 py-1 border border-slate-200 rounded text-sm" aria-label={`Milk quantity for round ${round.roundNumber}`} />
+                            <input type="number" min="1" value={(round.actualInput > 0 ? round.actualInput : round.plannedInput) || ''} onChange={(e) => { const quantity = Math.max(1, parseInt(e.target.value) || 1); updateProductionRound(round.id, { plannedInput: quantity, actualInput: quantity }); }} className="w-20 px-2 py-1 border border-slate-200 rounded text-sm" aria-label={`Milk quantity for round ${round.roundNumber}`} />
                           </td>
                           <td className="px-1 py-1.5 text-sm">
                             {round.startingTemperature !== undefined ? (
@@ -2805,7 +2805,7 @@ export default function ProductionBoard() {
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Planned Input (L)</label>
-            <input type="number" value={newRound.plannedInput || ''} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+            <input type="number" value={newRound.plannedInput || ''} onChange={(e) => setNewRound({ ...newRound, plannedInput: Math.max(1, parseInt(e.target.value) || 1) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="1" />
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk taken from</label>

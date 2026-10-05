@@ -3,7 +3,7 @@ import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, milkStorageVessels } from '../data/mockData';
+import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, milkStorageVessels } from '../data/mockData';
 import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 
 export default function MilkReceiving() {
@@ -135,13 +135,13 @@ export default function MilkReceiving() {
       return { ...vessel, litres };
     });
 
-    // New rounds identify their source vessel. Only actual input is drawn
-    // from a vessel; a scheduled round is still only a plan.
+    // New rounds identify their source vessel. Use the same draw rule as the
+    // milk ledger so scheduled rounds do not reduce vessel balances early.
     const sourceDraws = new Map<string, number>();
     productionRounds
       .filter((round) => round.milkLotId === lot.id && round.sourceVessel)
       .forEach((round) => {
-        const draw = round.actualInput > 0 ? round.actualInput : 0;
+        const draw = getRoundMilkInput(round);
         if (draw <= 0) return;
         const vesselId = round.sourceVessel === 'holding-tank' ? 'bmc-2' : round.sourceVessel!;
         sourceDraws.set(vesselId, (sourceDraws.get(vesselId) || 0) + Math.max(0, draw));
@@ -673,6 +673,7 @@ export default function MilkReceiving() {
                                   <div><span className="text-slate-500">Received</span><div className="font-bold text-slate-900">{lot.litresReceived.toLocaleString()} L</div></div>
                                   <div><span className="text-slate-500">Unallocated</span><div className="font-bold text-emerald-600">{lotAccounting.remaining.toLocaleString()} L</div></div>
                                 </div>
+                                {lotAccounting.overdraw > 0.01 && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Overdraw detected: {lotAccounting.overdraw.toFixed(2)} L. Review round input and waste records before closing this lot.</div>}
                               </div>
                               <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
                                 <h3 className="text-sm font-bold text-slate-900 mb-1">Vessel / location allocation</h3>

@@ -53,7 +53,7 @@ export default function Reconciliation() {
     : emptyProductionReconciliation;
   const milkAccounting = selectedLot
     ? getMilkLotAccounting(selectedLot, productionRounds)
-    : { consumed: 0, sold: 0, remaining: 0 };
+    : { consumed: 0, sold: 0, remaining: 0, overdraw: 0, rawRemaining: 0 };
   const consumedByProduction = milkAccounting.consumed;
   const received = selectedLot?.litresReceived ?? 0;
   const remaining = milkAccounting.remaining;
@@ -201,7 +201,7 @@ export default function Reconciliation() {
           </div>
         </div>
 
-        <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
           <div className="font-semibold">Received = Consumed + Remaining + Rejected + Spilled + Milk sold + Unexplained</div>
           <div className="mt-1 font-mono">{recon.received.toLocaleString()} = {recon.consumedByProduction.toLocaleString()} + {recon.remaining.toLocaleString()} + {recon.rejected.toLocaleString()} + {recon.spilled.toLocaleString()} + {recon.accountedOther.toLocaleString()} + {recon.unexplainedVariance.toFixed(2)}</div>
           <div className="mt-1 text-blue-700">Consumed uses actual input when recorded; otherwise it uses planned input for a started round. Scheduled and cancelled rounds are excluded.</div>
@@ -219,6 +219,7 @@ export default function Reconciliation() {
                 Owner review required. This may indicate measurement error, unrecorded usage, or system gap.
               </p>
             </div>
+            {milkAccounting.overdraw > 0.01 && <div className="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-700">Overdraw detected: {milkAccounting.overdraw.toFixed(2)} L. The lot has been consumed beyond its received/rejected/spilled/sold balance and requires owner review.</div>}
           </div>
         )}
       </div>

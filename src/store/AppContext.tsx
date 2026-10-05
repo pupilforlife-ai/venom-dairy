@@ -23,6 +23,7 @@ import {
   cipRecords as initialCipRecords,
   statusFlow,
   getMilkLotAccounting,
+  isMilkProductionRound,
 } from '../data/mockData';
 
 interface AppState {
@@ -208,6 +209,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Production round actions
   const addProductionRound = (round: Omit<ProductionRound, 'id'>) => {
+    if (isMilkProductionRound(round) && round.plannedInput <= 0) return;
     const newRound = { ...round, id: `pr-${Date.now()}` };
     setProductionRounds(currentRounds => [...currentRounds, newRound]);
   };
@@ -270,9 +272,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProductionRound = (id: string, updates: Partial<ProductionRound>) => {
-    setProductionRounds(currentRounds => currentRounds.map(round =>
-      round.id === id ? { ...round, ...updates } : round
-    ));
+    setProductionRounds(currentRounds => currentRounds.map(round => {
+      if (round.id !== id) return round;
+      const nextRound = { ...round, ...updates };
+      // A milk-production round must always retain a positive planned input.
+      // Actual input may remain zero while a scheduled round is waiting to
+      // start, but a zero planned input would make the milk ledger silently
+      // under-account the round.
+      if (isMilkProductionRound(nextRound) && nextRound.plannedInput <= 0) return round;
+      return nextRound;
+    }));
   };
 
   const hasRoundTypeDownstreamEvidence = (round: ProductionRound) => Boolean(
@@ -417,13 +426,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addTemperatureReading = (reading: Omit<TemperatureReading, 'id' | 'inRange'>) => {
     const inRange = reading.temperature >= reading.targetMin && reading.temperature <= reading.targetMax;
     const newReading = { ...reading, id: `t-${Date.now()}`, inRange };
-    setTemperatureReadings([...temperatureReadings, newReading]);
+    setTemperatureReadings(currentReadings => [...currentReadings, newReading]);
   };
 
   // Waste actions
   const addWasteEvent = (event: Omit<WasteEvent, 'id'>) => {
     const newEvent = { ...event, id: `w-${Date.now()}` };
-    setWasteEvents([...wasteEvents, newEvent]);
+    setWasteEvents(currentEvents => [...currentEvents, newEvent]);
 
     // Liquid raw-milk waste must reduce the linked receiving lot. The waste
     // event remains the audit record, while these lot counters keep the
@@ -476,7 +485,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Utility actions
   const addUtilityLog = (log: Omit<UtilityLog, 'id'>) => {
     const newLog = { ...log, id: `u-${Date.now()}` };
-    setUtilityLogs([...utilityLogs, newLog]);
+    setUtilityLogs(currentLogs => [...currentLogs, newLog]);
   };
 
   // CIP actions

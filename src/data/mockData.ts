@@ -229,33 +229,37 @@ export function isMilkProductionRound(round: Pick<ProductionRound, 'type'>) {
  * Scheduled and cancelled rounds do not consume milk.
  */
 export function getRoundMilkInput(round: Pick<ProductionRound, 'actualInput' | 'plannedInput' | 'status'>) {
+  // Scheduled rounds are plans only, even if an older workflow pre-filled the
+  // actualInput field. A cancelled round never draws milk. Once production has
+  // started, the measured input wins; otherwise the positive planned input is
+  // the accountable draw.
   if (round.status === 'scheduled' || round.status === 'cancelled') return 0;
-  return Math.max(0, round.actualInput > 0 ? round.actualInput : round.plannedInput);
+  if (round.actualInput > 0) return round.actualInput;
+  return Math.max(0, round.plannedInput);
 }
 
 /**
- * Use recorded round inputs when the round has a vessel assignment. Older
- * snapshots pre-date vessel tracking, so they continue to use the milk lot's
- * stored totals until a tracked round is actually started.
+ * Calculate the live milk balance from every eligible production round linked
+ * to the lot.  Vessel tracking is useful operational metadata, but it must
+ * never decide whether a round counts: older rounds and manually corrected
+ * rounds may not have a vessel value.  Falling back to the stored total is
+ * only safe when no round contains an accountable draw at all.
  */
 export function getMilkLotAccounting(lot: MilkLot, rounds: ProductionRound[]) {
-  const trackedRounds = rounds.filter((round) =>
+  const lotRounds = rounds.filter((round) =>
     (round.milkLotId === lot.id || round.milkLotCode === lot.lotCode) &&
-    Boolean(round.sourceVessel) &&
-    isMilkProductionRound(round) &&
-    (round.actualInput > 0 || (
-      round.plannedInput > 0 &&
-      round.status !== 'scheduled' &&
-      round.status !== 'cancelled'
-    ))
+    isMilkProductionRound(round)
   );
-  const consumed = trackedRounds.length > 0
-    ? trackedRounds.reduce((total, round) => total + getRoundMilkInput(round), 0)
+  const accountableRounds = lotRounds.filter((round) => getRoundMilkInput(round) > 0);
+  const consumed = accountableRounds.length > 0
+    ? accountableRounds.reduce((total, round) => total + getRoundMilkInput(round), 0)
     : Math.max(0, lot.litresConsumed);
   const sold = Math.max(0, lot.litresSold || 0);
   const accountedOther = Math.max(0, lot.litresRejected) + Math.max(0, lot.litresSpilled);
-  const remaining = Math.max(0, lot.litresReceived - consumed - sold - accountedOther);
-  return { consumed, sold, remaining };
+  const rawRemaining = lot.litresReceived - consumed - sold - accountedOther;
+  const overdraw = Math.max(0, -rawRemaining);
+  const remaining = Math.max(0, rawRemaining);
+  return { consumed, sold, remaining, overdraw, rawRemaining };
 }
 
 /**

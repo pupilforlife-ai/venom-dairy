@@ -222,8 +222,8 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
   };
 
   const handleCreateRound = () => {
-    if (!newRound.shiftId || !newRound.sourceVessel) {
-      showToast('error', 'Please select a shift and milk vessel');
+    if (!newRound.shiftId || !newRound.sourceVessel || newRound.plannedInput <= 0) {
+      showToast('error', 'Please select a shift, milk vessel, and a positive milk quantity');
       return;
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
@@ -788,7 +788,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Input Quantity (L)</label>
-            <input type="number" value={newRound.plannedInput || ''} onChange={(e) => setNewRound({ ...newRound, plannedInput: parseInt(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" />
+            <input type="number" value={newRound.plannedInput || ''} onChange={(e) => setNewRound({ ...newRound, plannedInput: Math.max(1, parseInt(e.target.value) || 1) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="1" />
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk taken from</label>

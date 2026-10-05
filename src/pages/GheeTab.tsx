@@ -325,7 +325,13 @@ export default function GheeTab() {
           sourceButterBatchId: existingPool.sourceButterBatchId || getButterBatchCode(milkLot.lotCode),
           totalGheeProduced: Math.max(0, existingPool.totalGheeProduced + yieldDelta),
           packedWeight: Math.max(0, existingPool.packedWeight + yieldDelta),
-          availableBalance: Math.max(0, existingPool.availableBalance),
+          // Available ghee is the un-packed portion of the common pool. Keep
+          // it derived from the two auditable totals instead of carrying a
+          // stale counter that can remain at zero after production.
+          availableBalance: Math.max(
+            0,
+            (existingPool.totalGheeProduced + yieldDelta) - (existingPool.packedWeight + yieldDelta),
+          ),
           roundsContributed: existingPool.roundsContributed.includes(round.id)
             ? existingPool.roundsContributed
             : [...existingPool.roundsContributed, round.id],

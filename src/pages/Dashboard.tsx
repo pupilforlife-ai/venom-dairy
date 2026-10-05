@@ -81,7 +81,7 @@ export default function Dashboard() {
   const activeLotRounds = productionRounds.filter((r) => r.milkLotCode === activeLotCode || r.milkLotId === activeMilkLot?.id);
   const milkAccounting = activeMilkLot
     ? getMilkLotAccounting(activeMilkLot, productionRounds)
-    : { consumed: 0, sold: 0, remaining: 0 };
+    : { consumed: 0, sold: 0, remaining: 0, overdraw: 0, rawRemaining: 0 };
   const activeRounds = activeLotRounds.filter((r) => !['handed_over', 'packed', 'frozen', 'cancelled', 'spoiled'].includes(r.status));
   const outOfRangeTemps = temperatureReadings.filter((t) => !t.inRange);
   const awaitingHandover = finishedStock.filter((f) => f.status === 'awaiting_handover');
@@ -100,7 +100,8 @@ export default function Dashboard() {
   const paneerOutput = paneerRounds.reduce((s, r) => s + r.outputWeight, 0);
   const paneerInput = paneerRounds.reduce((s, r) => s + getRoundMilkInput(r), 0);
   const paneerYield = paneerInput > 0 ? (paneerOutput / paneerInput) * 100 : 0;
-  const totalWaste = wasteEvents.reduce((s, event) => s + event.quantity, 0);
+  const totalWasteKg = wasteEvents.filter(event => event.unit.toLowerCase() === 'kg').reduce((s, event) => s + event.quantity, 0);
+  const totalWasteL = wasteEvents.filter(event => event.unit.toLowerCase() === 'l').reduce((s, event) => s + event.quantity, 0);
   const intermediateSourceRoundIds = new Set(intermediateLots.map((lot) => lot.sourceBatchId));
   const recordedFrozenStock = intermediateLots
     .filter((lot) => lot.status !== 'consumed' && lot.currentQuantity > 0 && /freezer/i.test(lot.storageLocation))
@@ -118,7 +119,7 @@ export default function Dashboard() {
     { label: 'Current Lot Output', value: totalOutput.toFixed(1), unit: 'kg', trend: 'up', trendValue: `${activeLotRounds.filter((r) => r.outputWeight > 0).length} completed rounds`, color: 'emerald' },
     { label: 'Paneer Yield', value: paneerYield.toFixed(1), unit: '%', trend: 'stable', trendValue: paneerInput > 0 ? 'Calculated from rounds' : 'No paneer input recorded', color: 'teal' },
     { label: 'Frozen Stock', value: frozenStock.toFixed(1), unit: 'kg', trend: 'up', trendValue: 'Available intermediate stock', color: 'indigo' },
-    { label: 'Recorded Waste', value: totalWaste.toFixed(1), unit: 'kg/L', trend: 'down', trendValue: `${wasteEvents.length} recorded events`, color: 'red' },
+    { label: 'Recorded Waste', value: `${totalWasteKg.toFixed(1)} / ${totalWasteL.toFixed(1)}`, unit: 'kg / L', trend: 'down', trendValue: `${wasteEvents.length} recorded events`, color: 'red' },
     { label: 'Cases Ready', value: totalCases, unit: 'cases', trend: 'up', trendValue: 'Awaiting handover', color: 'purple' },
     { label: 'Cold Chain', value: `${temperatureReadings.filter((t) => t.inRange).length}/${temperatureReadings.length}`, unit: 'OK', trend: 'stable', trendValue: `${outOfRangeTemps.length} excursion(s)`, color: 'amber' },
     { label: 'Weekly Fuel Cost', value: '—', unit: '', trend: 'stable', trendValue: 'Available after Utilities data is complete', color: 'orange' },
@@ -188,7 +189,8 @@ export default function Dashboard() {
               <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
                 <div className="font-semibold">Remaining = Received − Consumed − Rejected − Spilled − Sold</div>
                 <div className="mt-1 font-mono">{activeMilkLot.litresReceived.toLocaleString()} − {milkAccounting.consumed.toLocaleString()} − {activeMilkLot.litresRejected.toLocaleString()} − {activeMilkLot.litresSpilled.toLocaleString()} − {milkAccounting.sold.toLocaleString()} = {milkAccounting.remaining.toLocaleString()} L</div>
-                {Math.abs(unexplainedMilk) > 0.01 && <div className="mt-1 text-amber-700">Unexplained variance: {unexplainedMilk.toFixed(2)} L</div>}
+                {milkAccounting.overdraw > 0.01 && <div className="mt-1 font-semibold text-red-700">Overdraw: {milkAccounting.overdraw.toFixed(2)} L — review round inputs and waste records.</div>}
+                {Math.abs(unexplainedMilk) > 0.01 && milkAccounting.overdraw <= 0.01 && <div className="mt-1 text-amber-700">Unexplained variance: {unexplainedMilk.toFixed(2)} L</div>}
               </div>
             </div>
           )}

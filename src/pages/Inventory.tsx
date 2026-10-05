@@ -92,13 +92,26 @@ export default function Inventory() {
     (lot) => locationFilter === 'all' || lot.storageLocation === locationFilter,
   );
   const legacyFinishedStock = useMemo<FinishedStockLot[]>(() => {
-    const recordedPackingRuns = new Set(finishedStock.map(stock => stock.packingRunId));
+    // An undefined packingRunId is not a real link. Do not let one legacy row
+    // with a missing ID suppress every other legacy packing entry.
+    const recordedPackingRuns = new Set(finishedStock.map(stock => stock.packingRunId).filter(Boolean));
     return productionRounds.flatMap(round => {
       if (['scheduled', 'cancelled', 'spoiled', 'handed_over'].includes(round.status)) return [];
+      const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
       return (round.packedSkus || [])
-        .filter(entry => !entry.packingRunId || !recordedPackingRuns.has(entry.packingRunId))
+        .filter(entry => {
+          if (entry.packingRunId) return !recordedPackingRuns.has(entry.packingRunId);
+          // Older stock rows may not have a packingRunId. Match their source,
+          // SKU, and quantity before synthesising another legacy line.
+          return !finishedStock.some(stock =>
+            !stock.packingRunId &&
+            stock.sku === entry.sku &&
+            (stock.sourceBatchCodes || []).includes(sourceBatchCode) &&
+            (stock.cases || 0) === (entry.cases || 0) &&
+            (stock.loosePackets || 0) === (entry.loose || 0)
+          );
+        })
         .map((entry, index) => {
-          const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
           const packingRunId = entry.packingRunId || `legacy-${round.id}-${index}`;
           return {
             id: packingRunId,
