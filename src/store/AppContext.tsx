@@ -400,7 +400,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { 
         ...round, 
         status: nextStatus as ProductionRound['status'],
-        locked: nextStatus === 'handed_over'
+        locked: round.locked,
       };
     }));
   };
@@ -472,7 +472,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Finished stock actions
   const addFinishedStock = (stock: Omit<FinishedStockLot, 'id'>) => {
-    const newStock = { ...stock, id: `fs-${Date.now()}` };
+    const uniqueId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${stock.packingRunId}`;
+    const newStock = { ...stock, id: `fs-${uniqueId}` };
     setFinishedStock(currentStock => [...currentStock, newStock]);
   };
 

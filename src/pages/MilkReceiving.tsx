@@ -4,6 +4,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, milkStorageVessels } from '../data/mockData';
+import { getProductionPackingEntries } from '../lib/finishedStock';
 import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 
 export default function MilkReceiving() {
@@ -172,9 +173,9 @@ export default function MilkReceiving() {
 
   const packedSkuSummary = useMemo(() => {
     if (!displayedLot) return [];
-    const boardEntries = productionRounds
-      .filter((round) => round.milkLotId === displayedLot.id)
-      .flatMap((round) => round.packedSkus || []);
+    const boardEntries = getProductionPackingEntries(productionRounds)
+      .filter(({ round }) => round.milkLotId === displayedLot.id || round.milkLotCode === displayedLot.lotCode)
+      .map(({ pack }) => pack);
     const entries = boardEntries.length > 0 ? boardEntries : (displayedLot.packedSkus || []);
     const summary = new Map<string, { sku: string; cases: number; loose: number }>();
     entries.forEach((entry) => {

@@ -1361,7 +1361,6 @@ export const statusFlow = [
   'clingwrapped',
   'frozen',
   'packed',
-  'handed_over',
 ] as const;
 
 export const statusLabels: Record<string, string> = {

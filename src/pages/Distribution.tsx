@@ -13,7 +13,7 @@ import {
 import { Modal } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { useSupabaseState } from '../hooks/useSupabaseState';
-import { CreamLot, DistributionHandover, DistributionHandoverSource, FinishedStockLot, MilkLot, ProductionRound } from '../data/mockData';
+import { CreamLot, DistributionHandover, DistributionHandoverSource, MilkLot, ProductionRound } from '../data/mockData';
 import {
   FinishedGoodsBatchCodeMode,
   buildFinishedGoodsBatchCode,
@@ -22,6 +22,7 @@ import {
   getPaneerPackWeight,
   paneerSkuByCode,
 } from '../data/skuConfig';
+import { reconcileFinishedStock, ReconciledFinishedStockLine } from '../lib/finishedStock';
 import { useApp } from '../store/AppContext';
 
 type CandidateUnit = 'kg' | 'packets' | 'bottles';
@@ -39,7 +40,7 @@ interface DistributionCandidate {
   storageLocation?: string;
   detail: string;
   sku?: string;
-  sourceIds?: string[];
+  stockLines?: ReconciledFinishedStockLine[];
   sourceBatchCodes?: string[];
   finishedGoodsBatchCode?: string;
   finishedGoodsBatchCodeMode?: FinishedGoodsBatchCodeMode;
@@ -153,10 +154,14 @@ export default function Distribution() {
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const currentUsername = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_username') || '';
   const canAssignManualBatchCode = currentRole === 'admin' || currentRole === 'owner';
+  const reconciledFinishedStock = useMemo(
+    () => reconcileFinishedStock(productionRounds, finishedStock),
+    [finishedStock, productionRounds],
+  );
 
   const candidates = useMemo<DistributionCandidate[]>(() => {
-    const finishedBySku = new Map<string, FinishedStockLot[]>();
-    finishedStock
+    const finishedBySku = new Map<string, ReconciledFinishedStockLine[]>();
+    reconciledFinishedStock
       .filter(stock => stock.status === 'awaiting_handover')
       .forEach(stock => {
         const existing = finishedBySku.get(stock.sku) || [];
@@ -189,7 +194,7 @@ export default function Distribution() {
         id: `finished-sku:${sku}`,
         sourceType: 'finished_stock',
         sourceId: first.id,
-        sourceIds: stocks.map(stock => stock.id),
+        stockLines: stocks,
         sourceBatchCodes,
         sku,
         productName: first.productName,
@@ -272,10 +277,7 @@ export default function Distribution() {
         // candidate; that would make one physical stock line transferable
         // twice. Keep the round fallback only for legacy rows with no linked
         // FinishedStock record.
-        if (round.type === 'D' || round.type === 'C/S') {
-          const packingRunIds = new Set((round.packedSkus || []).map(pack => pack.packingRunId).filter(Boolean));
-          if ([...packingRunIds].some(id => finishedStock.some(stock => stock.packingRunId === id))) return false;
-        }
+        if (round.type === 'D' || round.type === 'C/S') return false;
         if (round.type === 'Amassi') return Boolean(round.amassiPacked?.length);
         return round.outputWeight > 0;
       })
@@ -326,7 +328,7 @@ export default function Distribution() {
       });
 
     return [...finishedCandidates, ...halloumiCandidates, ...crumbingCandidates, ...productionCandidates];
-  }, [creamLots, crumbingBatches, finishedStock, milkLots, productionRounds]);
+  }, [creamLots, crumbingBatches, milkLots, productionRounds, reconciledFinishedStock]);
 
   const extraSourceRounds = useMemo(() => {
     if (selectedCandidate?.sourceType !== 'finished_stock' || !selectedCandidate.sku) return [];
@@ -514,14 +516,31 @@ export default function Distribution() {
     }
 
     if (selectedCandidate?.sourceType === 'finished_stock') {
-      (selectedCandidate.sourceIds || [selectedCandidate.sourceId]).forEach(sourceId => {
-        updateFinishedStock(sourceId, {
+      (selectedCandidate.stockLines || []).forEach(stock => {
+        const reviewedStock = {
           status: 'handed_over',
           storageLocation: form.destination,
           finishedGoodsBatchCode,
           finishedGoodsBatchCodeReviewedBy: reviewedBy,
           finishedGoodsBatchCodeReviewedAt: reviewedAt,
           finishedGoodsBatchCodeReviewMethod: reviewMethod,
+        } as const;
+        if (stock.persisted) {
+          updateFinishedStock(stock.id, reviewedStock);
+          return;
+        }
+        addFinishedStock({
+          sku: stock.sku,
+          productName: stock.productName,
+          packingRunId: stock.packingRunId,
+          cases: stock.cases,
+          loosePackets: stock.loosePackets,
+          totalPackets: stock.totalPackets,
+          createdAt: stock.createdAt,
+          sourceBatchCodes: stock.sourceBatchCodes,
+          ...(stock.weightKg !== undefined ? { weightKg: stock.weightKg } : {}),
+          ...(stock.looseWeightKg !== undefined ? { looseWeightKg: stock.looseWeightKg } : {}),
+          ...reviewedStock,
         });
       });
     }

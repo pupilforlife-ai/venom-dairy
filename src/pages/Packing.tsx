@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Package,
   Plus,
@@ -13,10 +13,15 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { paneerSkuDefinitions, paneerSkuByCode, getAllowedPaneerSkus, getPaneerPackWeight } from '../data/skuConfig';
+import { reconcileFinishedStock } from '../lib/finishedStock';
 
 export default function Packing() {
   const { intermediateLots, finishedStock, addFinishedStock, updateIntermediateLot, updateProductionRound, productionRounds } = useApp();
   const { showToast } = useToast();
+  const awaitingFinishedStock = useMemo(
+    () => reconcileFinishedStock(productionRounds, finishedStock).filter(stock => stock.status === 'awaiting_handover'),
+    [finishedStock, productionRounds],
+  );
 
   const [showPackModal, setShowPackModal] = useState(false);
   const [selectedLot, setSelectedLot] = useState('');
@@ -224,7 +229,7 @@ export default function Packing() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {finishedStock.map((stock) => (
+              {awaitingFinishedStock.map((stock) => (
                 <tr key={stock.id} className="hover:bg-slate-50">
                   <td className="px-4 py-2.5">
                     <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-medium">{stock.sku}</code>
@@ -242,7 +247,7 @@ export default function Packing() {
             </tbody>
           </table>
         </div>
-        {finishedStock.length === 0 && (
+        {awaitingFinishedStock.length === 0 && (
           <div className="p-6 text-center text-slate-400 text-sm">No finished stock yet</div>
         )}
       </div>

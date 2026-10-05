@@ -43,7 +43,9 @@ function roundDisplayCode(round: { type: string; shiftNumber: number; roundNumbe
 }
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
-  const currentIndex = currentStatus === 'chiller_storage'
+  const currentIndex = currentStatus === 'handed_over'
+    ? statusFlow.indexOf('packed')
+    : currentStatus === 'chiller_storage'
     ? statusFlow.indexOf('cut')
     : statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
   return (
@@ -765,21 +767,6 @@ export default function ProductionBoard() {
     showToast('success', 'PAN111 request rejected. The balance is available for normal paneer packing or SPP routing.');
   };
 
-  const handleHandover = (roundId: string) => {
-    const round = productionRounds.find((item) => item.id === roundId);
-    if (!round) return;
-    const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
-    finishedStock
-      .filter((stock) => stock.status === 'awaiting_handover' && (stock.sourceBatchCodes || []).includes(sourceBatchCode))
-      .forEach((stock) => updateFinishedStock(stock.id, { status: 'handed_over' }));
-    updateProductionRound(roundId, { 
-      status: 'handed_over',
-      locked: true,
-      completedAt: new Date().toISOString()
-    });
-    showToast('success', 'Handed over to distribution');
-  };
-
   const handleRecordPan111 = () => {
     if (!activeMilkLot) return;
     
@@ -1472,7 +1459,7 @@ export default function ProductionBoard() {
     const canReport = !round.locked && !['cancelled', 'handed_over', 'spoiled', 'spoilage_pending'].includes(round.status);
     const reportButton = canReport ? <button onClick={() => openSpoilageModal(round.id)} className="flex w-fit items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"><AlertTriangle className="h-3 w-3" /> Report Spoilage</button> : null;
     if (round.status !== 'packed') return reportButton;
-    return <div className="flex flex-wrap items-center gap-1">{reportButton}{isOwner && <button onClick={() => handleHandover(round.id)} className="flex w-fit items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-800"><CheckCircle2 className="h-3 w-3" /> Hand Over</button>}</div>;
+    return <div className="flex flex-wrap items-center gap-1">{reportButton}<span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">Ready in Distribution</span></div>;
   };
 
   const selectedPackRound = selectedRound ? productionRounds.find(r => r.id === selectedRound) : undefined;
@@ -1925,7 +1912,7 @@ export default function ProductionBoard() {
                             {renderCreamAction(round)}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
-                            {canForceStage ? (
+                            {canForceStage && !round.locked ? (
                               <select value={round.status} onChange={(e) => handleStageChange(round.id, e.target.value)} className="w-36 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm font-semibold text-slate-700" aria-label={`Current stage for round ${round.roundNumber}`}>
                                 {editableStageOptions.map(stage => <option key={stage} value={stage}>{statusLabels[stage] || stage}</option>)}
                               </select>

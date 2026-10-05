@@ -13,8 +13,8 @@ import {
 import { Modal } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { useApp } from '../store/AppContext';
-import { FinishedStockLot, ProductionRound } from '../data/mockData';
-import { paneerSkuByCode } from '../data/skuConfig';
+import { ProductionRound } from '../data/mockData';
+import { isOnSiteFinishedStock, reconcileFinishedStock, ReconciledFinishedStockLine } from '../lib/finishedStock';
 
 type Tab = 'intermediate' | 'finished';
 type TransferKind = 'intermediate' | 'finished';
@@ -36,10 +36,6 @@ function isCurrentIntermediateStock(status: string, quantity: number) {
   return status !== 'consumed' && quantity > 0;
 }
 
-function isCurrentFinishedStock(status: string) {
-  return status !== 'handed_over';
-}
-
 function roundMatchesBatchCode(round: ProductionRound, sourceBatchCode: string) {
   const source = sourceBatchCode.trim().toLowerCase();
   if (!source) return false;
@@ -56,13 +52,15 @@ interface FinishedSkuGroup {
   sku: string;
   productName: string;
   cases: number;
+  handedOverCases: number;
+  recordedCases: number;
   loosePackets: number;
   totalPackets: number;
   weightKg: number;
   looseWeightKg: number;
   hasWeightKg: boolean;
   hasLooseWeightKg: boolean;
-  lines: FinishedStockLot[];
+  lines: ReconciledFinishedStockLine[];
 }
 
 export default function Inventory() {
@@ -91,49 +89,10 @@ export default function Inventory() {
   const filteredIntermediate = intermediateLots.filter(
     (lot) => locationFilter === 'all' || lot.storageLocation === locationFilter,
   );
-  const legacyFinishedStock = useMemo<FinishedStockLot[]>(() => {
-    // An undefined packingRunId is not a real link. Do not let one legacy row
-    // with a missing ID suppress every other legacy packing entry.
-    const recordedPackingRuns = new Set(finishedStock.map(stock => stock.packingRunId).filter(Boolean));
-    return productionRounds.flatMap(round => {
-      if (['scheduled', 'cancelled', 'spoiled', 'handed_over'].includes(round.status)) return [];
-      const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
-      return (round.packedSkus || [])
-        .filter(entry => {
-          if (entry.packingRunId) return !recordedPackingRuns.has(entry.packingRunId);
-          // Older stock rows may not have a packingRunId. Match their source,
-          // SKU, and quantity before synthesising another legacy line.
-          return !finishedStock.some(stock =>
-            !stock.packingRunId &&
-            stock.sku === entry.sku &&
-            (stock.sourceBatchCodes || []).includes(sourceBatchCode) &&
-            (stock.cases || 0) === (entry.cases || 0) &&
-            (stock.loosePackets || 0) === (entry.loose || 0)
-          );
-        })
-        .map((entry, index) => {
-          const packingRunId = entry.packingRunId || `legacy-${round.id}-${index}`;
-          return {
-            id: packingRunId,
-            sku: entry.sku,
-            productName: paneerSkuByCode[entry.sku]?.productName || entry.sku,
-            packingRunId,
-            cases: entry.cases || 0,
-            loosePackets: entry.loose || 0,
-            totalPackets: paneerSkuByCode[entry.sku]?.packMode === 'units'
-              ? (entry.cases || 0) * (paneerSkuByCode[entry.sku]?.unitsPerCase || 0) + (entry.loose || 0)
-              : 0,
-            storageLocation: 'Dairy Container (Finished Stock)',
-            status: 'awaiting_handover',
-            createdAt: round.completedAt || round.startTime,
-            sourceBatchCodes: [sourceBatchCode],
-            ...(entry.weightKg !== undefined ? { weightKg: entry.weightKg } : {}),
-            ...(entry.looseWeightKg !== undefined ? { looseWeightKg: entry.looseWeightKg } : {}),
-          } satisfies FinishedStockLot;
-        });
-    });
-  }, [finishedStock, productionRounds]);
-  const inventoryFinishedStock = useMemo(() => [...finishedStock, ...legacyFinishedStock], [finishedStock, legacyFinishedStock]);
+  const inventoryFinishedStock = useMemo(
+    () => reconcileFinishedStock(productionRounds, finishedStock),
+    [finishedStock, productionRounds],
+  );
   const filteredFinished = inventoryFinishedStock.filter(
     (stock) => locationFilter === 'all' || stock.storageLocation === locationFilter,
   );
@@ -142,7 +101,7 @@ export default function Inventory() {
   const currentIntermediate = filteredIntermediate.filter((lot) =>
     isCurrentIntermediateStock(lot.status, lot.currentQuantity),
   );
-  const currentFinished = filteredFinished.filter((stock) => isCurrentFinishedStock(stock.status));
+  const currentFinished = filteredFinished.filter(isOnSiteFinishedStock);
 
   const groupedFinished = useMemo<FinishedSkuGroup[]>(() => {
     const groups = new Map<string, FinishedSkuGroup>();
@@ -151,6 +110,8 @@ export default function Inventory() {
         sku: stock.sku,
         productName: stock.productName,
         cases: 0,
+        handedOverCases: 0,
+        recordedCases: 0,
         loosePackets: 0,
         totalPackets: 0,
         weightKg: 0,
@@ -160,7 +121,9 @@ export default function Inventory() {
         lines: [],
       };
       existing.lines.push(stock);
-      if (isCurrentFinishedStock(stock.status)) {
+      existing.recordedCases += stock.cases || 0;
+      if (stock.status === 'handed_over') existing.handedOverCases += stock.cases || 0;
+      if (isOnSiteFinishedStock(stock)) {
         existing.cases += stock.cases || 0;
         existing.loosePackets += stock.loosePackets || 0;
         existing.totalPackets += stock.totalPackets || 0;
@@ -209,8 +172,8 @@ export default function Inventory() {
 
   const transferItems = useMemo(() => ({
     intermediate: intermediateLots.filter((lot) => isCurrentIntermediateStock(lot.status, lot.currentQuantity)),
-    finished: finishedStock.filter((stock) => isCurrentFinishedStock(stock.status)),
-  }), [finishedStock, intermediateLots]);
+    finished: inventoryFinishedStock.filter((stock) => stock.persisted && isOnSiteFinishedStock(stock)),
+  }), [inventoryFinishedStock, intermediateLots]);
 
   const openTransferModal = (kind?: TransferKind, id?: string) => {
     const target = kind && id ? `${kind}|${id}` : '';
@@ -363,7 +326,9 @@ export default function Inventory() {
               <thead><tr className="bg-slate-50 text-left border-b border-slate-200">
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">SKU</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Product</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Cases</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Cases on site</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Transferred</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Recorded total</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Loose</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Total Pkts</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Location</th>
@@ -372,7 +337,7 @@ export default function Inventory() {
               <tbody className="divide-y divide-slate-100">
                 {groupedFinished.map((group) => {
                   const isExpanded = expandedSkus.has(group.sku);
-                  const currentLines = group.lines.filter(item => isCurrentFinishedStock(item.status));
+                  const currentLines = group.lines.filter(isOnSiteFinishedStock);
                   const locationsForSku = [...new Set(currentLines.map(item => item.storageLocation))];
                   const roundsForSku = [...new Map(group.lines.flatMap(item => (item.sourceBatchCodes || []).flatMap(code => productionRounds.filter(round => roundMatchesBatchCode(round, code)))).map(round => [round.id, round])).values()];
                   return (
@@ -381,6 +346,8 @@ export default function Inventory() {
                         <td className="px-4 py-3"><div className="flex items-center gap-2"><span className="text-slate-400">{isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</span><code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700">{group.sku}</code></div></td>
                         <td className="px-4 py-3 font-medium text-slate-900">{group.productName}</td>
                         <td className="px-4 py-3 font-medium text-slate-700">{group.cases}</td>
+                        <td className="px-4 py-3 font-medium text-slate-700">{group.handedOverCases}</td>
+                        <td className="px-4 py-3 font-bold text-indigo-700">{group.recordedCases}</td>
                         <td className="px-4 py-3 text-slate-700">{group.loosePackets}</td>
                         <td className="px-4 py-3 font-bold text-slate-900">{group.totalPackets}{group.hasWeightKg ? ` · ${formatQuantity(group.weightKg)} kg` : group.hasLooseWeightKg ? ` · ${formatQuantity(group.looseWeightKg)} kg loose` : ''}</td>
                         <td className="px-4 py-3"><div className="flex max-w-xs flex-wrap gap-1">{locationsForSku.length > 0 ? locationsForSku.map(location => <span key={location} className="text-xs font-medium text-blue-600">{location}</span>) : <span className="text-xs text-slate-400">No current stock</span>}</div></td>
@@ -388,7 +355,7 @@ export default function Inventory() {
                       </tr>
                       {isExpanded && (
                         <tr key={`${group.sku}-history`} className="bg-slate-50">
-                          <td colSpan={7} className="px-4 py-4">
+                          <td colSpan={9} className="px-4 py-4">
                             <div className="space-y-4">
                               <div>
                                 <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Packing and batch history</h4>
@@ -398,13 +365,13 @@ export default function Inventory() {
                                     <tbody className="divide-y divide-slate-100">
                                       {group.lines.map(item => {
                                         const lineRounds = [...new Map((item.sourceBatchCodes || []).flatMap(code => productionRounds.filter(round => roundMatchesBatchCode(round, code))).map(round => [round.id, round])).values()];
-                                        const isPersistedFinishedStock = !item.id.startsWith('legacy-');
+                                        const isPersistedFinishedStock = item.persisted;
                                         return <tr key={item.id} className="align-top">
                                           <td className="px-3 py-2 text-slate-600">{new Date(item.createdAt).toLocaleString()}<div className="mt-1 font-mono text-[10px] text-slate-400">{item.packingRunId}</div></td>
                                           <td className="px-3 py-2"><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Finished batch: {item.finishedGoodsBatchCode || 'Assigned at Distribution'}</div>{item.finishedGoodsBatchCodeReviewedBy && <div className="mb-1 text-[10px] text-indigo-700">Reviewed by {item.finishedGoodsBatchCodeReviewedBy}{item.finishedGoodsBatchCodeReviewMethod === 'owner_admin_override' ? ' · changed' : ''}</div>}<div className="flex max-w-sm flex-wrap gap-1">{(item.sourceBatchCodes || []).map((code, index) => <code key={`${code}-${index}`} className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-700">{code}</code>)}</div>{lineRounds.length > 0 && <div className="mt-1 text-[10px] text-indigo-700">Linked to {lineRounds.length} production round{lineRounds.length === 1 ? '' : 's'}</div>}</td>
                                           <td className="px-3 py-2 font-medium text-slate-700">{item.cases || 0} cases · {item.loosePackets || 0} loose<div className="text-slate-500">{item.totalPackets || 0} packets{item.weightKg !== undefined ? ` · ${formatQuantity(item.weightKg)} kg` : item.looseWeightKg !== undefined ? ` · ${formatQuantity(item.looseWeightKg)} kg loose` : ''}</div></td>
                                           <td className="px-3 py-2"><div className="text-slate-600">{item.storageLocation}</div><span className={`mt-1 inline-flex rounded-full px-2 py-0.5 font-medium ${item.status === 'awaiting_handover' ? 'bg-amber-100 text-amber-700' : item.status === 'handed_over' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{item.status === 'awaiting_handover' ? 'Awaiting' : item.status === 'handed_over' ? 'Handed Over' : 'Returned'}</span>{!isPersistedFinishedStock && <div className="mt-1 text-[10px] text-slate-400">Legacy round record</div>}</td>
-                                          <td className="px-3 py-2"><button type="button" onClick={(event) => { event.stopPropagation(); openTransferModal('finished', item.id); }} disabled={!isCurrentFinishedStock(item.status) || !isPersistedFinishedStock} title={!isPersistedFinishedStock ? 'This legacy round record must be reconciled before it can be transferred' : undefined} className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"><ArrowRightLeft className="h-3 w-3" />Move</button></td>
+                                          <td className="px-3 py-2"><button type="button" onClick={(event) => { event.stopPropagation(); openTransferModal('finished', item.id); }} disabled={!isOnSiteFinishedStock(item) || !isPersistedFinishedStock} title={!isPersistedFinishedStock ? 'Use Distribution to reconcile and hand over this Production Board record' : undefined} className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"><ArrowRightLeft className="h-3 w-3" />Move</button></td>
                                         </tr>;
                                       })}
                                     </tbody>

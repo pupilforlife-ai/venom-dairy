@@ -25,6 +25,7 @@ import {
 } from 'recharts';
 import { useApp } from '../store/AppContext';
 import { getMilkLotAccounting, getRoundMilkInput, statusLabels } from '../data/mockData';
+import { reconcileFinishedStock } from '../lib/finishedStock';
 
 type DashboardMetric = {
   label: string;
@@ -84,17 +85,12 @@ export default function Dashboard() {
     : { consumed: 0, sold: 0, remaining: 0, overdraw: 0, rawRemaining: 0 };
   const activeRounds = activeLotRounds.filter((r) => !['handed_over', 'packed', 'frozen', 'cancelled', 'spoiled'].includes(r.status));
   const outOfRangeTemps = temperatureReadings.filter((t) => !t.inRange);
-  const awaitingHandover = finishedStock.filter((f) => f.status === 'awaiting_handover');
-  const linkedPackingRunIds = new Set(finishedStock.map((stock) => stock.packingRunId).filter(Boolean));
-  const legacyAwaitingEntries = activeLotRounds
-    .filter((round) => !['handed_over', 'cancelled', 'spoiled'].includes(round.status))
-    .flatMap((round) => round.packedSkus || [])
-    .filter((packed) => !packed.packingRunId || !linkedPackingRunIds.has(packed.packingRunId));
-  const totalCases = awaitingHandover.reduce((s, f) => s + f.cases, 0) + legacyAwaitingEntries.reduce((s, packed) => s + packed.cases, 0);
-  const readyHandoverSkus = [
-    ...awaitingHandover.map((item) => item.sku),
-    ...legacyAwaitingEntries.map((item) => item.sku),
-  ].filter((sku, index, values) => values.indexOf(sku) === index);
+  const reconciledFinishedStock = reconcileFinishedStock(productionRounds, finishedStock);
+  const awaitingHandover = reconciledFinishedStock.filter((stock) => stock.status === 'awaiting_handover');
+  const totalCases = awaitingHandover.reduce((sum, stock) => sum + (stock.cases || 0), 0);
+  const readyHandoverSkus = awaitingHandover
+    .map((item) => item.sku)
+    .filter((sku, index, values) => values.indexOf(sku) === index);
   const totalOutput = activeLotRounds.reduce((s, r) => s + r.outputWeight, 0);
   const paneerRounds = activeLotRounds.filter((r) => r.type === 'D' || r.type === 'C/S');
   const paneerOutput = paneerRounds.reduce((s, r) => s + r.outputWeight, 0);
