@@ -139,6 +139,12 @@ export interface DistributionHandover {
   sourceType: DistributionHandoverSource;
   sourceId?: string;
   productName: string;
+  // Finished-goods label assigned at Distribution. `batchCode` remains the
+  // original source/production code for backwards-compatible genealogy.
+  finishedGoodsBatchCode?: string;
+  finishedGoodsBatchCodeReviewedBy?: string;
+  finishedGoodsBatchCodeReviewedAt?: string;
+  finishedGoodsBatchCodeReviewMethod?: 'automatic_suggestion' | 'owner_admin_override' | 'manual_entry';
   batchCode: string;
   quantity: number;
   unit: 'kg' | 'packets' | 'bottles';
@@ -507,6 +513,10 @@ export interface FinishedStockLot {
   status: 'awaiting_handover' | 'handed_over' | 'returned';
   createdAt: string;
   sourceBatchCodes: string[]; // genealogy: which rounds fed this
+  finishedGoodsBatchCode?: string;
+  finishedGoodsBatchCodeReviewedBy?: string;
+  finishedGoodsBatchCodeReviewedAt?: string;
+  finishedGoodsBatchCodeReviewMethod?: 'automatic_suggestion' | 'owner_admin_override' | 'manual_entry';
   weightKg?: number;
   looseWeightKg?: number;
 }
