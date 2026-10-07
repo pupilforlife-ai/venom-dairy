@@ -157,6 +157,8 @@ export interface DistributionHandover {
   quantityVerified?: boolean;
   quantityVerifiedBy?: string;
   quantityVerifiedAt?: string;
+  recordedQuantityBeforeVerification?: number;
+  quantityVariance?: number;
   notes?: string;
 }
 
