@@ -346,6 +346,17 @@ export default function GheeTab() {
     showToast('success', `Production closed. Moisture loss: ${moistureLoss.toFixed(2)} kg`);
   };
 
+  const openPacking = (roundId: string) => {
+    setSelectedRound(roundId);
+    setPackingForm({ sku: '', buckets: 0 });
+    setShowPackingModal(true);
+  };
+
+  const closePacking = () => {
+    setShowPackingModal(false);
+    setPackingForm({ sku: '', buckets: 0 });
+  };
+
   const getActionButtons = (round: any) => {
     const buttons = [];
 
@@ -403,17 +414,21 @@ export default function GheeTab() {
       buttons.push(
         <button
           key="pack"
-          onClick={() => {
-            setSelectedRound(round.id);
-            setShowPackingModal(true);
-          }}
+          onClick={() => openPacking(round.id)}
           className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-white rounded text-xs font-medium hover:bg-emerald-600"
         >
-          <Package className="w-3 h-3" /> Pack
+          <Package className="w-3 h-3" /> Record Packing
         </button>
       );
     } else if (round.status === 'packed') {
       buttons.push(
+        <button
+          key="add_packing"
+          onClick={() => openPacking(round.id)}
+          className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700"
+        >
+          <Plus className="w-3 h-3" /> Add Packing
+        </button>,
         <button
           key="close"
           onClick={() => handleCloseProduction(round.id)}
@@ -694,7 +709,7 @@ export default function GheeTab() {
       </Modal>
 
       {/* Packing Modal */}
-      <Modal isOpen={showPackingModal} onClose={() => setShowPackingModal(false)} title="Pack Ghee">
+      <Modal isOpen={showPackingModal} onClose={closePacking} title="Add Ghee Packing">
         <div className="space-y-4">
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">SKU</label>
@@ -742,7 +757,7 @@ export default function GheeTab() {
               Pack
             </button>
             <button
-              onClick={() => setShowPackingModal(false)}
+              onClick={closePacking}
               className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200"
             >
               Cancel
