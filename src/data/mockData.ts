@@ -14,6 +14,35 @@ export interface MilkSale {
   quantity: number;
 }
 
+export interface MilkBalanceSnapshot {
+  received: number;
+  consumed: number;
+  rejected: number;
+  spilled: number;
+  sold: number;
+  remaining: number;
+  overdraw: number;
+}
+
+export interface MilkBalanceRoundCorrection {
+  roundId: string;
+  shiftNumber: number;
+  roundNumber: number;
+  previousInput: number;
+  correctedInput: number;
+}
+
+export interface MilkBalanceReview {
+  id: string;
+  reviewedAt: string;
+  reviewedBy: string;
+  reviewerRole: 'owner' | 'admin';
+  reason: string;
+  before: MilkBalanceSnapshot;
+  after: MilkBalanceSnapshot;
+  roundCorrections: MilkBalanceRoundCorrection[];
+}
+
 export interface ProductionReconciliation {
   paneerRecorded: number; // kg
   yieldLPerKg: number; // L/kg
@@ -207,6 +236,9 @@ export interface MilkLot {
   productionClosedAt?: string;
   isLatest?: boolean;
   reconciliation?: ProductionReconciliation;
+  // Owner/admin corrections made from Reconciliation. The full before/after
+  // equation and every changed round input are retained for audit.
+  milkBalanceReviews?: MilkBalanceReview[];
   packedSkus?: PackedSku[];
   milkSales?: MilkSale[];
   creamLots?: CreamLot[];

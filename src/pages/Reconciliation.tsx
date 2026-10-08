@@ -9,14 +9,37 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
+import { Modal } from '../components/Modal';
+import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
-import { getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput } from '../data/mockData';
+import { getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, isMilkProductionRound } from '../data/mockData';
 import { getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 
+interface MilkBalanceReviewForm {
+  litresReceived: number;
+  litresRejected: number;
+  litresSpilled: number;
+  litresSold: number;
+  roundInputs: Record<string, number>;
+  reason: string;
+}
+
+const emptyMilkBalanceReviewForm: MilkBalanceReviewForm = {
+  litresReceived: 0,
+  litresRejected: 0,
+  litresSpilled: 0,
+  litresSold: 0,
+  roundInputs: {},
+  reason: '',
+};
+
 export default function Reconciliation() {
-  const { milkLots, productionRounds, updateProductionRound } = useApp();
+  const { milkLots, productionRounds, updateMilkLot, updateProductionRound } = useApp();
+  const { showToast } = useToast();
   const [selectedLotCode, setSelectedLotCode] = useState('');
   const [auditIdentity, setAuditIdentity] = useState({ username: '', role: '' });
+  const [showMilkBalanceReview, setShowMilkBalanceReview] = useState(false);
+  const [milkBalanceReviewForm, setMilkBalanceReviewForm] = useState<MilkBalanceReviewForm>(emptyMilkBalanceReviewForm);
   const latestMilkLot = [...milkLots].sort((a, b) => {
     const aTime = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
     const bTime = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
@@ -72,6 +95,9 @@ export default function Reconciliation() {
     unexplainedVariance,
   };
   const hasVariance = Math.abs(recon.unexplainedVariance) > 0.01;
+  const reviewableMilkRounds = lotRounds.filter(round =>
+    isMilkProductionRound(round) && !['scheduled', 'cancelled'].includes(round.status)
+  );
 
   const totalPaneerD = completedRounds.filter(r => r.type === 'D').reduce((s, r) => s + r.outputWeight, 0);
   const totalPaneerCS = completedRounds.filter(r => r.type === 'C/S').reduce((s, r) => s + r.outputWeight, 0);
@@ -96,7 +122,9 @@ export default function Reconciliation() {
     });
   }, []);
 
-  const isKbOwner = auditIdentity.username.toLowerCase() === 'kb' && auditIdentity.role.toLowerCase() === 'owner';
+  const normalizedAuditRole = auditIdentity.role.toLowerCase();
+  const canReviewMilkBalance = normalizedAuditRole === 'owner' || normalizedAuditRole === 'admin';
+  const isKbOwner = auditIdentity.username.toLowerCase() === 'kb' && normalizedAuditRole === 'owner';
   const auditToleranceKg = 1;
   const paneerAuditRounds = useMemo(
     () => productionRounds.filter(round => (round.milkLotCode === lotCode || round.milkLotId === selectedLot?.id) && (round.type === 'D' || round.type === 'C/S') && (round.actualInput > 0 || round.outputWeight > 0 || round.blockWeights?.length || round.packedSkus?.length)),
@@ -141,6 +169,120 @@ export default function Reconciliation() {
       verifiedSkuAt: new Date().toISOString(),
       verifiedSkuBy: 'kb',
     });
+  };
+
+  const openMilkBalanceReview = () => {
+    if (!selectedLot || !canReviewMilkBalance) return;
+    setMilkBalanceReviewForm({
+      litresReceived: selectedLot.litresReceived,
+      litresRejected: selectedLot.litresRejected,
+      litresSpilled: selectedLot.litresSpilled,
+      litresSold: selectedLot.litresSold || 0,
+      roundInputs: Object.fromEntries(reviewableMilkRounds.map(round => [round.id, getRoundMilkInput(round)])),
+      reason: '',
+    });
+    setShowMilkBalanceReview(true);
+  };
+
+  const projectedConsumed = reviewableMilkRounds.reduce(
+    (sum, round) => sum + Math.max(0, milkBalanceReviewForm.roundInputs[round.id] ?? getRoundMilkInput(round)),
+    0,
+  );
+  const projectedRawRemaining = milkBalanceReviewForm.litresReceived
+    - projectedConsumed
+    - milkBalanceReviewForm.litresRejected
+    - milkBalanceReviewForm.litresSpilled
+    - milkBalanceReviewForm.litresSold;
+  const projectedOverdraw = Math.max(0, -projectedRawRemaining);
+  const projectedRemaining = Math.max(0, projectedRawRemaining);
+
+  const saveMilkBalanceReview = () => {
+    if (!selectedLot || !canReviewMilkBalance) {
+      showToast('error', 'Only an owner or admin can correct the milk balance');
+      return;
+    }
+    const lotValues = [
+      milkBalanceReviewForm.litresReceived,
+      milkBalanceReviewForm.litresRejected,
+      milkBalanceReviewForm.litresSpilled,
+      milkBalanceReviewForm.litresSold,
+    ];
+    if (lotValues.some(value => !Number.isFinite(value) || value < 0)) {
+      showToast('error', 'Milk quantities must be valid values of zero or more');
+      return;
+    }
+    if (reviewableMilkRounds.some(round => {
+      const value = milkBalanceReviewForm.roundInputs[round.id];
+      return !Number.isFinite(value) || value <= 0;
+    })) {
+      showToast('error', 'Every started milk-production round must retain a positive input');
+      return;
+    }
+    if (!milkBalanceReviewForm.reason.trim()) {
+      showToast('error', 'Enter a reason for the correction so the review is auditable');
+      return;
+    }
+    if (projectedOverdraw > 0.01) {
+      showToast('error', `The proposed values still overdraw the lot by ${projectedOverdraw.toFixed(2)} L`);
+      return;
+    }
+
+    const reviewedAt = new Date().toISOString();
+    const reviewedBy = auditIdentity.username.trim() || normalizedAuditRole;
+    const roundCorrections = reviewableMilkRounds.flatMap(round => {
+      const previousInput = getRoundMilkInput(round);
+      const correctedInput = milkBalanceReviewForm.roundInputs[round.id];
+      if (Math.abs(previousInput - correctedInput) <= 0.001) return [];
+      updateProductionRound(round.id, { actualInput: correctedInput });
+      return [{
+        roundId: round.id,
+        shiftNumber: round.shiftNumber,
+        roundNumber: round.roundNumber,
+        previousInput,
+        correctedInput,
+      }];
+    });
+    const before = {
+      received: selectedLot.litresReceived,
+      consumed: milkAccounting.consumed,
+      rejected: selectedLot.litresRejected,
+      spilled: selectedLot.litresSpilled,
+      sold: milkAccounting.sold,
+      remaining: milkAccounting.remaining,
+      overdraw: milkAccounting.overdraw,
+    };
+    const after = {
+      received: milkBalanceReviewForm.litresReceived,
+      consumed: projectedConsumed,
+      rejected: milkBalanceReviewForm.litresRejected,
+      spilled: milkBalanceReviewForm.litresSpilled,
+      sold: milkBalanceReviewForm.litresSold,
+      remaining: projectedRemaining,
+      overdraw: projectedOverdraw,
+    };
+    updateMilkLot(selectedLot.id, {
+      litresReceived: after.received,
+      litresConsumed: after.consumed,
+      litresRemaining: after.remaining,
+      litresRejected: after.rejected,
+      litresSpilled: after.spilled,
+      litresSold: after.sold,
+      milkBalanceReviews: [
+        ...(selectedLot.milkBalanceReviews || []),
+        {
+          id: `milk-review-${Date.now()}`,
+          reviewedAt,
+          reviewedBy,
+          reviewerRole: normalizedAuditRole as 'owner' | 'admin',
+          reason: milkBalanceReviewForm.reason.trim(),
+          before,
+          after,
+          roundCorrections,
+        },
+      ],
+    });
+    setShowMilkBalanceReview(false);
+    showToast('success', `Milk balance reviewed. Corrected remaining balance: ${projectedRemaining.toFixed(2)} L`);
   };
 
   return (
@@ -210,7 +352,7 @@ export default function Reconciliation() {
         {hasVariance && (
           <div className="mt-4 flex items-start gap-2 p-3 bg-red-50 rounded-lg">
             <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-red-700">Unexplained Variance: {recon.unexplainedVariance} L</p>
               <p className="text-xs text-red-600 mt-0.5">
                 Received ({recon.received}) − Sum of accounted movements ({recon.consumedByProduction + recon.remaining + recon.rejected + recon.spilled + recon.accountedOther}) = {recon.unexplainedVariance} L
@@ -218,8 +360,55 @@ export default function Reconciliation() {
               <p className="text-xs text-red-600 mt-1">
                 Owner review required. This may indicate measurement error, unrecorded usage, or system gap.
               </p>
+              {milkAccounting.overdraw > 0.01 && (
+                <div className="mt-2 rounded border border-red-200 bg-white/70 px-2 py-1 font-semibold text-red-700">
+                  Overdraw detected: {milkAccounting.overdraw.toFixed(2)} L. Review the receiving quantity, waste deductions, sales, and each round input below.
+                </div>
+              )}
+              <div className="mt-3">
+                {canReviewMilkBalance ? (
+                  <button
+                    type="button"
+                    onClick={openMilkBalanceReview}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Review and correct milk balance
+                  </button>
+                ) : (
+                  <span className="inline-flex rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-700">
+                    Sign in as an owner or admin to correct this balance
+                  </span>
+                )}
+              </div>
             </div>
-            {milkAccounting.overdraw > 0.01 && <div className="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 font-semibold text-red-700">Overdraw detected: {milkAccounting.overdraw.toFixed(2)} L. The lot has been consumed beyond its received/rejected/spilled/sold balance and requires owner review.</div>}
+          </div>
+        )}
+
+        {selectedLot?.milkBalanceReviews && selectedLot.milkBalanceReviews.length > 0 && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Milk balance review history</h4>
+            <div className="mt-2 space-y-2">
+              {[...selectedLot.milkBalanceReviews].reverse().map(review => (
+                <details key={review.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-800">
+                    {new Date(review.reviewedAt).toLocaleString()} · {review.reviewedBy} ({review.reviewerRole})
+                  </summary>
+                  <div className="mt-2 space-y-1 text-xs text-slate-600">
+                    <p><span className="font-semibold">Reason:</span> {review.reason}</p>
+                    <p><span className="font-semibold">Before:</span> {review.before.consumed.toFixed(2)} L consumed · {review.before.remaining.toFixed(2)} L remaining · {review.before.overdraw.toFixed(2)} L overdraw</p>
+                    <p><span className="font-semibold">After:</span> {review.after.consumed.toFixed(2)} L consumed · {review.after.remaining.toFixed(2)} L remaining · {review.after.overdraw.toFixed(2)} L overdraw</p>
+                    {review.roundCorrections.length > 0 && (
+                      <ul className="list-disc pl-4">
+                        {review.roundCorrections.map(correction => (
+                          <li key={`${review.id}-${correction.roundId}`}>Shift {correction.shiftNumber}, round {correction.roundNumber}: {correction.previousInput.toFixed(2)} L → {correction.correctedInput.toFixed(2)} L</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </details>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -438,6 +627,136 @@ export default function Reconciliation() {
           <p className="text-sm text-slate-500">No earlier milk lot is available for comparison.</p>
         )}
       </div>
+
+      <Modal
+        isOpen={showMilkBalanceReview}
+        onClose={() => setShowMilkBalanceReview(false)}
+        title={`Review milk balance · ${lotCode}`}
+        size="lg"
+      >
+        <div className="space-y-5">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <p className="font-semibold">Correct the source figures—not the warning.</p>
+            <p className="mt-1">Review the receiving ledger and every started milk-production round. Saving is blocked until the corrected equation has no overdraw, and the before/after values are retained in the audit history.</p>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Receiving ledger</h4>
+            <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {([
+                ['litresReceived', 'Milk received'],
+                ['litresRejected', 'Rejected/contaminated'],
+                ['litresSpilled', 'Spilled'],
+                ['litresSold', 'Milk sold'],
+              ] as const).map(([field, label]) => (
+                <label key={field} className="block">
+                  <span className="text-[11px] font-medium text-slate-600">{label} (L)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={milkBalanceReviewForm[field]}
+                    onChange={event => setMilkBalanceReviewForm(current => ({
+                      ...current,
+                      [field]: Math.max(0, Number(event.target.value) || 0),
+                    }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Production inputs</h4>
+              <span className="text-[11px] text-slate-500">Scheduled and cancelled rounds do not consume milk</span>
+            </div>
+            <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[620px] text-sm">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="text-left">
+                    <th className="px-3 py-2 text-[10px] uppercase tracking-wide text-slate-500">Round</th>
+                    <th className="px-3 py-2 text-[10px] uppercase tracking-wide text-slate-500">Status</th>
+                    <th className="px-3 py-2 text-[10px] uppercase tracking-wide text-slate-500">Current source</th>
+                    <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wide text-slate-500">Current input</th>
+                    <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wide text-slate-500">Corrected input</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {reviewableMilkRounds.map(round => {
+                    const currentInput = getRoundMilkInput(round);
+                    const correctedInput = milkBalanceReviewForm.roundInputs[round.id] ?? currentInput;
+                    const changed = Math.abs(correctedInput - currentInput) > 0.001;
+                    return (
+                      <tr key={round.id} className={changed ? 'bg-amber-50/60' : ''}>
+                        <td className="px-3 py-2">
+                          <div className="font-mono text-xs font-semibold text-slate-900">S{round.shiftNumber}/R{round.roundNumber}</div>
+                          <div className="text-[10px] text-slate-500">{round.type}</div>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate-600">{round.status}</td>
+                        <td className="px-3 py-2 text-xs text-slate-600">{round.actualInput > 0 ? 'Actual input' : 'Planned fallback'}</td>
+                        <td className="px-3 py-2 text-right font-medium text-slate-700">{currentInput.toFixed(2)} L</td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={correctedInput}
+                            onChange={event => setMilkBalanceReviewForm(current => ({
+                              ...current,
+                              roundInputs: {
+                                ...current.roundInputs,
+                                [round.id]: Math.max(0, Number(event.target.value) || 0),
+                              },
+                            }))}
+                            className={`ml-auto block w-28 rounded-lg border px-2 py-1.5 text-right text-sm ${changed ? 'border-amber-300 bg-white' : 'border-slate-200'}`}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {reviewableMilkRounds.length === 0 && (
+                    <tr><td colSpan={5} className="px-3 py-6 text-center text-sm text-slate-500">No started milk-production rounds are linked to this lot.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className={`rounded-lg border p-3 ${projectedOverdraw > 0.01 ? 'border-red-300 bg-red-50' : 'border-emerald-300 bg-emerald-50'}`}>
+            <p className={`text-xs font-semibold ${projectedOverdraw > 0.01 ? 'text-red-800' : 'text-emerald-800'}`}>Projected corrected equation</p>
+            <p className="mt-1 font-mono text-xs text-slate-700">
+              {milkBalanceReviewForm.litresReceived.toFixed(2)} received − {projectedConsumed.toFixed(2)} consumed − {milkBalanceReviewForm.litresRejected.toFixed(2)} rejected − {milkBalanceReviewForm.litresSpilled.toFixed(2)} spilled − {milkBalanceReviewForm.litresSold.toFixed(2)} sold = {projectedRawRemaining.toFixed(2)} L
+            </p>
+            <p className={`mt-1 text-sm font-bold ${projectedOverdraw > 0.01 ? 'text-red-700' : 'text-emerald-700'}`}>
+              {projectedOverdraw > 0.01 ? `${projectedOverdraw.toFixed(2)} L overdraw remains` : `${projectedRemaining.toFixed(2)} L remaining`}
+            </p>
+          </div>
+
+          <label className="block">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-600">Reason for correction</span>
+            <textarea
+              rows={3}
+              value={milkBalanceReviewForm.reason}
+              onChange={event => setMilkBalanceReviewForm(current => ({ ...current, reason: event.target.value }))}
+              placeholder="State what was checked and which source figure was incorrect"
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </label>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={saveMilkBalanceReview}
+              className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+            >
+              Save reviewed correction
+            </button>
+            <button type="button" onClick={() => setShowMilkBalanceReview(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700">Cancel</button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
