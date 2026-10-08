@@ -4,6 +4,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, milkStorageVessels } from '../data/mockData';
+import { getPaneerPackWeight, normalizeFinishedGoodsSku, paneerSkuByCode } from '../data/skuConfig';
 import { getProductionPackingEntries } from '../lib/finishedStock';
 import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 
@@ -177,12 +178,25 @@ export default function MilkReceiving() {
       .filter(({ round }) => round.milkLotId === displayedLot.id || round.milkLotCode === displayedLot.lotCode)
       .map(({ pack }) => pack);
     const entries = boardEntries.length > 0 ? boardEntries : (displayedLot.packedSkus || []);
-    const summary = new Map<string, { sku: string; cases: number; loose: number }>();
+    const summary = new Map<string, { sku: string; cases: number; loose: number; looseWeightKg: number; weightKg: number }>();
     entries.forEach((entry) => {
-      const existing = summary.get(entry.sku) || { sku: entry.sku, cases: 0, loose: 0 };
+      const sku = normalizeFinishedGoodsSku(entry.sku);
+      const definition = paneerSkuByCode[sku];
+      const entryWeightKg = definition
+        ? getPaneerPackWeight(
+          definition,
+          entry.cases || 0,
+          entry.loose || 0,
+          entry.looseWeightKg || 0,
+          entry.weightKg || 0,
+        )
+        : Math.max(0, entry.weightKg || entry.looseWeightKg || 0);
+      const existing = summary.get(sku) || { sku, cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0 };
       existing.cases += entry.cases || 0;
       existing.loose += entry.loose || 0;
-      summary.set(entry.sku, existing);
+      existing.looseWeightKg += entry.looseWeightKg || 0;
+      existing.weightKg += entryWeightKg;
+      summary.set(sku, existing);
     });
     return [...summary.values()];
   }, [displayedLot, productionRounds]);
@@ -605,6 +619,9 @@ export default function MilkReceiving() {
                                 <h3 className="text-sm font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200">
                                   SKU Packed on Board
                                 </h3>
+                                <p className="mb-3 text-xs text-slate-500">
+                                  Weight is calculated from each SKU&apos;s configured pack size and the cases and loose quantity recorded on the Production Board.
+                                </p>
                                 {packedSkuSummary.length > 0 ? (
                                   <div className="overflow-x-auto">
                                     <table className="w-full text-sm">
@@ -612,7 +629,8 @@ export default function MilkReceiving() {
                                         <tr className="border-b border-slate-200">
                                           <th className="px-2 py-2 text-left text-[10px] uppercase tracking-wider text-slate-500">SKU</th>
                                           <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Quantity in cases</th>
-                                          <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Quantity in packets</th>
+                                          <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Loose</th>
+                                          <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Weight</th>
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-slate-100">
@@ -620,7 +638,12 @@ export default function MilkReceiving() {
                                           <tr key={sku.sku}>
                                             <td className="px-2 py-3 font-mono font-semibold text-slate-900">{sku.sku}</td>
                                             <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.cases.toLocaleString()}</td>
-                                            <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.loose.toLocaleString()}</td>
+                                            <td className="px-2 py-3 text-right font-bold text-slate-900">
+                                              {paneerSkuByCode[sku.sku]?.packMode === 'weight_loose'
+                                                ? `${sku.looseWeightKg.toFixed(2)} kg`
+                                                : sku.loose.toLocaleString()}
+                                            </td>
+                                            <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.weightKg.toFixed(2)} kg</td>
                                           </tr>
                                         ))}
                                       </tbody>
