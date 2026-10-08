@@ -32,6 +32,15 @@ export interface MilkBalanceRoundCorrection {
   correctedInput: number;
 }
 
+export interface MilkBalanceWasteCorrection {
+  wasteEventId: string;
+  category: 'rejected' | 'spilled';
+  eventDate: string;
+  eventReason: string;
+  previousQuantity: number;
+  correctedQuantity: number;
+}
+
 export interface MilkBalanceReview {
   id: string;
   reviewedAt: string;
@@ -41,6 +50,7 @@ export interface MilkBalanceReview {
   before: MilkBalanceSnapshot;
   after: MilkBalanceSnapshot;
   roundCorrections: MilkBalanceRoundCorrection[];
+  wasteCorrections?: MilkBalanceWasteCorrection[];
 }
 
 export interface ProductionReconciliation {
@@ -633,6 +643,13 @@ export interface WasteEvent {
   recordedBy: string;
   batchCode?: string;
   isRecoverable: boolean; // PAN111, recovered cream = NOT waste
+  correctionHistory?: Array<{
+    correctedAt: string;
+    correctedBy: string;
+    previousQuantity: number;
+    correctedQuantity: number;
+    reason: string;
+  }>;
 }
 
 export interface UtilityLog {

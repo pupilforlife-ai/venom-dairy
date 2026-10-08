@@ -69,6 +69,7 @@ interface AppContextType extends AppState {
   
   // Waste actions
   addWasteEvent: (event: Omit<WasteEvent, 'id'>) => void;
+  updateWasteEvent: (id: string, updates: Partial<WasteEvent>) => void;
   
   // Intermediate lot actions
   addIntermediateLot: (lot: Omit<IntermediateLot, 'id'>) => void;
@@ -479,6 +480,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateWasteEvent = (id: string, updates: Partial<WasteEvent>) => {
+    const previousEvent = wasteEvents.find(event => event.id === id);
+    if (!previousEvent) return;
+    const updatedEvent = { ...previousEvent, ...updates };
+    setWasteEvents(currentEvents => currentEvents.map(event => event.id === id ? updatedEvent : event));
+
+    // Keep the receiving ledger synchronized when a linked raw-milk waste
+    // record is corrected. Apply a delta rather than replacing the total so
+    // legacy/manual ledger entries that have no waste event remain intact.
+    const getMilkWasteCategory = (event: WasteEvent): 'rejected' | 'spilled' | null => {
+      if (event.unit.toLowerCase() !== 'l' || !/milk/i.test(event.product) || !event.batchCode?.trim()) return null;
+      return /spill/i.test(event.reason) ? 'spilled' : 'rejected';
+    };
+    const previousCategory = getMilkWasteCategory(previousEvent);
+    const updatedCategory = getMilkWasteCategory(updatedEvent);
+    if (!previousCategory && !updatedCategory) return;
+
+    setMilkLots(currentLots => currentLots.map(lot => {
+      let rejectedDelta = 0;
+      let spilledDelta = 0;
+      const previousBatchCode = previousEvent.batchCode?.trim();
+      const updatedBatchCode = updatedEvent.batchCode?.trim();
+      const matchesPreviousLot = lot.id === previousBatchCode || lot.lotCode === previousBatchCode;
+      const matchesUpdatedLot = lot.id === updatedBatchCode || lot.lotCode === updatedBatchCode;
+      if (matchesPreviousLot && previousCategory === 'rejected') rejectedDelta -= previousEvent.quantity;
+      if (matchesPreviousLot && previousCategory === 'spilled') spilledDelta -= previousEvent.quantity;
+      if (matchesUpdatedLot && updatedCategory === 'rejected') rejectedDelta += updatedEvent.quantity;
+      if (matchesUpdatedLot && updatedCategory === 'spilled') spilledDelta += updatedEvent.quantity;
+      if (rejectedDelta === 0 && spilledDelta === 0) return lot;
+
+      const updatedLot = {
+        ...lot,
+        litresRejected: Math.max(0, lot.litresRejected + rejectedDelta),
+        litresSpilled: Math.max(0, lot.litresSpilled + spilledDelta),
+      };
+      return {
+        ...updatedLot,
+        litresRemaining: getMilkLotAccounting(updatedLot, productionRounds).remaining,
+      };
+    }));
+  };
+
   // Intermediate lot actions
   const addIntermediateLot = (lot: Omit<IntermediateLot, 'id'>) => {
     const newLot = { ...lot, id: `il-${Date.now()}` };
@@ -561,6 +604,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     recordRoundOutput,
     addTemperatureReading,
     addWasteEvent,
+    updateWasteEvent,
     addIntermediateLot,
     updateIntermediateLot,
     addFinishedStock,

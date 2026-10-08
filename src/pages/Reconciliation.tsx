@@ -21,6 +21,7 @@ interface MilkBalanceReviewForm {
   litresSpilled: number;
   litresSold: number;
   roundInputs: Record<string, number>;
+  wasteEventQuantities: Record<string, number>;
   reason: string;
 }
 
@@ -30,11 +31,12 @@ const emptyMilkBalanceReviewForm: MilkBalanceReviewForm = {
   litresSpilled: 0,
   litresSold: 0,
   roundInputs: {},
+  wasteEventQuantities: {},
   reason: '',
 };
 
 export default function Reconciliation() {
-  const { milkLots, productionRounds, updateMilkLot, updateProductionRound } = useApp();
+  const { milkLots, productionRounds, wasteEvents, updateMilkLot, updateProductionRound, updateWasteEvent } = useApp();
   const { showToast } = useToast();
   const [selectedLotCode, setSelectedLotCode] = useState('');
   const [auditIdentity, setAuditIdentity] = useState({ username: '', role: '' });
@@ -98,6 +100,18 @@ export default function Reconciliation() {
   const reviewableMilkRounds = lotRounds.filter(round =>
     isMilkProductionRound(round) && !['scheduled', 'cancelled'].includes(round.status)
   );
+  const linkedMilkWasteEvents = wasteEvents.filter(event => {
+    const batchCode = event.batchCode?.trim();
+    return event.unit.toLowerCase() === 'l'
+      && /milk/i.test(event.product)
+      && Boolean(selectedLot && (batchCode === selectedLot.id || batchCode === selectedLot.lotCode));
+  });
+  const linkedRejectedEvents = linkedMilkWasteEvents.filter(event => !/spill/i.test(event.reason));
+  const linkedSpilledEvents = linkedMilkWasteEvents.filter(event => /spill/i.test(event.reason));
+  const linkedRejectedTotal = linkedRejectedEvents.reduce((sum, event) => sum + Math.max(0, event.quantity), 0);
+  const linkedSpilledTotal = linkedSpilledEvents.reduce((sum, event) => sum + Math.max(0, event.quantity), 0);
+  const unlinkedRejectedTotal = Math.max(0, (selectedLot?.litresRejected || 0) - linkedRejectedTotal);
+  const unlinkedSpilledTotal = Math.max(0, (selectedLot?.litresSpilled || 0) - linkedSpilledTotal);
 
   const totalPaneerD = completedRounds.filter(r => r.type === 'D').reduce((s, r) => s + r.outputWeight, 0);
   const totalPaneerCS = completedRounds.filter(r => r.type === 'C/S').reduce((s, r) => s + r.outputWeight, 0);
@@ -179,6 +193,7 @@ export default function Reconciliation() {
       litresSpilled: selectedLot.litresSpilled,
       litresSold: selectedLot.litresSold || 0,
       roundInputs: Object.fromEntries(reviewableMilkRounds.map(round => [round.id, getRoundMilkInput(round)])),
+      wasteEventQuantities: Object.fromEntries(linkedMilkWasteEvents.map(event => [event.id, event.quantity])),
       reason: '',
     });
     setShowMilkBalanceReview(true);
@@ -195,6 +210,26 @@ export default function Reconciliation() {
     - milkBalanceReviewForm.litresSold;
   const projectedOverdraw = Math.max(0, -projectedRawRemaining);
   const projectedRemaining = Math.max(0, projectedRawRemaining);
+
+  const changeWasteEventQuantity = (eventId: string, value: number) => {
+    setMilkBalanceReviewForm(current => {
+      const wasteEventQuantities = { ...current.wasteEventQuantities, [eventId]: Math.max(0, value) };
+      const nextRejected = unlinkedRejectedTotal + linkedRejectedEvents.reduce(
+        (sum, event) => sum + (wasteEventQuantities[event.id] ?? event.quantity),
+        0,
+      );
+      const nextSpilled = unlinkedSpilledTotal + linkedSpilledEvents.reduce(
+        (sum, event) => sum + (wasteEventQuantities[event.id] ?? event.quantity),
+        0,
+      );
+      return {
+        ...current,
+        wasteEventQuantities,
+        litresRejected: nextRejected,
+        litresSpilled: nextSpilled,
+      };
+    });
+  };
 
   const saveMilkBalanceReview = () => {
     if (!selectedLot || !canReviewMilkBalance) {
@@ -218,15 +253,17 @@ export default function Reconciliation() {
       showToast('error', 'Every started milk-production round must retain a positive input');
       return;
     }
+    if (linkedMilkWasteEvents.some(event => {
+      const value = milkBalanceReviewForm.wasteEventQuantities[event.id];
+      return !Number.isFinite(value) || value < 0;
+    })) {
+      showToast('error', 'Rejected and spilled milk corrections must be zero or more');
+      return;
+    }
     if (!milkBalanceReviewForm.reason.trim()) {
       showToast('error', 'Enter a reason for the correction so the review is auditable');
       return;
     }
-    if (projectedOverdraw > 0.01) {
-      showToast('error', `The proposed values still overdraw the lot by ${projectedOverdraw.toFixed(2)} L`);
-      return;
-    }
-
     const reviewedAt = new Date().toISOString();
     const reviewedBy = auditIdentity.username.trim() || normalizedAuditRole;
     const roundCorrections = reviewableMilkRounds.flatMap(round => {
@@ -240,6 +277,31 @@ export default function Reconciliation() {
         roundNumber: round.roundNumber,
         previousInput,
         correctedInput,
+      }];
+    });
+    const wasteCorrections = linkedMilkWasteEvents.flatMap(event => {
+      const correctedQuantity = milkBalanceReviewForm.wasteEventQuantities[event.id];
+      if (Math.abs(event.quantity - correctedQuantity) <= 0.001) return [];
+      updateWasteEvent(event.id, {
+        quantity: correctedQuantity,
+        correctionHistory: [
+          ...(event.correctionHistory || []),
+          {
+            correctedAt: reviewedAt,
+            correctedBy: reviewedBy,
+            previousQuantity: event.quantity,
+            correctedQuantity,
+            reason: milkBalanceReviewForm.reason.trim(),
+          },
+        ],
+      });
+      return [{
+        wasteEventId: event.id,
+        category: /spill/i.test(event.reason) ? 'spilled' as const : 'rejected' as const,
+        eventDate: event.date,
+        eventReason: event.reason,
+        previousQuantity: event.quantity,
+        correctedQuantity,
       }];
     });
     const before = {
@@ -278,11 +340,16 @@ export default function Reconciliation() {
           before,
           after,
           roundCorrections,
+          wasteCorrections,
         },
       ],
     });
     setShowMilkBalanceReview(false);
-    showToast('success', `Milk balance reviewed. Corrected remaining balance: ${projectedRemaining.toFixed(2)} L`);
+    if (projectedOverdraw > 0.01) {
+      showToast('info', `Correction saved. ${projectedOverdraw.toFixed(2)} L overdraw remains for further review.`);
+    } else {
+      showToast('success', `Milk balance reviewed. Corrected remaining balance: ${projectedRemaining.toFixed(2)} L`);
+    }
   };
 
   return (
@@ -402,6 +469,15 @@ export default function Reconciliation() {
                       <ul className="list-disc pl-4">
                         {review.roundCorrections.map(correction => (
                           <li key={`${review.id}-${correction.roundId}`}>Shift {correction.shiftNumber}, round {correction.roundNumber}: {correction.previousInput.toFixed(2)} L → {correction.correctedInput.toFixed(2)} L</li>
+                        ))}
+                      </ul>
+                    )}
+                    {(review.wasteCorrections || []).length > 0 && (
+                      <ul className="list-disc pl-4">
+                        {(review.wasteCorrections || []).map(correction => (
+                          <li key={`${review.id}-${correction.wasteEventId}`}>
+                            {correction.category === 'spilled' ? 'Spilled' : 'Rejected'} milk ({correction.eventReason}, {correction.eventDate}): {correction.previousQuantity.toFixed(2)} L → {correction.correctedQuantity.toFixed(2)} L
+                          </li>
                         ))}
                       </ul>
                     )}
@@ -637,7 +713,7 @@ export default function Reconciliation() {
         <div className="space-y-5">
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             <p className="font-semibold">Correct the source figures—not the warning.</p>
-            <p className="mt-1">Review the receiving ledger and every started milk-production round. Saving is blocked until the corrected equation has no overdraw, and the before/after values are retained in the audit history.</p>
+            <p className="mt-1">Review the receiving ledger, linked Waste &amp; Yield records, and every started milk-production round. Valid corrections can be saved even when another discrepancy remains; the warning stays visible until the full equation balances.</p>
           </div>
 
           <div>
@@ -648,24 +724,82 @@ export default function Reconciliation() {
                 ['litresRejected', 'Rejected/contaminated'],
                 ['litresSpilled', 'Spilled'],
                 ['litresSold', 'Milk sold'],
-              ] as const).map(([field, label]) => (
-                <label key={field} className="block">
-                  <span className="text-[11px] font-medium text-slate-600">{label} (L)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={milkBalanceReviewForm[field]}
-                    onChange={event => setMilkBalanceReviewForm(current => ({
-                      ...current,
-                      [field]: Math.max(0, Number(event.target.value) || 0),
-                    }))}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  />
-                </label>
-              ))}
+              ] as const).map(([field, label]) => {
+                const linkedSourceCount = field === 'litresRejected'
+                  ? linkedRejectedEvents.length
+                  : field === 'litresSpilled'
+                    ? linkedSpilledEvents.length
+                    : 0;
+                return (
+                  <label key={field} className="block">
+                    <span className="text-[11px] font-medium text-slate-600">{label} (L)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={milkBalanceReviewForm[field]}
+                      readOnly={linkedSourceCount > 0}
+                      onChange={event => setMilkBalanceReviewForm(current => ({
+                        ...current,
+                        [field]: Math.max(0, Number(event.target.value) || 0),
+                      }))}
+                      className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${linkedSourceCount > 0 ? 'border-slate-200 bg-slate-100 text-slate-600' : 'border-slate-200'}`}
+                    />
+                    {linkedSourceCount > 0 && (
+                      <span className="mt-1 block text-[10px] text-slate-500">Calculated from {linkedSourceCount} Waste &amp; Yield record{linkedSourceCount === 1 ? '' : 's'} below</span>
+                    )}
+                  </label>
+                );
+              })}
             </div>
           </div>
+
+          {linkedMilkWasteEvents.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Linked rejected and spilled milk records</h4>
+                <span className="text-[11px] text-slate-500">Updates Waste &amp; Yield and receiving together</span>
+              </div>
+              <div className="mt-2 overflow-hidden rounded-lg border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50">
+                    <tr className="text-left">
+                      <th className="px-3 py-2 text-[10px] uppercase tracking-wide text-slate-500">Date</th>
+                      <th className="px-3 py-2 text-[10px] uppercase tracking-wide text-slate-500">Reason</th>
+                      <th className="px-3 py-2 text-[10px] uppercase tracking-wide text-slate-500">Category</th>
+                      <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wide text-slate-500">Recorded</th>
+                      <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wide text-slate-500">Corrected</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {linkedMilkWasteEvents.map(event => {
+                      const correctedQuantity = milkBalanceReviewForm.wasteEventQuantities[event.id] ?? event.quantity;
+                      const changed = Math.abs(correctedQuantity - event.quantity) > 0.001;
+                      return (
+                        <tr key={event.id} className={changed ? 'bg-amber-50/60' : ''}>
+                          <td className="px-3 py-2 text-xs text-slate-600">{event.date}</td>
+                          <td className="px-3 py-2"><div className="text-xs font-medium text-slate-800">{event.reason}</div><div className="text-[10px] text-slate-500">Recorded by {event.recordedBy}</div></td>
+                          <td className="px-3 py-2 text-xs text-slate-600">{/spill/i.test(event.reason) ? 'Spilled' : 'Rejected'}</td>
+                          <td className="px-3 py-2 text-right font-medium text-slate-700">{event.quantity.toFixed(2)} L</td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={correctedQuantity}
+                              onChange={inputEvent => changeWasteEventQuantity(event.id, Number(inputEvent.target.value) || 0)}
+                              className={`ml-auto block w-28 rounded-lg border px-2 py-1.5 text-right text-sm ${changed ? 'border-amber-300 bg-white' : 'border-slate-200'}`}
+                              aria-label={`Corrected ${/spill/i.test(event.reason) ? 'spilled' : 'rejected'} milk for ${event.reason}`}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between gap-2">
