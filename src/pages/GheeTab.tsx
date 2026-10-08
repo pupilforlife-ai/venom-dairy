@@ -4,6 +4,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getDateBatchCode, getGheeBatchCode } from '../data/mockData';
+import { getGheePackWeight, gheeSkuByCode, gheeSkuDefinitions } from '../data/skuConfig';
 
 type GheeStatus = 
   | 'scheduled'
@@ -62,6 +63,7 @@ export default function GheeTab() {
     sku: '',
     buckets: 0,
   });
+  const selectedPackingDefinition = gheeSkuByCode[packingForm.sku];
 
   const [discardForm, setDiscardForm] = useState({
     reason: '',
@@ -110,14 +112,7 @@ export default function GheeTab() {
     if (!round.packedSkus || round.packedSkus.length === 0) return 0;
     
     return round.packedSkus.reduce((total: number, pack: any) => {
-      if (pack.sku === 'GHEE-400') {
-        // 27 buckets per case, 400g per bucket = 10.8 kg per case
-        return total + (pack.cases * 10.8) + (pack.loose * 0.4);
-      } else if (pack.sku === 'GHEE-1500') {
-        // 6 buckets per case, 1.5kg per bucket = 9 kg per case
-        return total + (pack.cases * 9) + (pack.loose * 1.5);
-      }
-      return total;
+      return total + getGheePackWeight(gheeSkuByCode[pack.sku], pack.cases || 0, pack.loose || 0);
     }, 0);
   };
 
@@ -265,29 +260,18 @@ export default function GheeTab() {
   };
 
   const handlePack = () => {
-    if (!selectedRound || packingForm.buckets <= 0) {
-      showToast('error', 'Please enter valid quantity');
+    const definition = gheeSkuByCode[packingForm.sku];
+    if (!selectedRound || !definition || packingForm.buckets <= 0) {
+      showToast('error', 'Select a ghee SKU and enter a valid bucket quantity');
       return;
     }
 
     const round = gheeRounds.find(r => r.id === selectedRound);
     if (!round) return;
 
-    // Calculate weight based on SKU
-    let weightPerBucket = 0;
-    let bucketsPerCase = 0;
-
-    if (packingForm.sku === 'GHEE-400') {
-      weightPerBucket = 0.4; // 400g
-      bucketsPerCase = 27;
-    } else if (packingForm.sku === 'GHEE-1500') {
-      weightPerBucket = 1.5; // 1.5kg
-      bucketsPerCase = 6;
-    }
-
-    const totalWeight = packingForm.buckets * weightPerBucket;
-    const cases = Math.floor(packingForm.buckets / bucketsPerCase);
-    const looseBuckets = packingForm.buckets % bucketsPerCase;
+    const totalWeight = packingForm.buckets * definition.unitWeightKg;
+    const cases = Math.floor(packingForm.buckets / definition.bucketsPerCase);
+    const looseBuckets = packingForm.buckets % definition.bucketsPerCase;
 
     // Update packing sessions
     const existingPacking = round.packedSkus || [];
@@ -720,8 +704,11 @@ export default function GheeTab() {
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
               <option value="">Select SKU</option>
-              <option value="GHEE-400">Ghee 400g (27 buckets/case = 10.8 kg)</option>
-              <option value="GHEE-1500">Ghee 1.5kg (6 buckets/case = 9 kg)</option>
+              {gheeSkuDefinitions.map(definition => (
+                <option key={definition.sku} value={definition.sku}>
+                  {definition.productName} ({definition.bucketsPerCase} buckets/case = {(definition.bucketsPerCase * definition.unitWeightKg).toFixed(1)} kg)
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -734,16 +721,16 @@ export default function GheeTab() {
               min="0"
             />
           </div>
-          {packingForm.sku && packingForm.buckets > 0 && (
+          {selectedPackingDefinition && packingForm.buckets > 0 && (
             <div className="bg-slate-50 rounded-lg p-3">
               <p className="text-xs text-slate-600">
                 <strong>Packing Preview:</strong>
               </p>
               <p className="text-sm font-medium text-slate-900 mt-1">
-                {packingForm.buckets} buckets = {Math.floor(packingForm.buckets / (packingForm.sku === 'GHEE-400' ? 27 : 6))} cases + {packingForm.buckets % (packingForm.sku === 'GHEE-400' ? 27 : 6)} loose buckets
+                {packingForm.buckets} buckets = {Math.floor(packingForm.buckets / selectedPackingDefinition.bucketsPerCase)} cases + {packingForm.buckets % selectedPackingDefinition.bucketsPerCase} loose buckets
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                Total weight: {(packingForm.buckets * (packingForm.sku === 'GHEE-400' ? 0.4 : 1.5)).toFixed(2)} kg
+                Total weight: {(packingForm.buckets * selectedPackingDefinition.unitWeightKg).toFixed(2)} kg
               </p>
             </div>
           )}

@@ -30,6 +30,13 @@ export interface CrumbingSkuDefinition {
   crumbingType: 'SPP' | 'JP' | 'HCP';
 }
 
+export interface GheeSkuDefinition {
+  sku: string;
+  productName: string;
+  unitWeightKg: number;
+  bucketsPerCase: number;
+}
+
 // Paneer Board SKUs. SPP, JP and HCP are deliberately excluded: those are
 // final products selected only after their Crumbing workflow is complete.
 export const paneerSkuDefinitions: PaneerSkuDefinition[] = [
@@ -59,6 +66,15 @@ export const crumbingSkuDefinitions: CrumbingSkuDefinition[] = [
   { sku: 'ROZ JP', productName: 'Rozana Jalapeno Poppers', unitWeightKg: 0.25, unitsPerCase: 12, packMode: 'units', crumbingType: 'JP' },
   { sku: 'HCP', productName: 'Vejoy Halloumi Poppers', unitWeightKg: 0.25, unitsPerCase: 12, packMode: 'units', crumbingType: 'HCP' },
   { sku: 'ROZ HCP', productName: 'Rozana Halloumi Poppers', unitWeightKg: 0.25, unitsPerCase: 12, packMode: 'units', crumbingType: 'HCP' },
+];
+
+// Keep the two 400 g case configurations as separate SKUs. This preserves the
+// historical 27-bucket packing records while allowing the new 24-bucket case
+// to be counted and reconciled independently.
+export const gheeSkuDefinitions: GheeSkuDefinition[] = [
+  { sku: 'GHEE-400', productName: 'Ghee 400g — 27 bucket case', unitWeightKg: 0.4, bucketsPerCase: 27 },
+  { sku: 'GHEE-400-24', productName: 'Ghee 400g — 24 bucket case', unitWeightKg: 0.4, bucketsPerCase: 24 },
+  { sku: 'GHEE-1500', productName: 'Ghee 1.5kg — 6 bucket case', unitWeightKg: 1.5, bucketsPerCase: 6 },
 ];
 
 // Finished-goods batch identity is deliberately separate from the internal
@@ -98,6 +114,7 @@ export const finishedGoodsBatchCodeDefinitions: FinishedGoodsBatchCodeDefinition
   { sku: 'GHEE-1500', prefix: '61', mode: 'receipt_date', receiptSource: 'cream' },
   { sku: '400G', prefix: '62', mode: 'receipt_date', receiptSource: 'cream' },
   { sku: 'GHEE-400', prefix: '62', mode: 'receipt_date', receiptSource: 'cream' },
+  { sku: 'GHEE-400-24', prefix: '62', mode: 'receipt_date', receiptSource: 'cream' },
   { sku: 'TN3-(TBN PROMO)', prefix: '71', mode: 'manual' },
   { sku: 'TBN', prefix: '72', mode: 'manual' },
   { sku: 'GBN (PROMO)', prefix: '73', mode: 'manual' },
@@ -149,6 +166,7 @@ export function buildFinishedGoodsBatchCode(sku: string, receiptDate?: string) {
 
 export const paneerSkuByCode = Object.fromEntries(paneerSkuDefinitions.map(definition => [definition.sku, definition])) as Record<string, PaneerSkuDefinition>;
 export const crumbingSkuByCode = Object.fromEntries(crumbingSkuDefinitions.map(definition => [definition.sku, definition])) as Record<string, CrumbingSkuDefinition>;
+export const gheeSkuByCode = Object.fromEntries(gheeSkuDefinitions.map(definition => [definition.sku, definition])) as Record<string, GheeSkuDefinition>;
 
 export function getAllowedPaneerSkus(roundType: PaneerSourceType, cuttingType?: string) {
   return paneerSkuDefinitions.filter(definition => {
@@ -170,4 +188,9 @@ export function getPaneerPackWeight(definition: PaneerSkuDefinition | undefined,
 export function getCrumbingPackWeight(definition: CrumbingSkuDefinition | undefined, cases: number, loose: number) {
   if (!definition) return 0;
   return Math.max(0, cases) * definition.unitsPerCase * definition.unitWeightKg + Math.max(0, loose) * definition.unitWeightKg;
+}
+
+export function getGheePackWeight(definition: GheeSkuDefinition | undefined, cases: number, looseBuckets: number) {
+  if (!definition) return 0;
+  return (Math.max(0, cases) * definition.bucketsPerCase + Math.max(0, looseBuckets)) * definition.unitWeightKg;
 }
