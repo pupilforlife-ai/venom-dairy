@@ -8,6 +8,9 @@ import { crumbingSkuDefinitions, crumbingSkuByCode, getCrumbingPackWeight } from
 
 type CrumbingStatus = 
   | 'scheduled'
+  | 'jp_prepping'
+  | 'jp_filling'
+  | 'jp_filling_frozen'
   | 'crumbing'
   | 'frozen'
   | 'frying'
@@ -17,8 +20,21 @@ type CrumbingStatus =
 
 type CrumbingType = 'SPP' | 'JP' | 'HCP';
 
+interface JpCreamCheeseMake {
+  id: string;
+  pan111InputKg: number;
+  creamKg: number;
+  blackPepperKg: number;
+  saltKg: number;
+  totalMadeKg: number;
+  recordedAt: string;
+}
+
 const crumbingStatusLabels: Record<CrumbingStatus, string> = {
   scheduled: 'Scheduled',
+  jp_prepping: 'JP Prepping',
+  jp_filling: 'Cheese Filling',
+  jp_filling_frozen: 'Filled & Frozen',
   crumbing: 'Crumbing',
   frozen: 'Frozen',
   frying: 'Frying',
@@ -29,6 +45,9 @@ const crumbingStatusLabels: Record<CrumbingStatus, string> = {
 
 const crumbingStatusColors: Record<CrumbingStatus, string> = {
   scheduled: 'bg-slate-400',
+  jp_prepping: 'bg-lime-600',
+  jp_filling: 'bg-cyan-600',
+  jp_filling_frozen: 'bg-blue-600',
   crumbing: 'bg-orange-500',
   frozen: 'bg-blue-500',
   frying: 'bg-red-500',
@@ -50,6 +69,8 @@ interface CrumbingBatch {
   // Manual SPP batches may come from paneer that is not represented by a
   // production round. Keep the origin on the batch for traceability.
   origin?: string;
+  pan111SourcePending?: boolean;
+  pan111SourceLinkedAt?: string;
   status: CrumbingStatus;
   traysCrumbed: number;
   traysFried: number;
@@ -75,6 +96,62 @@ interface CrumbingBatch {
   recipeAutosavedAt?: string;
   balanceRecordedAt?: string;
   productionCompletedAt?: string;
+  jpPrepping?: {
+    buckets: Array<{
+      id: string;
+      nominalWeightKg: 2.5 | 5;
+      rawWeightKg: number;
+      drainedWeightKg: number;
+      totalPieces: number;
+      goodPieces: number;
+      damagedPieces: number;
+    }>;
+    totalPieces: number;
+    goodPieces: number;
+    damagedPieces: number;
+    crumbablePieces: number;
+    initialPan111InputKg?: number;
+    pan111InputKg: number;
+    creamKg: number;
+    blackPepperKg: number;
+    saltKg: number;
+    newCreamCheeseMadeKg?: number;
+    carriedCreamCheeseSourceBatchId?: string;
+    carriedCreamCheeseSourceBatchCode?: string;
+    carriedCreamCheeseKg?: number;
+    totalCreamCheeseAvailableKg?: number;
+    additionalCreamCheeseMakes?: JpCreamCheeseMake[];
+    preparedBy: string;
+    completedAt?: string;
+  };
+  jpFilling?: {
+    damagedPieces: number;
+    filledPieces: number;
+    traysFilled: number;
+    filledBy: string;
+    creamCheeseAvailableKg?: number;
+    creamCheeseUsedKg?: number;
+    creamCheeseLeftoverKg?: number;
+    creamCheeseDisposition?: 'none' | 'carry_forward' | 'discarded';
+    creamCheeseCarriedForwardKg?: number;
+    creamCheeseDiscardedKg?: number;
+    completedAt?: string;
+    frozenAt?: string;
+  };
+  jpCrumbing?: {
+    damagedPieces: number;
+    finalCrumbedPieces: number;
+    traysCrumbed: number;
+    crumbedBy: string;
+    predustMultiplier: number;
+    batterMultiplier: number;
+    breadingMultiplier: number;
+    predustKg: number;
+    batterMixKg: number;
+    batterWaterL: number;
+    adajioKg: number;
+    completedAt?: string;
+  };
   crumbingTeam?: string;
   fryingTeam?: string;
   fryTemperature?: number;
@@ -90,7 +167,7 @@ interface CrumbingBatch {
 }
 
 export default function CrumbingTab() {
-  const { productionRounds, milkLots, intermediateLots, updateMilkLot } = useApp();
+  const { productionRounds, milkLots, intermediateLots, updateMilkLot, updateIntermediateLot } = useApp();
   const { showToast } = useToast();
 
   const [crumbingBatches, setCrumbingBatches] = useSupabaseState<CrumbingBatch[]>('vejoy_crumbingBatches', []);
@@ -128,6 +205,43 @@ export default function CrumbingTab() {
     loose: 0,
   });
 
+  const emptyJpPrepForm = () => ({
+    buckets: [] as Array<{
+      id: string;
+      nominalWeightKg: 2.5 | 5;
+      rawWeightKg: number;
+      drainedWeightKg: number;
+      totalPieces: number;
+      goodPieces: number;
+      damagedPieces: number;
+    }>,
+    totalPieces: 0,
+    goodPieces: 0,
+    damagedPieces: 0,
+    pan111InputKg: 0,
+    carriedCreamCheeseSourceBatchId: '',
+    carriedCreamCheeseKg: 0,
+    preparedBy: '',
+  });
+  const [jpPrepForm, setJpPrepForm] = useState(emptyJpPrepForm);
+  const [jpFillingForm, setJpFillingForm] = useState({
+    damagedPieces: 0,
+    traysFilled: 0,
+    filledBy: '',
+    creamCheeseLeftoverKg: 0,
+    creamCheeseDisposition: 'none' as 'none' | 'carry_forward' | 'discarded',
+  });
+  const [additionalCreamCheesePan111Kg, setAdditionalCreamCheesePan111Kg] = useState(0);
+  const [jpSourceLinkSelection, setJpSourceLinkSelection] = useState('');
+  const [jpCrumbingForm, setJpCrumbingForm] = useState({
+    damagedPieces: 0,
+    traysCrumbed: 0,
+    crumbedBy: '',
+    predustMultiplier: 0,
+    batterMultiplier: 0,
+    breadingMultiplier: 0,
+  });
+
   const [recipeForm, setRecipeForm] = useState({
     sourceWeightKg: 0,
     balanceWeightKg: 0,
@@ -158,6 +272,142 @@ export default function CrumbingTab() {
 
   const updateCrumbingBatch = (id: string, updates: Partial<CrumbingBatch>) => {
     setCrumbingBatches(current => current.map(batch => batch.id === id ? { ...batch, ...updates } : batch));
+  };
+
+  const openJpWorkflow = (batch: CrumbingBatch) => {
+    if (batch.type !== 'JP') return;
+    setSelectedBatch(batch.id);
+    if (batch.status === 'jp_prepping') {
+      setJpPrepForm(batch.jpPrepping ? {
+        buckets: batch.jpPrepping.buckets.map(bucket => ({
+          ...bucket,
+          totalPieces: (bucket.goodPieces || 0) + (bucket.damagedPieces || 0),
+          goodPieces: bucket.goodPieces || 0,
+          damagedPieces: bucket.damagedPieces || 0,
+        })),
+        totalPieces: batch.jpPrepping.totalPieces,
+        goodPieces: batch.jpPrepping.goodPieces,
+        damagedPieces: batch.jpPrepping.damagedPieces,
+        pan111InputKg: batch.jpPrepping.initialPan111InputKg ?? batch.jpPrepping.pan111InputKg,
+        carriedCreamCheeseSourceBatchId: batch.jpPrepping.carriedCreamCheeseSourceBatchId || '',
+        carriedCreamCheeseKg: batch.jpPrepping.carriedCreamCheeseKg || 0,
+        preparedBy: batch.jpPrepping.preparedBy,
+      } : { ...emptyJpPrepForm(), preparedBy: batch.crumbingTeam || '' });
+    } else if (batch.status === 'jp_filling') {
+      setJpFillingForm({
+        damagedPieces: batch.jpFilling?.damagedPieces || 0,
+        traysFilled: batch.jpFilling?.traysFilled || 0,
+        filledBy: batch.jpFilling?.filledBy || batch.crumbingTeam || '',
+        creamCheeseLeftoverKg: batch.jpFilling?.creamCheeseLeftoverKg || 0,
+        creamCheeseDisposition: batch.jpFilling?.creamCheeseDisposition || 'none',
+      });
+    } else if (batch.status === 'jp_filling_frozen' || batch.status === 'crumbing') {
+      setJpCrumbingForm({
+        damagedPieces: batch.jpCrumbing?.damagedPieces || 0,
+        traysCrumbed: batch.jpCrumbing?.traysCrumbed || 0,
+        crumbedBy: batch.jpCrumbing?.crumbedBy || batch.crumbingTeam || '',
+        predustMultiplier: batch.jpCrumbing?.predustMultiplier || 0,
+        batterMultiplier: batch.jpCrumbing?.batterMultiplier || 0,
+        breadingMultiplier: batch.jpCrumbing?.breadingMultiplier || 0,
+      });
+    }
+  };
+
+  const getJpCreamCheeseCarryoverAvailable = (sourceBatch: CrumbingBatch, forBatchId?: string) => {
+    const carriedForwardKg = sourceBatch.jpFilling?.creamCheeseCarriedForwardKg || 0;
+    const allocatedKg = crumbingBatches.reduce((total, candidate) => {
+      if (candidate.id === forBatchId || candidate.jpPrepping?.carriedCreamCheeseSourceBatchId !== sourceBatch.id) return total;
+      return total + (candidate.jpPrepping.carriedCreamCheeseKg || 0);
+    }, 0);
+    return Math.max(0, carriedForwardKg - allocatedKg);
+  };
+
+  const getJpCreamCheeseCarryoverSources = (forBatchId?: string) => crumbingBatches.filter(candidate =>
+    candidate.type === 'JP'
+    && candidate.id !== forBatchId
+    && getJpCreamCheeseCarryoverAvailable(candidate, forBatchId) > 0.001
+  );
+
+  const saveJpPrepDraft = (batch: CrumbingBatch, nextForm: typeof jpPrepForm) => {
+    const pan111InputKg = Math.max(0, Number(nextForm.pan111InputKg) || 0);
+    const carriedCreamCheeseKg = Math.max(0, Number(nextForm.carriedCreamCheeseKg) || 0);
+    const carriedSource = crumbingBatches.find(candidate => candidate.id === nextForm.carriedCreamCheeseSourceBatchId);
+    const totalPieces = nextForm.buckets.reduce((total, bucket) => total + (Number(bucket.totalPieces) || 0), 0);
+    const goodPieces = nextForm.buckets.reduce((total, bucket) => total + (Number(bucket.goodPieces) || 0), 0);
+    const damagedPieces = nextForm.buckets.reduce((total, bucket) => total + (Number(bucket.damagedPieces) || 0), 0);
+    const calculatedForm = { ...nextForm, totalPieces, goodPieces, damagedPieces, pan111InputKg, carriedCreamCheeseKg };
+    const creamKg = pan111InputKg * (0.75 / 15);
+    const blackPepperKg = pan111InputKg * (0.018 / 15);
+    const saltKg = pan111InputKg * (0.2 / 15);
+    const newCreamCheeseMadeKg = pan111InputKg + creamKg + blackPepperKg + saltKg;
+    setJpPrepForm(calculatedForm);
+    updateCrumbingBatch(batch.id, {
+      jpPrepping: {
+        ...calculatedForm,
+        crumbablePieces: Math.max(0, goodPieces) * 2,
+        initialPan111InputKg: pan111InputKg,
+        creamKg,
+        blackPepperKg,
+        saltKg,
+        newCreamCheeseMadeKg,
+        carriedCreamCheeseSourceBatchCode: carriedSource?.batchCode,
+        totalCreamCheeseAvailableKg: newCreamCheeseMadeKg + carriedCreamCheeseKg,
+        additionalCreamCheeseMakes: batch.jpPrepping?.additionalCreamCheeseMakes || [],
+        completedAt: batch.jpPrepping?.completedAt,
+      },
+    });
+  };
+
+  const updateJpPrepBucket = (batch: CrumbingBatch, bucketId: string, updates: Partial<(typeof jpPrepForm.buckets)[number]>) => {
+    saveJpPrepDraft(batch, {
+      ...jpPrepForm,
+      buckets: jpPrepForm.buckets.map(bucket => {
+        if (bucket.id !== bucketId) return bucket;
+        const updated = { ...bucket, ...updates };
+        return { ...updated, totalPieces: (Number(updated.goodPieces) || 0) + (Number(updated.damagedPieces) || 0) };
+      }),
+    });
+  };
+
+  const addJpPrepBucket = (batch: CrumbingBatch, nominalWeightKg: 2.5 | 5) => {
+    saveJpPrepDraft(batch, {
+      ...jpPrepForm,
+      buckets: [...jpPrepForm.buckets, {
+        id: `jp-bucket-${Date.now()}-${jpPrepForm.buckets.length}`,
+        nominalWeightKg,
+        rawWeightKg: 0,
+        drainedWeightKg: 0,
+        totalPieces: 0,
+        goodPieces: 0,
+        damagedPieces: 0,
+      }],
+    });
+  };
+
+  const updateJpFillingDraft = (batch: CrumbingBatch, changes: Partial<typeof jpFillingForm>) => {
+    const nextForm = { ...jpFillingForm, ...changes };
+    setJpFillingForm(nextForm);
+    const crumbablePieces = batch.jpPrepping?.crumbablePieces || 0;
+    const damagedPieces = Math.min(crumbablePieces, Math.max(0, Math.trunc(nextForm.damagedPieces || 0)));
+    const creamCheeseAvailableKg = batch.jpPrepping?.totalCreamCheeseAvailableKg
+      ?? (batch.jpPrepping ? batch.jpPrepping.pan111InputKg + batch.jpPrepping.creamKg + batch.jpPrepping.blackPepperKg + batch.jpPrepping.saltKg : 0);
+    const creamCheeseLeftoverKg = Math.max(0, Number(nextForm.creamCheeseLeftoverKg) || 0);
+    updateCrumbingBatch(batch.id, {
+      jpFilling: {
+        damagedPieces,
+        filledPieces: Math.max(0, crumbablePieces - damagedPieces),
+        traysFilled: Math.max(0, Math.trunc(nextForm.traysFilled || 0)),
+        filledBy: nextForm.filledBy,
+        creamCheeseAvailableKg,
+        creamCheeseUsedKg: Math.max(0, creamCheeseAvailableKg - creamCheeseLeftoverKg),
+        creamCheeseLeftoverKg,
+        creamCheeseDisposition: nextForm.creamCheeseDisposition,
+        creamCheeseCarriedForwardKg: nextForm.creamCheeseDisposition === 'carry_forward' ? creamCheeseLeftoverKg : 0,
+        creamCheeseDiscardedKg: nextForm.creamCheeseDisposition === 'discarded' ? creamCheeseLeftoverKg : 0,
+        completedAt: batch.jpFilling?.completedAt,
+        frozenAt: batch.jpFilling?.frozenAt,
+      },
+    });
   };
 
   const openRecipeDetails = (batch: CrumbingBatch) => {
@@ -266,7 +516,8 @@ export default function CrumbingTab() {
   // Handlers
   const handleCreateBatch = () => {
     const isManualSpp = newBatchForm.type === 'SPP' && newBatchForm.sourceBatchId === 'manual';
-    if ((!newBatchForm.sourceBatchId || (isManualSpp && !newBatchForm.manualOrigin.trim())) || !newBatchForm.crumbingTeam.trim()) {
+    const isPendingJp = newBatchForm.type === 'JP' && newBatchForm.sourceBatchId === 'pending';
+    if ((!newBatchForm.sourceBatchId || ((isManualSpp || isPendingJp) && !newBatchForm.manualOrigin.trim())) || !newBatchForm.crumbingTeam.trim()) {
       showToast('error', 'Please fill all required fields');
       return;
     }
@@ -278,7 +529,7 @@ export default function CrumbingTab() {
       showToast('error', 'Enter the Halloumi weight being allocated to HCP crumbing');
       return;
     }
-    if (newBatchForm.type !== 'SPP' && newBatchForm.traysCrumbed <= 0) {
+    if (newBatchForm.type === 'HCP' && newBatchForm.traysCrumbed <= 0) {
       showToast('error', 'Enter the number of trays crumbed');
       return;
     }
@@ -309,8 +560,16 @@ export default function CrumbingTab() {
         }
       }
     } else if (newBatchForm.type === 'JP') {
-      const source = intermediateLots.find(l => l.id === newBatchForm.sourceBatchId);
-      if (source) {
+      if (isPendingJp) {
+        origin = newBatchForm.manualOrigin.trim();
+        sourceBatchCode = `Pending PAN111 source · ${origin}`;
+        milkLotCode = 'PENDING';
+      } else {
+        const source = intermediateLots.find(l => l.id === newBatchForm.sourceBatchId);
+        if (!source || source.productId !== 'pan111' || source.status !== 'available') {
+          showToast('error', 'Select an available PAN111 source or choose pending production');
+          return;
+        }
         sourceBatchCode = source.lotCode;
         milkLotCode = source.sourceMilkLotCode;
       }
@@ -350,13 +609,14 @@ export default function CrumbingTab() {
       id: `crumb-${Date.now()}`,
       batchCode,
       type: newBatchForm.type,
-      sourceBatchId: isManualSpp ? `manual-spp-${Date.now()}` : newBatchForm.sourceBatchId,
+      sourceBatchId: isManualSpp ? `manual-spp-${Date.now()}` : isPendingJp ? `pending-pan111-${Date.now()}` : newBatchForm.sourceBatchId,
       sourceBatchCode,
       origin,
-      status: newBatchForm.type === 'SPP' ? 'scheduled' : 'crumbing',
-      traysCrumbed: newBatchForm.type === 'SPP' ? 0 : newBatchForm.traysCrumbed,
+      pan111SourcePending: isPendingJp,
+      status: newBatchForm.type === 'SPP' ? 'scheduled' : newBatchForm.type === 'JP' ? 'jp_prepping' : 'crumbing',
+      traysCrumbed: newBatchForm.type === 'HCP' ? newBatchForm.traysCrumbed : 0,
       traysFried: 0,
-      traysRemaining: newBatchForm.type === 'SPP' ? 0 : newBatchForm.traysCrumbed,
+      traysRemaining: newBatchForm.type === 'HCP' ? newBatchForm.traysCrumbed : 0,
       traysPacked: 0,
       sourceWeightKg,
       crumbingTeam: newBatchForm.crumbingTeam,
@@ -378,6 +638,9 @@ export default function CrumbingTab() {
         batterMultiplier: 0,
         breadingMultiplier: 0,
       });
+    } else if (newBatchForm.type === 'JP') {
+      setSelectedBatch(newBatch.id);
+      setJpPrepForm({ ...emptyJpPrepForm(), preparedBy: newBatchForm.crumbingTeam.trim() });
     }
     setNewBatchForm({ type: 'SPP', sourceBatchId: '', manualPaneerWeightKg: 0, manualOrigin: '', halloumiWeightKg: 0, traysCrumbed: 0, crumbingTeam: '' });
   };
@@ -537,6 +800,312 @@ export default function CrumbingTab() {
     showToast('success', `Production completed · ${normalizedWeightCrumbedKg.toFixed(2)} kg crumbed · ${normalizedBalanceWeightKg.toFixed(2)} kg returned to source`);
   };
 
+  const handleCompleteJpPrepping = (batch: CrumbingBatch) => {
+    if (batch.type !== 'JP') return;
+    const source = intermediateLots.find(lot => lot.id === batch.sourceBatchId);
+    if ((!source || source.productId !== 'pan111') && !batch.pan111SourcePending) {
+      showToast('error', 'The PAN111 source for this JP batch is no longer available');
+      return;
+    }
+    if (jpPrepForm.buckets.length === 0) {
+      showToast('error', 'Add at least one 2.5 kg or 5 kg jalapeño bucket');
+      return;
+    }
+    const invalidBucket = jpPrepForm.buckets.some(bucket =>
+      bucket.rawWeightKg <= 0 || bucket.drainedWeightKg <= 0 || bucket.drainedWeightKg > bucket.rawWeightKg
+    );
+    if (invalidBucket) {
+      showToast('error', 'Record valid raw and drained weights for every bucket; drained weight cannot exceed raw weight');
+      return;
+    }
+    const invalidBucketCounts = jpPrepForm.buckets.some(bucket =>
+      ![bucket.totalPieces, bucket.goodPieces, bucket.damagedPieces].every(Number.isInteger)
+      || bucket.totalPieces <= 0
+      || bucket.goodPieces < 0
+      || bucket.damagedPieces < 0
+      || bucket.goodPieces + bucket.damagedPieces !== bucket.totalPieces
+    );
+    if (invalidBucketCounts) {
+      showToast('error', 'For every bucket, enter whole-number counts where good plus damaged equals total jalapeños');
+      return;
+    }
+    const { totalPieces, goodPieces, damagedPieces, pan111InputKg } = jpPrepForm;
+    if (pan111InputKg <= 0 || (source && pan111InputKg > source.currentQuantity + 0.001)) {
+      showToast('error', source ? `Enter PAN111 from 0.01 kg up to the available ${source.currentQuantity.toFixed(2)} kg` : 'Enter the PAN111 quantity used');
+      return;
+    }
+    const carryoverSource = crumbingBatches.find(candidate => candidate.id === jpPrepForm.carriedCreamCheeseSourceBatchId);
+    const carryoverAvailableKg = carryoverSource ? getJpCreamCheeseCarryoverAvailable(carryoverSource, batch.id) : 0;
+    if (jpPrepForm.carriedCreamCheeseKg > 0 && (!carryoverSource || jpPrepForm.carriedCreamCheeseKg > carryoverAvailableKg + 0.001)) {
+      showToast('error', `Select a valid cream-cheese carryover and use no more than ${carryoverAvailableKg.toFixed(2)} kg`);
+      return;
+    }
+    if (!jpPrepForm.preparedBy.trim()) {
+      showToast('error', 'Enter the staff responsible for JP preparation');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const creamKg = pan111InputKg * (0.75 / 15);
+    const blackPepperKg = pan111InputKg * (0.018 / 15);
+    const saltKg = pan111InputKg * (0.2 / 15);
+    const newCreamCheeseMadeKg = pan111InputKg + creamKg + blackPepperKg + saltKg;
+    updateCrumbingBatch(batch.id, {
+      status: 'jp_filling',
+      sourceWeightKg: pan111InputKg,
+      jpPrepping: {
+        buckets: jpPrepForm.buckets,
+        totalPieces,
+        goodPieces,
+        damagedPieces,
+        crumbablePieces: goodPieces * 2,
+        initialPan111InputKg: pan111InputKg,
+        pan111InputKg,
+        creamKg,
+        blackPepperKg,
+        saltKg,
+        newCreamCheeseMadeKg,
+        carriedCreamCheeseSourceBatchId: carryoverSource?.id,
+        carriedCreamCheeseSourceBatchCode: carryoverSource?.batchCode,
+        carriedCreamCheeseKg: jpPrepForm.carriedCreamCheeseKg,
+        totalCreamCheeseAvailableKg: newCreamCheeseMadeKg + jpPrepForm.carriedCreamCheeseKg,
+        additionalCreamCheeseMakes: [],
+        preparedBy: jpPrepForm.preparedBy.trim(),
+        completedAt: now,
+      },
+    });
+    if (source) {
+      const remainingPan111 = Math.max(0, source.currentQuantity - pan111InputKg);
+      updateIntermediateLot(source.id, {
+        currentQuantity: remainingPan111,
+        status: remainingPan111 > 0.001 ? 'available' : 'consumed',
+      });
+    }
+    setJpFillingForm({ damagedPieces: 0, traysFilled: 0, filledBy: jpPrepForm.preparedBy.trim(), creamCheeseLeftoverKg: 0, creamCheeseDisposition: 'none' });
+    showToast('success', `JP preparation completed · ${goodPieces * 2} crumbable jalapeño halves · ${pan111InputKg.toFixed(2)} kg PAN111 used`);
+  };
+
+  const handleAddJpCreamCheeseMake = (batch: CrumbingBatch) => {
+    const prep = batch.jpPrepping;
+    const pan111InputKg = Math.max(0, Number(additionalCreamCheesePan111Kg) || 0);
+    if (!prep?.completedAt || batch.status !== 'jp_filling' || pan111InputKg <= 0) {
+      showToast('error', 'Enter the additional PAN111 quantity used for cream cheese');
+      return;
+    }
+    const source = intermediateLots.find(lot => lot.id === batch.sourceBatchId && lot.productId === 'pan111');
+    if (!source && !batch.pan111SourcePending) {
+      showToast('error', 'Link a valid PAN111 source before recording more cream cheese');
+      return;
+    }
+    if (source && pan111InputKg > source.currentQuantity + 0.001) {
+      showToast('error', `Only ${source.currentQuantity.toFixed(2)} kg remains in the linked PAN111 source`);
+      return;
+    }
+
+    const creamKg = pan111InputKg * (0.75 / 15);
+    const blackPepperKg = pan111InputKg * (0.018 / 15);
+    const saltKg = pan111InputKg * (0.2 / 15);
+    const totalMadeKg = pan111InputKg + creamKg + blackPepperKg + saltKg;
+    const make: JpCreamCheeseMake = {
+      id: `jp-cream-cheese-${Date.now()}`,
+      pan111InputKg,
+      creamKg,
+      blackPepperKg,
+      saltKg,
+      totalMadeKg,
+      recordedAt: new Date().toISOString(),
+    };
+    const nextPan111InputKg = prep.pan111InputKg + pan111InputKg;
+    const nextCreamKg = prep.creamKg + creamKg;
+    const nextBlackPepperKg = prep.blackPepperKg + blackPepperKg;
+    const nextSaltKg = prep.saltKg + saltKg;
+    const nextNewCreamCheeseMadeKg = (prep.newCreamCheeseMadeKg ?? (prep.pan111InputKg + prep.creamKg + prep.blackPepperKg + prep.saltKg)) + totalMadeKg;
+    updateCrumbingBatch(batch.id, {
+      sourceWeightKg: nextPan111InputKg,
+      jpPrepping: {
+        ...prep,
+        pan111InputKg: nextPan111InputKg,
+        creamKg: nextCreamKg,
+        blackPepperKg: nextBlackPepperKg,
+        saltKg: nextSaltKg,
+        newCreamCheeseMadeKg: nextNewCreamCheeseMadeKg,
+        totalCreamCheeseAvailableKg: nextNewCreamCheeseMadeKg + (prep.carriedCreamCheeseKg || 0),
+        additionalCreamCheeseMakes: [...(prep.additionalCreamCheeseMakes || []), make],
+      },
+    });
+    if (source) {
+      const remainingPan111 = Math.max(0, source.currentQuantity - pan111InputKg);
+      updateIntermediateLot(source.id, { currentQuantity: remainingPan111, status: remainingPan111 > 0.001 ? 'available' : 'consumed' });
+    }
+    setAdditionalCreamCheesePan111Kg(0);
+    showToast('success', `Additional cream cheese recorded · ${pan111InputKg.toFixed(2)} kg PAN111 produced ${totalMadeKg.toFixed(2)} kg`);
+  };
+
+  const handleLinkJpPan111Source = (batch: CrumbingBatch) => {
+    const source = intermediateLots.find(lot => lot.id === jpSourceLinkSelection && lot.productId === 'pan111');
+    if (!batch.pan111SourcePending || !source) {
+      showToast('error', 'Select an available PAN111 source lot');
+      return;
+    }
+    const pan111RecordedKg = batch.jpPrepping?.pan111InputKg || 0;
+    const shouldDeductNow = Boolean(batch.jpPrepping?.completedAt);
+    if (shouldDeductNow && pan111RecordedKg > source.currentQuantity + 0.001) {
+      showToast('error', `The selected source has ${source.currentQuantity.toFixed(2)} kg but this batch recorded ${pan111RecordedKg.toFixed(2)} kg`);
+      return;
+    }
+    if (shouldDeductNow && pan111RecordedKg > 0) {
+      const remainingPan111 = Math.max(0, source.currentQuantity - pan111RecordedKg);
+      updateIntermediateLot(source.id, { currentQuantity: remainingPan111, status: remainingPan111 > 0.001 ? 'available' : 'consumed' });
+    }
+    updateCrumbingBatch(batch.id, {
+      sourceBatchId: source.id,
+      sourceBatchCode: source.lotCode,
+      pan111SourcePending: false,
+      pan111SourceLinkedAt: new Date().toISOString(),
+    });
+    setJpSourceLinkSelection('');
+    showToast('success', `PAN111 source linked to ${source.lotCode}${shouldDeductNow ? ` and ${pan111RecordedKg.toFixed(2)} kg reconciled` : ''}`);
+  };
+
+  const handleCompleteJpFilling = (batch: CrumbingBatch) => {
+    const crumbablePieces = batch.jpPrepping?.crumbablePieces || 0;
+    if (batch.type !== 'JP' || crumbablePieces <= 0) return;
+    if (!Number.isInteger(jpFillingForm.damagedPieces) || jpFillingForm.damagedPieces < 0 || jpFillingForm.damagedPieces > crumbablePieces) {
+      showToast('error', `Filling damage must be a whole number from 0 to ${crumbablePieces}`);
+      return;
+    }
+    if (!Number.isInteger(jpFillingForm.traysFilled) || jpFillingForm.traysFilled <= 0 || !jpFillingForm.filledBy.trim()) {
+      showToast('error', 'Enter the filled tray count and responsible staff');
+      return;
+    }
+    const creamCheeseAvailableKg = batch.jpPrepping?.totalCreamCheeseAvailableKg
+      ?? (batch.jpPrepping ? batch.jpPrepping.pan111InputKg + batch.jpPrepping.creamKg + batch.jpPrepping.blackPepperKg + batch.jpPrepping.saltKg : 0);
+    const creamCheeseLeftoverKg = Math.max(0, Number(jpFillingForm.creamCheeseLeftoverKg) || 0);
+    if (creamCheeseLeftoverKg > creamCheeseAvailableKg + 0.001) {
+      showToast('error', `Cream-cheese leftover cannot exceed the ${creamCheeseAvailableKg.toFixed(2)} kg available`);
+      return;
+    }
+    if (creamCheeseLeftoverKg > 0 && jpFillingForm.creamCheeseDisposition === 'none') {
+      showToast('error', 'Choose whether the leftover cream cheese will be carried forward or discarded');
+      return;
+    }
+    const now = new Date().toISOString();
+    const filledPieces = crumbablePieces - jpFillingForm.damagedPieces;
+    updateCrumbingBatch(batch.id, {
+      status: 'jp_filling_frozen',
+      jpFilling: {
+        damagedPieces: jpFillingForm.damagedPieces,
+        filledPieces,
+        traysFilled: jpFillingForm.traysFilled,
+        filledBy: jpFillingForm.filledBy.trim(),
+        creamCheeseAvailableKg,
+        creamCheeseUsedKg: Math.max(0, creamCheeseAvailableKg - creamCheeseLeftoverKg),
+        creamCheeseLeftoverKg,
+        creamCheeseDisposition: creamCheeseLeftoverKg > 0 ? jpFillingForm.creamCheeseDisposition : 'none',
+        creamCheeseCarriedForwardKg: jpFillingForm.creamCheeseDisposition === 'carry_forward' ? creamCheeseLeftoverKg : 0,
+        creamCheeseDiscardedKg: jpFillingForm.creamCheeseDisposition === 'discarded' ? creamCheeseLeftoverKg : 0,
+        completedAt: now,
+        frozenAt: now,
+      },
+    });
+    setJpCrumbingForm({
+      damagedPieces: 0,
+      traysCrumbed: 0,
+      crumbedBy: jpFillingForm.filledBy.trim(),
+      predustMultiplier: 0,
+      batterMultiplier: 0,
+      breadingMultiplier: 0,
+    });
+    showToast('success', `Cheese filling completed and frozen · ${filledPieces} filled pieces in ${jpFillingForm.traysFilled} trays`);
+  };
+
+  const updateJpCrumbingDraft = (batch: CrumbingBatch, changes: Partial<typeof jpCrumbingForm>) => {
+    const nextForm = { ...jpCrumbingForm, ...changes };
+    setJpCrumbingForm(nextForm);
+    const filledPieces = batch.jpFilling?.filledPieces || 0;
+    const damagedPieces = Math.min(filledPieces, Math.max(0, Math.trunc(nextForm.damagedPieces || 0)));
+    updateCrumbingBatch(batch.id, {
+      recipe: {
+        flavourMultiplier: nextForm.predustMultiplier,
+        batterMultiplier: nextForm.batterMultiplier,
+        breadingMultiplier: nextForm.breadingMultiplier,
+        flavourIyababKg: 0,
+        flavourPredustKg: nextForm.predustMultiplier,
+        batterIyababaKg: nextForm.batterMultiplier,
+        batterWaterL: nextForm.batterMultiplier * 2.5,
+        breadingAdajioKg: nextForm.breadingMultiplier,
+      },
+      recipeAutosavedAt: new Date().toISOString(),
+      jpCrumbing: {
+        damagedPieces,
+        finalCrumbedPieces: Math.max(0, filledPieces - damagedPieces),
+        traysCrumbed: Math.max(0, Math.trunc(nextForm.traysCrumbed || 0)),
+        crumbedBy: nextForm.crumbedBy,
+        predustMultiplier: nextForm.predustMultiplier,
+        batterMultiplier: nextForm.batterMultiplier,
+        breadingMultiplier: nextForm.breadingMultiplier,
+        predustKg: nextForm.predustMultiplier,
+        batterMixKg: nextForm.batterMultiplier,
+        batterWaterL: nextForm.batterMultiplier * 2.5,
+        adajioKg: nextForm.breadingMultiplier,
+        completedAt: batch.jpCrumbing?.completedAt,
+      },
+    });
+  };
+
+  const handleCompleteJpCrumbing = (batch: CrumbingBatch) => {
+    const filledPieces = batch.jpFilling?.filledPieces || 0;
+    const { damagedPieces, traysCrumbed, crumbedBy, predustMultiplier, batterMultiplier, breadingMultiplier } = jpCrumbingForm;
+    if (!Number.isInteger(damagedPieces) || damagedPieces < 0 || damagedPieces > filledPieces) {
+      showToast('error', `Crumbing damage must be a whole number from 0 to ${filledPieces}`);
+      return;
+    }
+    if (!Number.isInteger(traysCrumbed) || traysCrumbed <= 0 || !crumbedBy.trim()) {
+      showToast('error', 'Enter the crumbed tray count and responsible staff');
+      return;
+    }
+    if (predustMultiplier <= 0 || batterMultiplier <= 0 || breadingMultiplier <= 0) {
+      showToast('error', 'Record at least one addition for Predust, batter, and Adajio');
+      return;
+    }
+    const finalCrumbedPieces = Math.max(0, filledPieces - damagedPieces);
+    const now = new Date().toISOString();
+    updateCrumbingBatch(batch.id, {
+      status: 'crumbing',
+      traysCrumbed,
+      traysRemaining: traysCrumbed,
+      crumbingTeam: crumbedBy.trim(),
+      recipe: {
+        flavourMultiplier: predustMultiplier,
+        batterMultiplier,
+        breadingMultiplier,
+        flavourIyababKg: 0,
+        flavourPredustKg: predustMultiplier,
+        batterIyababaKg: batterMultiplier,
+        batterWaterL: batterMultiplier * 2.5,
+        breadingAdajioKg: breadingMultiplier,
+      },
+      recipeRecordedAt: now,
+      recipeAutosavedAt: now,
+      productionCompletedAt: now,
+      jpCrumbing: {
+        damagedPieces,
+        finalCrumbedPieces,
+        traysCrumbed,
+        crumbedBy: crumbedBy.trim(),
+        predustMultiplier,
+        batterMultiplier,
+        breadingMultiplier,
+        predustKg: predustMultiplier,
+        batterMixKg: batterMultiplier,
+        batterWaterL: batterMultiplier * 2.5,
+        adajioKg: breadingMultiplier,
+        completedAt: now,
+      },
+    });
+    showToast('success', `JP crumbing completed · ${finalCrumbedPieces} pieces in ${traysCrumbed} trays. Freeze before frying.`);
+  };
+
   const handleFreeze = (batchId: string) => {
     const batch = crumbingBatches.find(item => item.id === batchId);
     if (batch?.type === 'SPP' && !batch.productionCompletedAt) {
@@ -636,6 +1205,23 @@ export default function CrumbingTab() {
 
   const getActionButtons = (batch: CrumbingBatch) => {
     const buttons = [];
+
+    if (batch.type === 'JP' && ['jp_prepping', 'jp_filling', 'jp_filling_frozen'].includes(batch.status)) {
+      const label = batch.status === 'jp_prepping'
+        ? 'Record prepping'
+        : batch.status === 'jp_filling'
+          ? 'Record cheese filling'
+          : 'Record crumbing';
+      buttons.push(
+        <button
+          key="jp-workflow"
+          onClick={() => openJpWorkflow(batch)}
+          className="px-3 py-1.5 bg-lime-600 text-white rounded text-xs font-medium hover:bg-lime-700"
+        >
+          {label}
+        </button>
+      );
+    }
 
     if (batch.type === 'SPP' && !batch.recipe) {
       buttons.push(
@@ -797,6 +1383,208 @@ export default function CrumbingTab() {
     );
   };
 
+  const renderJpWorkflowDetails = (batch: CrumbingBatch) => {
+    const prep = batch.jpPrepping;
+    const filling = batch.jpFilling;
+    const crumbing = batch.jpCrumbing;
+    const source = intermediateLots.find(lot => lot.id === batch.sourceBatchId);
+    const formRawWeightKg = jpPrepForm.buckets.reduce((total, bucket) => total + (Number(bucket.rawWeightKg) || 0), 0);
+    const formDrainedWeightKg = jpPrepForm.buckets.reduce((total, bucket) => total + (Number(bucket.drainedWeightKg) || 0), 0);
+    const storedRawWeightKg = prep?.buckets.reduce((total, bucket) => total + (Number(bucket.rawWeightKg) || 0), 0) || 0;
+    const storedDrainedWeightKg = prep?.buckets.reduce((total, bucket) => total + (Number(bucket.drainedWeightKg) || 0), 0) || 0;
+    const carryoverSources = getJpCreamCheeseCarryoverSources(batch.id);
+    const selectedCarryoverSource = crumbingBatches.find(candidate => candidate.id === jpPrepForm.carriedCreamCheeseSourceBatchId);
+    const selectedCarryoverAvailableKg = selectedCarryoverSource ? getJpCreamCheeseCarryoverAvailable(selectedCarryoverSource, batch.id) : 0;
+    const crumbablePieces = prep?.crumbablePieces || 0;
+    const creamCheeseAvailableKg = prep?.totalCreamCheeseAvailableKg
+      ?? (prep ? prep.pan111InputKg + prep.creamKg + prep.blackPepperKg + prep.saltKg : 0);
+    const filledPieces = filling?.filledPieces ?? Math.max(0, crumbablePieces - jpFillingForm.damagedPieces);
+    const finalCrumbedPieces = crumbing?.finalCrumbedPieces ?? Math.max(0, filledPieces - jpCrumbingForm.damagedPieces);
+
+    return (
+      <div className="rounded-xl border border-lime-200 bg-lime-50/40 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-bold text-lime-950">JP production record · {batch.batchCode}</h4>
+            <p className="mt-1 text-xs text-lime-800">PAN111 source: {batch.sourceBatchCode}. Entries in the active phase autosave.</p>
+          </div>
+          <button type="button" onClick={() => setSelectedBatch(null)} className="rounded-lg border border-lime-200 bg-white px-3 py-1.5 text-xs font-semibold text-lime-800 hover:bg-lime-100">Close details</button>
+        </div>
+
+        {batch.pan111SourcePending && (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+            <div className="text-sm font-bold text-amber-950">PAN111 source is pending</div>
+            <div className="mt-1 text-xs text-amber-800">Production may continue. Once the PAN111 lot is recorded, link it here so the total PAN111 used by this batch is deducted and reconciled once.</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <select value={jpSourceLinkSelection} onChange={(event) => setJpSourceLinkSelection(event.target.value)} className="min-w-64 flex-1 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm">
+                <option value="">Select the PAN111 source lot...</option>
+                {intermediateLots.filter(lot => lot.productId === 'pan111' && lot.status === 'available').map(lot => <option key={lot.id} value={lot.id}>{lot.lotCode} · {lot.currentQuantity.toFixed(2)} kg available</option>)}
+              </select>
+              <button type="button" onClick={() => handleLinkJpPan111Source(batch)} className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-800">Link and reconcile source</button>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {[
+            ['1', 'Prepping', Boolean(prep?.completedAt)],
+            ['2', 'Cheese filling + first freeze', Boolean(filling?.completedAt)],
+            ['3', 'Crumbing + second freeze', Boolean(crumbing?.completedAt)],
+          ].map(([number, label, complete]) => (
+            <div key={String(number)} className={`rounded-lg border p-2 text-xs font-semibold ${complete ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600'}`}>
+              Phase {number}: {label}{complete ? ' ✓' : ''}
+            </div>
+          ))}
+        </div>
+
+        {prep?.completedAt && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 text-xs text-slate-700">
+            <div className="font-bold text-emerald-800">Phase 1 completed · {new Date(prep.completedAt).toLocaleString()}</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div>{prep.buckets.length} buckets · raw {storedRawWeightKg.toFixed(2)} kg · drained {storedDrainedWeightKg.toFixed(2)} kg</div>
+              <div>Total {prep.totalPieces} · good {prep.goodPieces} · damaged {prep.damagedPieces}</div>
+              <div className="font-semibold">Crumbable: {prep.goodPieces} × 2 = {prep.crumbablePieces} pieces</div>
+              <div>PAN111 {prep.pan111InputKg.toFixed(2)} kg · by {prep.preparedBy}</div>
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {prep.buckets.map((bucket, index) => (
+                <div key={bucket.id} className="rounded-lg bg-slate-50 p-2">
+                  <strong>Bucket {index + 1} · {bucket.nominalWeightKg} kg:</strong> raw {bucket.rawWeightKg.toFixed(2)} kg, drained {bucket.drainedWeightKg.toFixed(2)} kg · total {bucket.totalPieces || 0}, good {bucket.goodPieces || 0}, damaged {bucket.damagedPieces || 0}
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-slate-500">Cream {(prep.creamKg * 1000).toFixed(0)} g · black pepper {(prep.blackPepperKg * 1000).toFixed(1)} g · salt {(prep.saltKg * 1000).toFixed(1)} g</div>
+            <div className="mt-2 rounded-lg bg-cyan-50 p-2 text-cyan-900">New cream cheese made: <strong>{(prep.newCreamCheeseMadeKg ?? (prep.pan111InputKg + prep.creamKg + prep.blackPepperKg + prep.saltKg)).toFixed(2)} kg</strong>{(prep.carriedCreamCheeseKg || 0) > 0 ? <> · carried in <strong>{prep.carriedCreamCheeseKg?.toFixed(2)} kg</strong> from {prep.carriedCreamCheeseSourceBatchCode}</> : null} · total available: <strong>{(prep.totalCreamCheeseAvailableKg ?? (prep.pan111InputKg + prep.creamKg + prep.blackPepperKg + prep.saltKg)).toFixed(2)} kg</strong></div>
+            {(prep.additionalCreamCheeseMakes || []).length > 0 && <div className="mt-2 text-slate-600">Additional makes: {prep.additionalCreamCheeseMakes?.map((make, index) => <span key={make.id} className="mr-2 inline-block rounded bg-slate-100 px-2 py-1">#{index + 1}: {make.pan111InputKg.toFixed(2)} kg PAN111 → {make.totalMadeKg.toFixed(2)} kg</span>)}</div>}
+          </div>
+        )}
+
+        {batch.status === 'jp_prepping' && (
+          <div className="mt-3 space-y-3 rounded-lg border border-lime-200 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><div className="text-sm font-bold text-slate-900">Phase 1 · Jalapeño and cream-cheese preparation</div><div className="text-xs text-slate-500">Weigh every bucket before and after draining its brine.</div></div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => addJpPrepBucket(batch, 2.5)} className="rounded-lg bg-lime-600 px-3 py-2 text-xs font-semibold text-white hover:bg-lime-700">+ 2.5 kg bucket</button>
+                <button type="button" onClick={() => addJpPrepBucket(batch, 5)} className="rounded-lg bg-lime-700 px-3 py-2 text-xs font-semibold text-white hover:bg-lime-800">+ 5 kg bucket</button>
+              </div>
+            </div>
+
+            {jpPrepForm.buckets.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">Add each raw jalapeño bucket to begin.</div>
+            ) : (
+              <div className="space-y-2">
+                {jpPrepForm.buckets.map((bucket, index) => (
+                  <div key={bucket.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-2"><div><div className="text-xs font-bold text-slate-800">Bucket {index + 1} · {bucket.nominalWeightKg} kg size</div><div className="mt-1 text-[11px] text-slate-500">Brine removed: {Math.max(0, bucket.rawWeightKg - bucket.drainedWeightKg).toFixed(2)} kg</div></div><button type="button" onClick={() => saveJpPrepDraft(batch, { ...jpPrepForm, buckets: jpPrepForm.buckets.filter(item => item.id !== bucket.id) })} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50">Remove</button></div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <label className="text-xs text-slate-600">Raw weight (kg)<input type="number" min="0" step="0.01" value={bucket.rawWeightKg || ''} onChange={(event) => updateJpPrepBucket(batch, bucket.id, { rawWeightKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+                      <label className="text-xs text-slate-600">Drained weight (kg)<input type="number" min="0" step="0.01" value={bucket.drainedWeightKg || ''} onChange={(event) => updateJpPrepBucket(batch, bucket.id, { drainedWeightKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+                    </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      <label className="text-xs font-medium text-slate-600">Good jalapeños<input type="number" min="0" step="1" value={bucket.goodPieces || ''} onChange={(event) => updateJpPrepBucket(batch, bucket.id, { goodPieces: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+                      <label className="text-xs font-medium text-slate-600">Damaged jalapeños<input type="number" min="0" step="1" value={bucket.damagedPieces || ''} onChange={(event) => updateJpPrepBucket(batch, bucket.id, { damagedPieces: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+                      <label className="text-xs font-medium text-slate-600">Total jalapeños (auto)<input type="number" readOnly value={bucket.totalPieces} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700" /></label>
+                    </div>
+                    <div className={`mt-2 rounded-lg px-3 py-2 text-xs ${bucket.totalPieces > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'}`}>Bucket total: {bucket.goodPieces || 0} good + {bucket.damagedPieces || 0} damaged = <strong>{bucket.totalPieces || 0}</strong> · crumbable pieces: <strong>{Math.max(0, bucket.goodPieces) * 2}</strong></div>
+                  </div>
+                ))}
+                <div className="grid gap-2 rounded-lg border border-lime-200 bg-lime-50 p-3 text-xs sm:grid-cols-2 lg:grid-cols-3"><div>Raw total <strong>{formRawWeightKg.toFixed(2)} kg</strong></div><div>Drained total <strong>{formDrainedWeightKg.toFixed(2)} kg</strong></div><div>Brine removed <strong>{Math.max(0, formRawWeightKg - formDrainedWeightKg).toFixed(2)} kg</strong></div><div>All buckets: <strong>{jpPrepForm.totalPieces} total</strong></div><div><strong>{jpPrepForm.goodPieces} good</strong> · {jpPrepForm.damagedPieces} damaged</div><div>Crumbable: <strong>{jpPrepForm.goodPieces * 2} pieces</strong></div></div>
+              </div>
+            )}
+
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
+              <div className="text-sm font-bold text-violet-950">Old cream-cheese carryover (optional)</div>
+              <div className="mt-1 text-xs text-violet-800">Use cream cheese carried forward from an earlier JP batch before making more.</div>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-medium text-violet-900">Previous JP batch<select value={jpPrepForm.carriedCreamCheeseSourceBatchId} onChange={(event) => saveJpPrepDraft(batch, { ...jpPrepForm, carriedCreamCheeseSourceBatchId: event.target.value, carriedCreamCheeseKg: 0 })} className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm"><option value="">No old cream cheese</option>{carryoverSources.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.batchCode} · {getJpCreamCheeseCarryoverAvailable(candidate, batch.id).toFixed(2)} kg available</option>)}</select></label>
+                <label className="text-xs font-medium text-violet-900">Old cream cheese used (kg)<input type="number" min="0" step="0.01" disabled={!selectedCarryoverSource} value={jpPrepForm.carriedCreamCheeseKg || ''} onChange={(event) => saveJpPrepDraft(batch, { ...jpPrepForm, carriedCreamCheeseKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm disabled:bg-slate-100" /><span className="mt-1 block font-normal">Available from selected batch: {selectedCarryoverAvailableKg.toFixed(2)} kg</span></label>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3">
+              <div className="text-sm font-bold text-cyan-950">Cream-cheese recipe</div>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-medium text-cyan-900">PAN111 used (kg)<input type="number" min="0" step="0.01" value={jpPrepForm.pan111InputKg || ''} onChange={(event) => saveJpPrepDraft(batch, { ...jpPrepForm, pan111InputKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm" /><span className="mt-1 block font-normal text-cyan-700">{batch.pan111SourcePending ? 'Source quantity will be reconciled when the pending lot is linked.' : `Available in source: ${(source?.currentQuantity || 0).toFixed(2)} kg`}</span></label>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs"><div className="rounded-lg bg-white p-2">Cream<strong className="mt-1 block text-sm">{(jpPrepForm.pan111InputKg * 50).toFixed(0)} g</strong></div><div className="rounded-lg bg-white p-2">Black pepper<strong className="mt-1 block text-sm">{(jpPrepForm.pan111InputKg * 1.2).toFixed(1)} g</strong></div><div className="rounded-lg bg-white p-2">Salt<strong className="mt-1 block text-sm">{(jpPrepForm.pan111InputKg * (200 / 15)).toFixed(1)} g</strong></div></div>
+              </div>
+              <div className="mt-2 text-[11px] text-cyan-800">Automatically scaled from 15 kg PAN111 + 750 g cream + 18 g black pepper + 200 g salt.</div>
+              <div className="mt-2 rounded-lg bg-white p-2 text-xs text-cyan-900">New cream cheese: <strong>{(jpPrepForm.pan111InputKg + (jpPrepForm.pan111InputKg * 0.05) + (jpPrepForm.pan111InputKg * 0.0012) + (jpPrepForm.pan111InputKg * (0.2 / 15))).toFixed(2)} kg</strong> · old carryover: <strong>{jpPrepForm.carriedCreamCheeseKg.toFixed(2)} kg</strong> · total available: <strong>{(jpPrepForm.pan111InputKg + (jpPrepForm.pan111InputKg * 0.05) + (jpPrepForm.pan111InputKg * 0.0012) + (jpPrepForm.pan111InputKg * (0.2 / 15)) + jpPrepForm.carriedCreamCheeseKg).toFixed(2)} kg</strong></div>
+            </div>
+
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <label className="min-w-64 flex-1 text-xs font-medium text-slate-600">Prepared by<input type="text" value={jpPrepForm.preparedBy} onChange={(event) => saveJpPrepDraft(batch, { ...jpPrepForm, preparedBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <button type="button" onClick={() => handleCompleteJpPrepping(batch)} className="rounded-lg bg-lime-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-lime-800">Complete prepping → cheese filling</button>
+            </div>
+          </div>
+        )}
+
+        {filling?.completedAt && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 text-xs text-slate-700">
+            <div className="font-bold text-emerald-800">Phase 2 completed and first freeze recorded · {new Date(filling.completedAt).toLocaleString()}</div>
+            <div className="mt-2">{crumbablePieces} crumbable − {filling.damagedPieces} damaged during filling = <strong>{filling.filledPieces} frozen filled pieces</strong> · {filling.traysFilled} trays · by {filling.filledBy}</div>
+            <div className="mt-1">Cream cheese: {(filling.creamCheeseAvailableKg || 0).toFixed(2)} kg available · {(filling.creamCheeseUsedKg || 0).toFixed(2)} kg used · {(filling.creamCheeseLeftoverKg || 0).toFixed(2)} kg leftover {filling.creamCheeseDisposition === 'carry_forward' ? 'carried forward' : filling.creamCheeseDisposition === 'discarded' ? 'discarded' : ''}.</div>
+          </div>
+        )}
+
+        {batch.status === 'jp_filling' && (
+          <div className="mt-3 rounded-lg border border-cyan-200 bg-white p-3">
+            <div className="text-sm font-bold text-cyan-950">Phase 2 · Cheese filling and first freeze</div>
+            <div className="mt-1 text-xs text-slate-500">Start with {crumbablePieces} crumbable jalapeño halves from Phase 1.</div>
+            <div className="mt-3 rounded-lg border border-cyan-200 bg-cyan-50 p-3">
+              <div className="text-xs font-bold uppercase tracking-wide text-cyan-900">Cream cheese available: {creamCheeseAvailableKg.toFixed(2)} kg</div>
+              <div className="mt-1 text-xs text-cyan-800">If more is needed during filling, enter more PAN111 here. Its cream, pepper, and salt recipe is calculated and added to this batch.</div>
+              <div className="mt-2 flex flex-wrap items-end gap-2">
+                <label className="min-w-56 flex-1 text-xs font-medium text-cyan-900">Additional PAN111 (kg)<input type="number" min="0" step="0.01" value={additionalCreamCheesePan111Kg || ''} onChange={(event) => setAdditionalCreamCheesePan111Kg(Number(event.target.value) || 0)} className="mt-1 w-full rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm" /></label>
+                <div className="flex-1 text-xs text-cyan-900">Adds: cream {(additionalCreamCheesePan111Kg * 50).toFixed(0)} g · pepper {(additionalCreamCheesePan111Kg * 1.2).toFixed(1)} g · salt {(additionalCreamCheesePan111Kg * (200 / 15)).toFixed(1)} g</div>
+                <button type="button" onClick={() => handleAddJpCreamCheeseMake(batch)} className="rounded-lg bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-800">Record more cream cheese</button>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <label className="text-xs font-medium text-slate-600">Damaged during filling<input type="number" min="0" step="1" value={jpFillingForm.damagedPieces || ''} onChange={(event) => updateJpFillingDraft(batch, { damagedPieces: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-medium text-slate-600">Filled trays<input type="number" min="0" step="1" value={jpFillingForm.traysFilled || ''} onChange={(event) => updateJpFillingDraft(batch, { traysFilled: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-medium text-slate-600">Filled by<input type="text" value={jpFillingForm.filledBy} onChange={(event) => updateJpFillingDraft(batch, { filledBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+            </div>
+            <div className="mt-3 grid gap-3 rounded-lg border border-violet-200 bg-violet-50 p-3 sm:grid-cols-2">
+              <label className="text-xs font-medium text-violet-900">Cream cheese left after filling (kg)<input type="number" min="0" step="0.01" value={jpFillingForm.creamCheeseLeftoverKg || ''} onChange={(event) => updateJpFillingDraft(batch, { creamCheeseLeftoverKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm" /><span className="mt-1 block font-normal">Used automatically: {Math.max(0, creamCheeseAvailableKg - jpFillingForm.creamCheeseLeftoverKg).toFixed(2)} kg</span></label>
+              <label className="text-xs font-medium text-violet-900">Leftover action<select value={jpFillingForm.creamCheeseDisposition} disabled={jpFillingForm.creamCheeseLeftoverKg <= 0} onChange={(event) => updateJpFillingDraft(batch, { creamCheeseDisposition: event.target.value as typeof jpFillingForm.creamCheeseDisposition })} className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm disabled:bg-slate-100"><option value="none">No leftover</option><option value="carry_forward">Carry forward to another JP batch</option><option value="discarded">Discard leftover</option></select></label>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-cyan-50 p-3 text-sm text-cyan-900"><span>Filled pieces: <strong>{crumbablePieces} − {jpFillingForm.damagedPieces || 0} = {Math.max(0, crumbablePieces - (jpFillingForm.damagedPieces || 0))}</strong></span><button type="button" onClick={() => handleCompleteJpFilling(batch)} className="rounded-lg bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-800">Complete filling & record first freeze</button></div>
+          </div>
+        )}
+
+        {crumbing?.completedAt && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 text-xs text-slate-700">
+            <div className="font-bold text-emerald-800">Phase 3 completed · {new Date(crumbing.completedAt).toLocaleString()}</div>
+            <div className="mt-2">({prep?.goodPieces || 0} good × 2) − {filling?.damagedPieces || 0} filling damage − {crumbing.damagedPieces} crumbing damage = <strong>{crumbing.finalCrumbedPieces} final crumbed pieces</strong> · {crumbing.traysCrumbed} trays</div>
+            <div className="mt-1 text-slate-500">Predust {crumbing.predustKg.toFixed(2)} kg · batter {crumbing.batterMixKg.toFixed(2)} kg + {crumbing.batterWaterL.toFixed(2)} L water · Adajio {crumbing.adajioKg.toFixed(2)} kg · by {crumbing.crumbedBy}</div>
+          </div>
+        )}
+
+        {batch.status === 'jp_filling_frozen' && (
+          <div className="mt-3 rounded-lg border border-orange-200 bg-white p-3">
+            <div className="text-sm font-bold text-orange-950">Phase 3 · Crumbing</div>
+            <div className="mt-1 text-xs text-slate-500">Crumb the {filledPieces} frozen, cream-cheese-filled pieces. Record every ingredient addition as it is taken.</div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><div className="text-xs font-semibold uppercase text-amber-900">Flavour coat · Predust</div><div className="mt-1 text-sm">1 kg per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {jpCrumbingForm.predustMultiplier}</strong><button type="button" onClick={() => updateJpCrumbingDraft(batch, { predustMultiplier: jpCrumbingForm.predustMultiplier + 1 })} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">Total {jpCrumbingForm.predustMultiplier.toFixed(2)} kg</div></div>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3"><div className="text-xs font-semibold uppercase text-blue-900">Batter coat</div><div className="mt-1 text-sm">1 kg batter + 2.5 L water per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {jpCrumbingForm.batterMultiplier}</strong><button type="button" onClick={() => updateJpCrumbingDraft(batch, { batterMultiplier: jpCrumbingForm.batterMultiplier + 1 })} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">{jpCrumbingForm.batterMultiplier.toFixed(2)} kg + {(jpCrumbingForm.batterMultiplier * 2.5).toFixed(2)} L water</div></div>
+              <div className="rounded-lg border border-purple-200 bg-purple-50 p-3"><div className="text-xs font-semibold uppercase text-purple-900">Breading coat · Adajio</div><div className="mt-1 text-sm">1 kg per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {jpCrumbingForm.breadingMultiplier}</strong><button type="button" onClick={() => updateJpCrumbingDraft(batch, { breadingMultiplier: jpCrumbingForm.breadingMultiplier + 1 })} className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">Total {jpCrumbingForm.breadingMultiplier.toFixed(2)} kg</div></div>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <label className="text-xs font-medium text-slate-600">Damaged during crumbing<input type="number" min="0" step="1" value={jpCrumbingForm.damagedPieces || ''} onChange={(event) => updateJpCrumbingDraft(batch, { damagedPieces: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-medium text-slate-600">Crumbed trays<input type="number" min="0" step="1" value={jpCrumbingForm.traysCrumbed || ''} onChange={(event) => updateJpCrumbingDraft(batch, { traysCrumbed: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-medium text-slate-600">Crumbed by<input type="text" value={jpCrumbingForm.crumbedBy} onChange={(event) => updateJpCrumbingDraft(batch, { crumbedBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-orange-50 p-3 text-sm text-orange-950"><span>Final tally: <strong>({prep?.goodPieces || 0} × 2) − {filling?.damagedPieces || 0} − {jpCrumbingForm.damagedPieces || 0} = {finalCrumbedPieces} pieces</strong></span><button type="button" onClick={() => handleCompleteJpCrumbing(batch)} className="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700">Complete crumbing → ready for second freeze</button></div>
+          </div>
+        )}
+
+        {crumbing?.completedAt && ['crumbing', 'frozen', 'frying', 'packed', 'handed_over'].includes(batch.status) && (
+          <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">Post-crumb workflow: <strong>{batch.status === 'crumbing' ? 'Awaiting second freeze' : crumbingStatusLabels[batch.status]}</strong> → Fry → Pack → Hand Over.</div>
+        )}
+      </div>
+    );
+  };
+
   const renderBatchSection = (title: string, batches: CrumbingBatch[], type: CrumbingType) => {
     const sources = getAvailableSources(type);
 
@@ -874,7 +1662,7 @@ export default function CrumbingTab() {
                       <div className="text-xs text-slate-600">{batch.sourceBatchCode}</div>
                       {batch.origin && <div className="mt-1 text-[11px] text-slate-500">Origin: {batch.origin}</div>}
                       {batch.clubbedBatchCodes && <div className="mt-1 text-[11px] font-medium text-pink-700">Clubbed from {batch.clubbedBatchCodes.length} SPP batches</div>}
-                      {(batch.type === 'SPP' || batch.type === 'HCP') && batch.sourceWeightKg !== undefined && <div className="mt-1 text-[11px] text-pink-700">{batch.sourceWeightKg.toFixed(2)} kg source</div>}
+                      {(batch.type === 'SPP' || batch.type === 'JP' || batch.type === 'HCP') && batch.sourceWeightKg !== undefined && <div className="mt-1 text-[11px] text-pink-700">{batch.sourceWeightKg.toFixed(2)} kg source</div>}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">
                       {batch.type === 'SPP' ? (
@@ -886,6 +1674,13 @@ export default function CrumbingTab() {
                             {!batch.productionCompletedAt && <button onClick={() => openRecipeDetails(batch)} className="mt-1 rounded border border-pink-200 bg-pink-50 px-2 py-1 text-[11px] font-semibold text-pink-700 hover:bg-pink-100">Continue details</button>}
                           </div>
                         ) : <button onClick={() => openRecipeDetails(batch)} className="rounded border border-pink-200 bg-pink-50 px-2 py-1 text-[11px] font-semibold text-pink-700 hover:bg-pink-100">Recipe details required</button>
+                      ) : batch.type === 'JP' ? (
+                        <div className="space-y-1">
+                          {batch.jpPrepping ? <div>Crumbable: <strong>{batch.jpPrepping.crumbablePieces} pieces</strong></div> : <div>Prepping details required</div>}
+                          {batch.jpFilling?.completedAt && <div>Filling damage: {batch.jpFilling.damagedPieces} · filled: {batch.jpFilling.filledPieces}</div>}
+                          {batch.jpCrumbing?.completedAt && <div>Crumbing damage: {batch.jpCrumbing.damagedPieces} · final: <strong>{batch.jpCrumbing.finalCrumbedPieces}</strong></div>}
+                          <button onClick={() => openJpWorkflow(batch)} className="mt-1 rounded border border-lime-200 bg-lime-50 px-2 py-1 text-[11px] font-semibold text-lime-700 hover:bg-lime-100">{selectedBatch === batch.id ? 'Refresh details' : 'View process record'}</button>
+                        </div>
                       ) : '—'}
                     </td>
                     <td className="px-4 py-3">
@@ -930,6 +1725,13 @@ export default function CrumbingTab() {
                     <tr>
                       <td colSpan={9} className="border-t border-pink-100 bg-pink-50/30 p-3">
                         {renderSppRecipeDetails(batch)}
+                      </td>
+                    </tr>
+                  )}
+                  {batch.type === 'JP' && selectedBatch === batch.id && (
+                    <tr>
+                      <td colSpan={9} className="border-t border-lime-100 bg-lime-50/30 p-3">
+                        {renderJpWorkflowDetails(batch)}
                       </td>
                     </tr>
                   )}
@@ -1067,6 +1869,7 @@ export default function CrumbingTab() {
             >
               <option value="">Select source...</option>
               {activeType === 'SPP' && <option value="manual">Manual entry — no source round</option>}
+              {activeType === 'JP' && <option value="pending">Current production — PAN111 lot pending</option>}
               {getAvailableSources(activeType).map((source: any) => (
                 <option key={source.id} value={source.id}>
                   {activeType === 'SPP' && `${source.milkLotCode}/S${source.shiftNumber}/R${source.roundNumber}/${source.type} - ${getSppAvailableWeight(source).toFixed(2)} kg SPP available`}
@@ -1113,7 +1916,18 @@ export default function CrumbingTab() {
               />
             </div>
           </>}
-          {activeType !== 'SPP' && <div>
+          {activeType === 'JP' && newBatchForm.sourceBatchId === 'pending' && <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Pending PAN111 origin</label>
+            <input
+              type="text"
+              value={newBatchForm.manualOrigin}
+              onChange={(e) => setNewBatchForm({ ...newBatchForm, manualOrigin: e.target.value })}
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              placeholder="e.g., current production — lot will be linked later"
+            />
+            <p className="mt-1 text-xs text-amber-700">Production can continue now. Link the actual PAN111 lot from the JP batch record once it has been entered.</p>
+          </div>}
+          {activeType === 'HCP' && <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Trays Crumbed</label>
             <input
               type="number"
@@ -1124,8 +1938,9 @@ export default function CrumbingTab() {
             />
           </div>}
           {activeType === 'SPP' && <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-xs text-pink-900">After the batch is created, the recipe details open directly under the batch and autosave as they are entered.</div>}
+          {activeType === 'JP' && <div className="rounded-lg border border-lime-200 bg-lime-50 p-3 text-xs text-lime-900">This creates the JP record and opens Phase 1. Jalapeño bucket weights, piece inspection, PAN111 input, proportional cream-cheese recipe, filling, both freezes, and crumbing are recorded in sequence.</div>}
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Crumbing Team</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">{activeType === 'JP' ? 'Prepping Team' : 'Crumbing Team'}</label>
             <input
               type="text"
               value={newBatchForm.crumbingTeam}
