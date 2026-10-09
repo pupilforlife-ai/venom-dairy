@@ -282,6 +282,15 @@ export function getRoundMilkInput(round: Pick<ProductionRound, 'actualInput' | '
   return Math.max(0, round.plannedInput);
 }
 
+/** Total recorded material input for a ghee round (butter + AF oil). */
+export function getGheeRoundInput(
+  round: Pick<ProductionRound, 'butterInput' | 'actualInput' | 'afOilInput'>,
+) {
+  const butterInput = Math.max(0, round.butterInput || round.actualInput || 0);
+  const afOilInput = Math.max(0, round.afOilInput || 0);
+  return butterInput + afOilInput;
+}
+
 /**
  * Calculate the live milk balance from every eligible production round linked
  * to the lot.  Vessel tracking is useful operational metadata, but it must

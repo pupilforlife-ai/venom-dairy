@@ -21,7 +21,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getRoundMilkInput } from '../data/mockData';
+import { getGheeRoundInput, getRoundMilkInput } from '../data/mockData';
 
 const wasteReasons = [
   'Texture defect',
@@ -57,7 +57,7 @@ export default function WasteAndYield() {
   const malaiYield = yieldForRounds(malaiRounds);
   const rozanaYield = yieldForRounds(rozanaRounds);
   const gheeRounds = productionRounds.filter(round => round.type === 'Ghee' && !['scheduled', 'cancelled'].includes(round.status));
-  const gheeInput = gheeRounds.reduce((sum, round) => sum + Math.max(0, round.butterInput || round.actualInput || 0) + Math.max(0, round.afOilInput || 0), 0);
+  const gheeInput = gheeRounds.reduce((sum, round) => sum + getGheeRoundInput(round), 0);
   const gheeOutput = gheeRounds.reduce((sum, round) => sum + Math.max(0, round.outputWeight), 0);
   const gheeYield = gheeInput > 0 ? (gheeOutput / gheeInput) * 100 : 0;
   const yieldTrends = [{

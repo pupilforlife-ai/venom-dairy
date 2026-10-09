@@ -12,7 +12,7 @@ import { useApp } from '../store/AppContext';
 import { Modal } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
-import { getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, isMilkProductionRound } from '../data/mockData';
+import { getGheeRoundInput, getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, isMilkProductionRound } from '../data/mockData';
 import { getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 
 interface MilkBalanceReviewForm {
@@ -116,6 +116,11 @@ export default function Reconciliation() {
   const totalPaneerD = completedRounds.filter(r => r.type === 'D').reduce((s, r) => s + r.outputWeight, 0);
   const totalPaneerCS = completedRounds.filter(r => r.type === 'C/S').reduce((s, r) => s + r.outputWeight, 0);
   const totalHalloumi = completedRounds.filter(r => r.type === 'Halloumi').reduce((s, r) => s + r.outputWeight, 0);
+  const completedGheeRounds = completedRounds.filter(round => round.type === 'Ghee');
+  const totalGheeInput = completedGheeRounds.reduce((sum, round) => sum + getGheeRoundInput(round), 0);
+  const totalGheeAFOilInput = completedGheeRounds.reduce((sum, round) => sum + Math.max(0, round.afOilInput || 0), 0);
+  const totalGheeOutput = completedGheeRounds.reduce((sum, round) => sum + Math.max(0, round.outputWeight), 0);
+  const totalGheeYield = totalGheeInput > 0 ? (totalGheeOutput / totalGheeInput) * 100 : 0;
 
   useEffect(() => {
     const fallback = {
@@ -501,7 +506,7 @@ export default function Reconciliation() {
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Product</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Quantity</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Rounds</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Yield (kg/100L)</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Yield</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -537,6 +542,19 @@ export default function Reconciliation() {
                 <td className="px-4 py-3 text-slate-500">Co-product</td>
                 <td className="px-4 py-3 text-slate-500">—</td>
               </tr>
+              {completedGheeRounds.length > 0 && (
+                <tr className="hover:bg-slate-50">
+                  <td className="px-4 py-3 font-medium text-slate-900">
+                    Ghee
+                    <div className="mt-0.5 text-[10px] font-normal text-slate-500">
+                      {totalGheeInput.toFixed(2)} kg input, including {totalGheeAFOilInput.toFixed(2)} kg AF oil
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-700 font-medium">{totalGheeOutput.toFixed(2)} kg</td>
+                  <td className="px-4 py-3 text-slate-500">{completedGheeRounds.length}</td>
+                  <td className="px-4 py-3 text-indigo-600 font-medium">{totalGheeYield.toFixed(2)}%</td>
+                </tr>
+              )}
               <tr className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-900">PAN111 (Recovered)</td>
                 <td className="px-4 py-3 text-slate-700 font-medium">{productionReconciliation.pan111.toFixed(2)} kg</td>
@@ -559,7 +577,7 @@ export default function Reconciliation() {
               <tr className="bg-slate-50 text-left">
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Batch</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Type</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Input (L)</th>
+                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Input</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Output (kg)</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Yield %</th>
                 <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Packed</th>
@@ -569,23 +587,30 @@ export default function Reconciliation() {
             <tbody className="divide-y divide-slate-100">
               {completedRounds
                 .map(round => {
-                  const milkInput = getRoundMilkInput(round);
-                  const yieldPct = milkInput > 0 ? ((round.outputWeight / milkInput) * 100).toFixed(1) : '—';
+                  const input = round.type === 'Ghee' ? getGheeRoundInput(round) : getRoundMilkInput(round);
+                  const inputUnit = round.type === 'Ghee' || round.type === 'Butter' ? 'kg' : 'L';
+                  const yieldPct = input > 0 ? (round.outputWeight / input) * 100 : null;
+                  const meetsTarget = yieldPct !== null && (round.type === 'Ghee' ? yieldPct >= 70 : yieldPct >= 14);
                   return (
                     <tr key={round.id} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 font-mono text-xs font-bold text-slate-900">
-                        {round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber}
+                        {round.batchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}`}
                       </td>
                       <td className="px-4 py-2.5">
                         <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-bold">{round.type}</span>
                       </td>
-                      <td className="px-4 py-2.5 text-slate-600">{milkInput} L</td>
+                      <td className="px-4 py-2.5 text-slate-600">
+                        {input.toFixed(2)} {inputUnit}
+                        {round.type === 'Ghee' && (
+                          <div className="text-[10px] text-slate-500">
+                            {(round.butterInput || round.actualInput || 0).toFixed(2)} butter + {(round.afOilInput || 0).toFixed(2)} AF oil
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-2.5 text-slate-600">{round.outputWeight} kg</td>
                       <td className="px-4 py-2.5">
-                        <span className={`font-medium ${
-                          typeof yieldPct === 'string' && parseFloat(yieldPct) >= 14 ? 'text-emerald-600' : 'text-amber-600'
-                        }`}>
-                          {yieldPct !== '—' ? `${yieldPct}%` : '—'}
+                        <span className={`font-medium ${meetsTarget ? 'text-emerald-600' : 'text-amber-600'}`}>
+                          {yieldPct !== null ? `${yieldPct.toFixed(2)}%` : '—'}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-slate-600">
