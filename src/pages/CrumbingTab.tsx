@@ -71,6 +71,7 @@ interface CrumbingBatch {
   origin?: string;
   pan111SourcePending?: boolean;
   pan111SourceLinkedAt?: string;
+  hcpRecipeRequired?: boolean;
   status: CrumbingStatus;
   traysCrumbed: number;
   traysFried: number;
@@ -241,6 +242,13 @@ export default function CrumbingTab() {
     batterMultiplier: 0,
     breadingMultiplier: 0,
   });
+  const [hcpCrumbingForm, setHcpCrumbingForm] = useState({
+    traysCrumbed: 0,
+    crumbedBy: '',
+    predustMultiplier: 0,
+    batterMultiplier: 0,
+    breadingMultiplier: 0,
+  });
 
   const [recipeForm, setRecipeForm] = useState({
     sourceWeightKg: 0,
@@ -311,6 +319,18 @@ export default function CrumbingTab() {
         breadingMultiplier: batch.jpCrumbing?.breadingMultiplier || 0,
       });
     }
+  };
+
+  const openHcpCrumbingWorkflow = (batch: CrumbingBatch) => {
+    if (batch.type !== 'HCP') return;
+    setSelectedBatch(batch.id);
+    setHcpCrumbingForm({
+      traysCrumbed: batch.traysCrumbed || 0,
+      crumbedBy: batch.crumbingTeam || '',
+      predustMultiplier: batch.recipe?.flavourMultiplier || 0,
+      batterMultiplier: batch.recipe?.batterMultiplier || 0,
+      breadingMultiplier: batch.recipe?.breadingMultiplier || 0,
+    });
   };
 
   const getJpCreamCheeseCarryoverAvailable = (sourceBatch: CrumbingBatch, forBatchId?: string) => {
@@ -613,6 +633,7 @@ export default function CrumbingTab() {
       sourceBatchCode,
       origin,
       pan111SourcePending: isPendingJp,
+      hcpRecipeRequired: newBatchForm.type === 'HCP',
       status: newBatchForm.type === 'SPP' ? 'scheduled' : newBatchForm.type === 'JP' ? 'jp_prepping' : 'crumbing',
       traysCrumbed: newBatchForm.type === 'HCP' ? newBatchForm.traysCrumbed : 0,
       traysFried: 0,
@@ -641,6 +662,15 @@ export default function CrumbingTab() {
     } else if (newBatchForm.type === 'JP') {
       setSelectedBatch(newBatch.id);
       setJpPrepForm({ ...emptyJpPrepForm(), preparedBy: newBatchForm.crumbingTeam.trim() });
+    } else if (newBatchForm.type === 'HCP') {
+      setSelectedBatch(newBatch.id);
+      setHcpCrumbingForm({
+        traysCrumbed: newBatchForm.traysCrumbed,
+        crumbedBy: newBatchForm.crumbingTeam.trim(),
+        predustMultiplier: 0,
+        batterMultiplier: 0,
+        breadingMultiplier: 0,
+      });
     }
     setNewBatchForm({ type: 'SPP', sourceBatchId: '', manualPaneerWeightKg: 0, manualOrigin: '', halloumiWeightKg: 0, traysCrumbed: 0, crumbingTeam: '' });
   };
@@ -1106,10 +1136,69 @@ export default function CrumbingTab() {
     showToast('success', `JP crumbing completed · ${finalCrumbedPieces} pieces in ${traysCrumbed} trays. Freeze before frying.`);
   };
 
+  const updateHcpCrumbingDraft = (batch: CrumbingBatch, changes: Partial<typeof hcpCrumbingForm>) => {
+    const nextForm = { ...hcpCrumbingForm, ...changes };
+    setHcpCrumbingForm(nextForm);
+    const traysCrumbed = Math.max(0, Math.trunc(nextForm.traysCrumbed || 0));
+    updateCrumbingBatch(batch.id, {
+      traysCrumbed,
+      traysRemaining: Math.max(0, traysCrumbed - batch.traysFried),
+      crumbingTeam: nextForm.crumbedBy,
+      recipe: {
+        flavourMultiplier: nextForm.predustMultiplier,
+        batterMultiplier: nextForm.batterMultiplier,
+        breadingMultiplier: nextForm.breadingMultiplier,
+        flavourIyababKg: 0,
+        flavourPredustKg: nextForm.predustMultiplier,
+        batterIyababaKg: nextForm.batterMultiplier,
+        batterWaterL: nextForm.batterMultiplier * 2.5,
+        breadingAdajioKg: nextForm.breadingMultiplier,
+      },
+      recipeAutosavedAt: new Date().toISOString(),
+    });
+  };
+
+  const handleCompleteHcpCrumbing = (batch: CrumbingBatch) => {
+    const { traysCrumbed, crumbedBy, predustMultiplier, batterMultiplier, breadingMultiplier } = hcpCrumbingForm;
+    if (!Number.isInteger(traysCrumbed) || traysCrumbed <= 0 || !crumbedBy.trim()) {
+      showToast('error', 'Enter the HCP crumbed tray count and responsible staff');
+      return;
+    }
+    if (predustMultiplier <= 0 || batterMultiplier <= 0 || breadingMultiplier <= 0) {
+      showToast('error', 'Record at least one addition for Predust, batter, and Adajio');
+      return;
+    }
+    const now = new Date().toISOString();
+    updateCrumbingBatch(batch.id, {
+      status: 'crumbing',
+      traysCrumbed,
+      traysRemaining: traysCrumbed,
+      crumbingTeam: crumbedBy.trim(),
+      recipe: {
+        flavourMultiplier: predustMultiplier,
+        batterMultiplier,
+        breadingMultiplier,
+        flavourIyababKg: 0,
+        flavourPredustKg: predustMultiplier,
+        batterIyababaKg: batterMultiplier,
+        batterWaterL: batterMultiplier * 2.5,
+        breadingAdajioKg: breadingMultiplier,
+      },
+      recipeRecordedAt: now,
+      recipeAutosavedAt: now,
+      productionCompletedAt: now,
+    });
+    showToast('success', `HCP crumbing completed · ${traysCrumbed} trays ready to freeze`);
+  };
+
   const handleFreeze = (batchId: string) => {
     const batch = crumbingBatches.find(item => item.id === batchId);
     if (batch?.type === 'SPP' && !batch.productionCompletedAt) {
       showToast('error', 'Complete the SPP production details, including the balance paneer, first');
+      return;
+    }
+    if (batch?.type === 'HCP' && batch.hcpRecipeRequired && !batch.productionCompletedAt) {
+      showToast('error', 'Complete the HCP Predust, batter, and Adajio record before freezing');
       return;
     }
     setCrumbingBatches(crumbingBatches.map(b => 
@@ -1223,6 +1312,18 @@ export default function CrumbingTab() {
       );
     }
 
+    if (batch.type === 'HCP' && batch.hcpRecipeRequired && !batch.productionCompletedAt) {
+      buttons.push(
+        <button
+          key="hcp-recipe"
+          onClick={() => openHcpCrumbingWorkflow(batch)}
+          className="px-3 py-1.5 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-700"
+        >
+          Record crumbing recipe
+        </button>
+      );
+    }
+
     if (batch.type === 'SPP' && !batch.recipe) {
       buttons.push(
         <button
@@ -1245,7 +1346,12 @@ export default function CrumbingTab() {
       );
     }
 
-    if (batch.status === 'crumbing' && (batch.type !== 'SPP' || Boolean(batch.productionCompletedAt))) {
+    const recipeGateSatisfied = batch.type === 'SPP'
+      ? Boolean(batch.productionCompletedAt)
+      : batch.type === 'HCP'
+        ? !batch.hcpRecipeRequired || Boolean(batch.productionCompletedAt)
+        : true;
+    if (batch.status === 'crumbing' && recipeGateSatisfied) {
       buttons.push(
         <button
           key="freeze"
@@ -1585,6 +1691,40 @@ export default function CrumbingTab() {
     );
   };
 
+  const renderHcpCrumbingDetails = (batch: CrumbingBatch) => {
+    const complete = Boolean(batch.productionCompletedAt);
+    const recipe = batch.recipe;
+    return (
+      <div className="rounded-xl border border-orange-200 bg-orange-50/40 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h4 className="text-sm font-bold text-orange-950">HCP crumbing recipe · {batch.batchCode}</h4><p className="mt-1 text-xs text-orange-800">Halloumi source: {batch.sourceBatchCode} · {(batch.sourceWeightKg || 0).toFixed(2)} kg. Each ingredient addition autosaves.</p></div>
+          <button type="button" onClick={() => setSelectedBatch(null)} className="rounded-lg border border-orange-200 bg-white px-3 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-100">Close details</button>
+        </div>
+
+        {complete ? (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 text-sm text-slate-700">
+            <div className="font-bold text-emerald-800">Crumbing completed · {new Date(batch.productionCompletedAt as string).toLocaleString()}</div>
+            <div className="mt-2">{batch.traysCrumbed} trays · Predust {(recipe?.flavourPredustKg || 0).toFixed(2)} kg · batter {(recipe?.batterIyababaKg || 0).toFixed(2)} kg + {(recipe?.batterWaterL || 0).toFixed(2)} L water · Adajio {(recipe?.breadingAdajioKg || 0).toFixed(2)} kg · by {batch.crumbingTeam}</div>
+            <div className="mt-2 text-xs text-blue-800">Next: Freeze → Fry → Pack → Hand Over.</div>
+          </div>
+        ) : (
+          <>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><div className="text-xs font-semibold uppercase text-amber-900">Flavour coat · Predust</div><div className="mt-1 text-sm">1 kg per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {hcpCrumbingForm.predustMultiplier}</strong><button type="button" onClick={() => updateHcpCrumbingDraft(batch, { predustMultiplier: hcpCrumbingForm.predustMultiplier + 1 })} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">Total {hcpCrumbingForm.predustMultiplier.toFixed(2)} kg</div></div>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3"><div className="text-xs font-semibold uppercase text-blue-900">Batter coat</div><div className="mt-1 text-sm">1 kg batter + 2.5 L water per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {hcpCrumbingForm.batterMultiplier}</strong><button type="button" onClick={() => updateHcpCrumbingDraft(batch, { batterMultiplier: hcpCrumbingForm.batterMultiplier + 1 })} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">{hcpCrumbingForm.batterMultiplier.toFixed(2)} kg + {(hcpCrumbingForm.batterMultiplier * 2.5).toFixed(2)} L water</div></div>
+              <div className="rounded-lg border border-purple-200 bg-purple-50 p-3"><div className="text-xs font-semibold uppercase text-purple-900">Breader coat · Adajio</div><div className="mt-1 text-sm">1 kg per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {hcpCrumbingForm.breadingMultiplier}</strong><button type="button" onClick={() => updateHcpCrumbingDraft(batch, { breadingMultiplier: hcpCrumbingForm.breadingMultiplier + 1 })} className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">Total {hcpCrumbingForm.breadingMultiplier.toFixed(2)} kg</div></div>
+            </div>
+            <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-2">
+              <label className="text-xs font-medium text-slate-600">Crumbed trays<input type="number" min="1" step="1" value={hcpCrumbingForm.traysCrumbed || ''} onChange={(event) => updateHcpCrumbingDraft(batch, { traysCrumbed: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-medium text-slate-600">Crumbed by<input type="text" value={hcpCrumbingForm.crumbedBy} onChange={(event) => updateHcpCrumbingDraft(batch, { crumbedBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+            </div>
+            <div className="mt-3 flex justify-end"><button type="button" onClick={() => handleCompleteHcpCrumbing(batch)} className="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700">Complete HCP crumbing → Freeze</button></div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   const renderBatchSection = (title: string, batches: CrumbingBatch[], type: CrumbingType) => {
     const sources = getAvailableSources(type);
 
@@ -1681,6 +1821,11 @@ export default function CrumbingTab() {
                           {batch.jpCrumbing?.completedAt && <div>Crumbing damage: {batch.jpCrumbing.damagedPieces} · final: <strong>{batch.jpCrumbing.finalCrumbedPieces}</strong></div>}
                           <button onClick={() => openJpWorkflow(batch)} className="mt-1 rounded border border-lime-200 bg-lime-50 px-2 py-1 text-[11px] font-semibold text-lime-700 hover:bg-lime-100">{selectedBatch === batch.id ? 'Refresh details' : 'View process record'}</button>
                         </div>
+                      ) : batch.type === 'HCP' && batch.hcpRecipeRequired ? (
+                        <div className="space-y-1">
+                          {batch.recipe ? <><div className="font-medium text-slate-800">Predust {batch.recipe.flavourMultiplier} · Batter {batch.recipe.batterMultiplier} · Adajio {batch.recipe.breadingMultiplier}</div><div>{batch.productionCompletedAt ? 'Recipe completed' : 'Recipe in progress'}</div></> : <div>Crumbing recipe required</div>}
+                          <button onClick={() => openHcpCrumbingWorkflow(batch)} className="mt-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-100">View crumbing record</button>
+                        </div>
                       ) : '—'}
                     </td>
                     <td className="px-4 py-3">
@@ -1732,6 +1877,13 @@ export default function CrumbingTab() {
                     <tr>
                       <td colSpan={9} className="border-t border-lime-100 bg-lime-50/30 p-3">
                         {renderJpWorkflowDetails(batch)}
+                      </td>
+                    </tr>
+                  )}
+                  {batch.type === 'HCP' && batch.hcpRecipeRequired && selectedBatch === batch.id && (
+                    <tr>
+                      <td colSpan={9} className="border-t border-orange-100 bg-orange-50/30 p-3">
+                        {renderHcpCrumbingDetails(batch)}
                       </td>
                     </tr>
                   )}
@@ -1939,6 +2091,7 @@ export default function CrumbingTab() {
           </div>}
           {activeType === 'SPP' && <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-xs text-pink-900">After the batch is created, the recipe details open directly under the batch and autosave as they are entered.</div>}
           {activeType === 'JP' && <div className="rounded-lg border border-lime-200 bg-lime-50 p-3 text-xs text-lime-900">This creates the JP record and opens Phase 1. Jalapeño bucket weights, piece inspection, PAN111 input, proportional cream-cheese recipe, filling, both freezes, and crumbing are recorded in sequence.</div>}
+          {activeType === 'HCP' && <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-xs text-orange-900">After creation, record each Predust, batter, and Adajio addition. HCP cannot move to Freeze until the crumbing recipe is completed.</div>}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">{activeType === 'JP' ? 'Prepping Team' : 'Crumbing Team'}</label>
             <input
