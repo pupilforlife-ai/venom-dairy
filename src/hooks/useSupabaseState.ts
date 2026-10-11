@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 interface AppStateRow<T> {
   key: string;
   value: T;
+  version: number;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -32,7 +33,7 @@ function mergePersistedValue<T>(base: T, next: T, remote: T): T {
         // A deletion is honoured only when the remote item is still the same
         // item the local edit started from; otherwise preserve the newer edit.
         if (!nextById.has(id) && baseById.has(id)) {
-          return jsonEqual(remoteById.get(id), baseById.get(id));
+          return !jsonEqual(remoteById.get(id), baseById.get(id));
         }
         return true;
       }).map(item => {
@@ -93,6 +94,38 @@ function readLocalValue<T>(key: string, initialValue: T): T {
   }
 }
 
+// A milk receipt can exist only in an open device's cache if an older client
+// overwrote the shared array before realtime synchronization was available.
+// Recover only recent, complete receipts and never replace a server lot. This
+// is deliberately limited to milk lots; other collections must not resurrect
+// records that were intentionally removed during maintenance.
+function recoverRecentCachedMilkLots<T>(key: string, cached: T, remote: T): T {
+  if (key !== 'vejoy_milkLots' || !Array.isArray(cached) || !Array.isArray(remote)) return remote;
+
+  const remoteRecords = remote.filter(isRecord);
+  const remoteIds = new Set(remoteRecords.map(item => String(item.id || '')));
+  const remoteCodes = new Set(remoteRecords.map(item => String(item.lotCode || '')));
+  const recentCutoff = Date.now() - (14 * 24 * 60 * 60 * 1000);
+  const recoverableByCode = new Map<string, JsonRecord>();
+
+  cached.forEach(item => {
+    if (!isRecord(item)) return;
+    const id = typeof item.id === 'string' ? item.id : '';
+    const lotCode = typeof item.lotCode === 'string' ? item.lotCode.trim() : '';
+    const receiptDate = typeof item.receiptDate === 'string' ? item.receiptDate : '';
+    const receiptTimestamp = Date.parse(`${receiptDate}T00:00:00`);
+    if (!id || !lotCode || !Number.isFinite(receiptTimestamp) || receiptTimestamp < recentCutoff) return;
+    if (remoteIds.has(id) || remoteCodes.has(lotCode)) return;
+
+    // New lots are appended, so if a user had to enter the same receipt twice
+    // the last cached copy is the one linked to the latest production records.
+    recoverableByCode.set(lotCode, item);
+  });
+
+  if (recoverableByCode.size === 0) return remote;
+  return [...remote, ...recoverableByCode.values()] as T;
+}
+
 export function useSupabaseState<T>(key: string, initialValue: T) {
   // When Supabase is enabled, browser localStorage is only a cache. Never use
   // an old demo/cache snapshot as the initial production source of truth.
@@ -108,50 +141,98 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
   const localWriteVersionRef = useRef(0);
   const serverValueRef = useRef<T | undefined>(undefined);
+  const pendingWritesRef = useRef(0);
+
+  const applyServerValue = (row: AppStateRow<T>) => {
+    serverValueRef.current = row.value;
+    valueRef.current = row.value;
+    setStoredValue(row.value);
+    window.localStorage.setItem(key, JSON.stringify(row.value));
+  };
 
   const queuePersist = (baseValue: T, nextValue: T, localVersion: number) => {
     const client = supabase;
     if (!client) return;
+    pendingWritesRef.current += 1;
 
     writeQueueRef.current = writeQueueRef.current
       .catch(() => undefined)
       .then(async () => {
-        const { data: remoteRow, error: readError } = await client
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const { data: remoteRow, error: readError } = await client
+            .from('app_state')
+            .select('key, value, version')
+            .eq('key', key)
+            .maybeSingle<AppStateRow<T>>();
+          if (readError) throw readError;
+
+          const remoteValue = remoteRow?.value ?? serverValueRef.current ?? baseValue;
+          const mergedValue = mergePersistedValue(baseValue, nextValue, remoteValue);
+
+          if (!remoteRow) {
+            const { data: insertedRow, error: insertError } = await client
+              .from('app_state')
+              .insert({ key, value: mergedValue })
+              .select('key, value, version')
+              .single<AppStateRow<T>>();
+            if (insertError) {
+              lastError = insertError;
+              if (insertError.code === '23505') continue;
+              throw insertError;
+            }
+            serverValueRef.current = insertedRow.value;
+            if (localWriteVersionRef.current === localVersion) applyServerValue(insertedRow);
+            return;
+          }
+
+          // Compare-and-swap: if another device updates this collection after
+          // our read, zero rows match and we retry against its newer snapshot.
+          const { data: savedRow, error: saveError } = await client
+            .from('app_state')
+            .update({ value: mergedValue })
+            .eq('key', key)
+            .eq('version', remoteRow.version)
+            .select('key, value, version')
+            .maybeSingle<AppStateRow<T>>();
+          if (saveError) throw saveError;
+          if (!savedRow) continue;
+
+          serverValueRef.current = savedRow.value;
+          if (localWriteVersionRef.current === localVersion) applyServerValue(savedRow);
+          return;
+        }
+        throw lastError || new Error(`Could not save ${key} after concurrent updates`);
+      })
+      .catch(async (error) => {
+        console.error(`Error saving ${key} to Supabase:`, error);
+        // A rejected write must not leave a false local-only view. Reload the
+        // authoritative server copy when this was the most recent edit.
+        if (localWriteVersionRef.current !== localVersion) return;
+        const { data } = await client
           .from('app_state')
-          .select('key, value')
+          .select('key, value, version')
           .eq('key', key)
           .maybeSingle<AppStateRow<T>>();
-        if (readError) console.error(`Error reading latest ${key} before save:`, readError);
-
-        const remoteValue = remoteRow?.value ?? serverValueRef.current ?? baseValue;
-        const mergedValue = mergePersistedValue(baseValue, nextValue, remoteValue);
-        const { error } = await client
-          .from('app_state')
-          .upsert({ key, value: mergedValue }, { onConflict: 'key' });
-        if (error) console.error(`Error saving ${key} to Supabase:`, error);
-        if (error) return;
-
-        serverValueRef.current = mergedValue;
-        // If no newer local edit happened while this request was in flight,
-        // reflect any preserved remote fields in the visible/local snapshot.
-        if (localWriteVersionRef.current === localVersion) {
-          valueRef.current = mergedValue;
-          setStoredValue(mergedValue);
-          window.localStorage.setItem(key, JSON.stringify(mergedValue));
-        }
+        if (data) applyServerValue(data);
+      })
+      .finally(() => {
+        pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
       });
   };
 
   useEffect(() => {
     let cancelled = false;
     const loadVersion = localWriteVersionRef.current;
+    const cachedValue = readLocalValue(key, initialValue);
+    const client = supabase;
 
     const loadValue = async () => {
-      if (!supabase) return;
+      if (!client) return;
 
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from('app_state')
-        .select('key, value')
+        .select('key, value, version')
         .eq('key', key)
         .maybeSingle<AppStateRow<T>>();
 
@@ -169,11 +250,20 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
           setHasLoaded(true);
           return;
         }
-        serverValueRef.current = data.value;
-        valueRef.current = data.value;
-        setStoredValue(data.value);
+        const recoveredValue = recoverRecentCachedMilkLots(key, cachedValue, data.value);
+        if (!jsonEqual(recoveredValue, data.value)) {
+          localWriteVersionRef.current += 1;
+          const recoveryVersion = localWriteVersionRef.current;
+          valueRef.current = recoveredValue;
+          setStoredValue(recoveredValue);
+          window.localStorage.setItem(key, JSON.stringify(recoveredValue));
+          setHasLoaded(true);
+          queuePersist(data.value, recoveredValue, recoveryVersion);
+          return;
+        }
+
+        applyServerValue(data);
         setHasLoaded(true);
-        window.localStorage.setItem(key, JSON.stringify(data.value));
         return;
       }
 
@@ -184,8 +274,25 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
 
     void loadValue();
 
+    if (!client) return undefined;
+
+    const channel = client
+      .channel(`app-state-${key}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'app_state', filter: `key=eq.${key}` },
+        (payload) => {
+          const row = payload.new as AppStateRow<T>;
+          if (!row?.key || row.key !== key) return;
+          serverValueRef.current = row.value;
+          if (pendingWritesRef.current === 0) applyServerValue(row);
+        },
+      )
+      .subscribe();
+
     return () => {
       cancelled = true;
+      void client.removeChannel(channel);
     };
   }, [key]);
 
