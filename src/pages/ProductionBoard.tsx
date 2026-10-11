@@ -18,6 +18,7 @@ import {
   Trash2,
   XCircle,
   ArrowLeftRight,
+  Download,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -25,11 +26,13 @@ import { Modal } from '../components/Modal';
 import { milkProductionVessels, statusFlow, statusLabels, statusColors, CipRecord } from '../data/mockData';
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
+import { useSupabaseState } from '../hooks/useSupabaseState';
+import { exportProductionBoardWorkbook } from '../lib/operationalExports';
 import HalloumiTab from './HalloumiTab';
 import AmassiTab from './AmassiTab';
 import ButterTab from './ButterTab';
 import GheeTab from './GheeTab';
-import CrumbingTab from './CrumbingTab';
+import CrumbingTab, { type CrumbingBatch } from './CrumbingTab';
 
 const emptyPackForm = { sku: '', cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0, reason: '' };
 
@@ -94,6 +97,8 @@ export default function ProductionBoard() {
     addFinishedStock, updateFinishedStock, addCipRecord, updateCipRecord
   } = useApp();
   const { showToast } = useToast();
+  const [crumbingBatches, setCrumbingBatches] = useSupabaseState<CrumbingBatch[]>('vejoy_crumbingBatches', []);
+  const [isExporting, setIsExporting] = useState(false);
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
   const canRequestTypeChange = ['staff', 'admin', 'owner'].includes(currentRole);
@@ -1441,6 +1446,26 @@ export default function ProductionBoard() {
     ? getAllowedPaneerSkus(selectedPackRound.type, selectedPackRound.cuttingType)
     : [];
 
+  const handleExport = async () => {
+    if (!activeMilkLot || isExporting) return;
+    setIsExporting(true);
+    try {
+      await exportProductionBoardWorkbook({
+        lot: activeMilkLot,
+        shifts: productionShifts,
+        rounds: productionRounds,
+        cipRecords,
+        crumbingBatches,
+      });
+      showToast('success', `Production Board for lot ${activeMilkLot.lotCode} exported to Excel`);
+    } catch (error) {
+      console.error('Production Board Excel export failed:', error);
+      showToast('error', 'Could not create the Production Board Excel file');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -1454,7 +1479,15 @@ export default function ProductionBoard() {
             Milk Lot: <span className="font-medium text-slate-700">{activeMilkLot?.lotCode ?? 'No lot selected'}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={!activeMilkLot || isExporting}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" /> {isExporting ? 'Exporting…' : 'Export Excel'}
+          </button>
           <select
             value={selectedMilkLotId}
             onChange={(event) => setFilters(current => ({ ...current, milkLot: event.target.value, shift: 'all' }))}
@@ -2015,7 +2048,7 @@ export default function ProductionBoard() {
 
       {/* Crumbing Tab Content */}
       {activeTab === 'crumbing' && (
-        <CrumbingTab />
+        <CrumbingTab crumbingBatches={crumbingBatches} setCrumbingBatches={setCrumbingBatches} />
       )}
 
       {/* Modals - only show for paneer tab */}

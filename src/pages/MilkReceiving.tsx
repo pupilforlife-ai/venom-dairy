@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
@@ -7,6 +7,7 @@ import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBat
 import { getPaneerPackWeight, normalizeFinishedGoodsSku, paneerSkuByCode } from '../data/skuConfig';
 import { getProductionPackingEntries } from '../lib/finishedStock';
 import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
+import { exportMilkReceivingWorkbook } from '../lib/operationalExports';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
@@ -29,6 +30,7 @@ export default function MilkReceiving() {
   const [weeklyCipSupervisorName, setWeeklyCipSupervisorName] = useState('');
   const [weeklyCipSupervisorConfirmed, setWeeklyCipSupervisorConfirmed] = useState(false);
   const [weeklyCipCompletedSteps, setWeeklyCipCompletedSteps] = useState<string[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
 
   const orderedLots = useMemo(() => [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
@@ -205,6 +207,20 @@ export default function MilkReceiving() {
     received: displayedLot.litresReceived,
     ...getMilkLotAccounting(displayedLot, productionRounds),
   } : { received: 0, consumed: 0, sold: 0, remaining: 0 };
+
+  const handleExport = async () => {
+    if (!displayedLot || isExporting) return;
+    setIsExporting(true);
+    try {
+      await exportMilkReceivingWorkbook(displayedLot, productionRounds);
+      showToast('success', `Milk receiving record for lot ${displayedLot.lotCode} exported to Excel`);
+    } catch (error) {
+      console.error('Milk Receiving Excel export failed:', error);
+      showToast('error', 'Could not create the Milk Receiving Excel file');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const openEditLot = (lot: typeof milkLots[number]) => {
     setEditingLotId(lot.id);
@@ -389,6 +405,15 @@ export default function MilkReceiving() {
           <p className="text-sm text-slate-500 mt-1">Record each receipt as a traceable source lot.</p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={!displayedLot || isExporting}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 transition-colors shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            {isExporting ? 'Exporting…' : 'Export Excel'}
+          </button>
           <button
             onClick={() => setShowReceiveCreamModal(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors shadow-sm"

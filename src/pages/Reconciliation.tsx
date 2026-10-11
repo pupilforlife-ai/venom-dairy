@@ -6,6 +6,7 @@ import {
   GitBranch,
   Scale,
   ShieldCheck,
+  Download,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
@@ -14,6 +15,7 @@ import { useToast } from '../components/Toast';
 import { supabase } from '../lib/supabase';
 import { getGheeRoundInput, getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, isMilkProductionRound } from '../data/mockData';
 import { getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
+import { exportReconciliationWorkbook } from '../lib/operationalExports';
 
 interface MilkBalanceReviewForm {
   litresReceived: number;
@@ -42,6 +44,7 @@ export default function Reconciliation() {
   const [auditIdentity, setAuditIdentity] = useState({ username: '', role: '' });
   const [showMilkBalanceReview, setShowMilkBalanceReview] = useState(false);
   const [milkBalanceReviewForm, setMilkBalanceReviewForm] = useState<MilkBalanceReviewForm>(emptyMilkBalanceReviewForm);
+  const [isExporting, setIsExporting] = useState(false);
   const latestMilkLot = [...milkLots].sort((a, b) => {
     const aTime = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
     const bTime = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
@@ -188,6 +191,20 @@ export default function Reconciliation() {
       verifiedSkuAt: new Date().toISOString(),
       verifiedSkuBy: 'kb',
     });
+  };
+
+  const handleExport = async () => {
+    if (!selectedLot || isExporting) return;
+    setIsExporting(true);
+    try {
+      await exportReconciliationWorkbook({ lot: selectedLot, rounds: productionRounds, wasteEvents });
+      showToast('success', `Reconciliation for lot ${selectedLot.lotCode} exported to Excel`);
+    } catch (error) {
+      console.error('Reconciliation Excel export failed:', error);
+      showToast('error', 'Could not create the Reconciliation Excel file');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const openMilkBalanceReview = () => {
@@ -367,6 +384,14 @@ export default function Reconciliation() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={!selectedLot || isExporting}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" /> {isExporting ? 'Exporting…' : 'Export Excel'}
+          </button>
           <select value={lotCode} onChange={(event) => setSelectedLotCode(event.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
             {milkLots.map(lot => (
               <option key={lot.id} value={lot.lotCode}>{lot.lotCode}</option>

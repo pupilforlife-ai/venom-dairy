@@ -3,7 +3,6 @@ import { Plus, Package, CheckCircle2, Clock } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { useSupabaseState } from '../hooks/useSupabaseState';
 import { crumbingSkuDefinitions, crumbingSkuByCode, getCrumbingPackWeight } from '../data/skuConfig';
 
 type CrumbingStatus = 
@@ -56,7 +55,7 @@ const crumbingStatusColors: Record<CrumbingStatus, string> = {
   handed_over: 'bg-emerald-700',
 };
 
-interface CrumbingBatch {
+export interface CrumbingBatch {
   id: string;
   batchCode: string;
   type: CrumbingType;
@@ -167,11 +166,14 @@ interface CrumbingBatch {
   createdAt: string;
 }
 
-export default function CrumbingTab() {
+interface CrumbingTabProps {
+  crumbingBatches: CrumbingBatch[];
+  setCrumbingBatches: (value: CrumbingBatch[] | ((current: CrumbingBatch[]) => CrumbingBatch[])) => void;
+}
+
+export default function CrumbingTab({ crumbingBatches, setCrumbingBatches }: CrumbingTabProps) {
   const { productionRounds, milkLots, intermediateLots, updateMilkLot, updateIntermediateLot } = useApp();
   const { showToast } = useToast();
-
-  const [crumbingBatches, setCrumbingBatches] = useSupabaseState<CrumbingBatch[]>('vejoy_crumbingBatches', []);
 
   const [showNewBatchModal, setShowNewBatchModal] = useState(false);
   const [showTrayModal, setShowTrayModal] = useState(false);
