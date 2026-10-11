@@ -53,6 +53,13 @@ begin
     return old;
   end if;
 
+  -- Several screens derive summary fields from the same state. Do not turn
+  -- an unchanged save into another version/realtime event, otherwise open
+  -- devices can echo the same snapshot back and forth indefinitely.
+  if tg_op = 'UPDATE' and new.value = old.value then
+    return null;
+  end if;
+
   new.updated_at := now();
   new.updated_by := auth.uid();
   if tg_op = 'INSERT' then

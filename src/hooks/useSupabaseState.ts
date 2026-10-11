@@ -299,6 +299,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const setValue = (value: T | ((currentValue: T) => T)) => {
     const baseValue = valueRef.current;
     const nextValue = value instanceof Function ? value(baseValue) : value;
+    if (jsonEqual(baseValue, nextValue)) return;
     localWriteVersionRef.current += 1;
     const localVersion = localWriteVersionRef.current;
     valueRef.current = nextValue;
