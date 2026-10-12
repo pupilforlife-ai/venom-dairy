@@ -4,6 +4,7 @@ import {
   getMilkLotAccounting,
   getMilkLotProductionReconciliation,
   getRoundMilkInput,
+  FinishedStockLot,
   isMilkProductionRound,
   MilkLot,
   ProductionRound,
@@ -457,17 +458,200 @@ function amassiSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']
 function packWeight(pack: { sku: string; cases: number; loose?: number; looseWeightKg?: number; weightKg?: number }) {
   const sku = normalizeFinishedGoodsSku(pack.sku);
   if (paneerSkuByCode[sku]) {
-    return getPaneerPackWeight(
+    return Math.round((getPaneerPackWeight(
       paneerSkuByCode[sku],
       pack.cases || 0,
       pack.loose || 0,
       pack.looseWeightKg || 0,
       pack.weightKg || 0,
-    );
+    ) + Number.EPSILON) * 100) / 100;
   }
-  if (gheeSkuByCode[sku]) return getGheePackWeight(gheeSkuByCode[sku], pack.cases || 0, pack.loose || 0);
-  if (crumbingSkuByCode[sku]) return getCrumbingPackWeight(crumbingSkuByCode[sku], pack.cases || 0, pack.loose || 0);
-  return Math.max(0, pack.weightKg || pack.looseWeightKg || 0);
+  if (gheeSkuByCode[sku]) return Math.round((getGheePackWeight(gheeSkuByCode[sku], pack.cases || 0, pack.loose || 0) + Number.EPSILON) * 100) / 100;
+  if (crumbingSkuByCode[sku]) return Math.round((getCrumbingPackWeight(crumbingSkuByCode[sku], pack.cases || 0, pack.loose || 0) + Number.EPSILON) * 100) / 100;
+  return Math.round((Math.max(0, pack.weightKg || pack.looseWeightKg || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function packingSummary(round: ProductionRound) {
+  return (round.packedSkus || [])
+    .map(pack => {
+      const sku = normalizeFinishedGoodsSku(pack.sku);
+      const quantities = [
+        `${Math.max(0, pack.cases || 0)} cs`,
+        pack.loose ? `${Math.max(0, pack.loose)} loose` : '',
+      ].filter(Boolean).join(' + ');
+      return `${sku}: ${quantities}`;
+    })
+    .join('; ');
+}
+
+function packingLocation(
+  round: ProductionRound,
+  packIndex: number,
+  finishedStock: FinishedStockLot[],
+) {
+  const entry = getProductionPackingEntries([round]).find(candidate => candidate.packIndex === packIndex);
+  if (!entry) return 'Dairy Container (Finished Stock)';
+  const stock = finishedStock.find(candidate => candidate.packingRunId === entry.packingRunId)
+    || finishedStock.find(candidate =>
+      normalizeFinishedGoodsSku(candidate.sku) === entry.pack.sku
+      && (candidate.sourceBatchCodes || []).includes(entry.sourceBatchCode)
+    );
+  return stock?.storageLocation || 'Dairy Container (Finished Stock)';
+}
+
+function paneerWorkbookSheet(
+  rounds: ProductionRound[],
+  metadata: ExcelSheet['metadata'],
+  finishedStock: FinishedStockLot[],
+  emptyMessage: string,
+): ExcelSheet {
+  const paneerRounds = sortedRounds(rounds.filter(round => round.type === 'D' || round.type === 'C/S'));
+  const summaryColumns = [
+    { key: 'shift', header: 'Shift', width: 9, numberFormat: '0' },
+    { key: 'round', header: 'Round', width: 9, numberFormat: '0' },
+    { key: 'batch', header: 'Batch Code', width: 25 },
+    { key: 'type', header: 'Type', width: 10 },
+    { key: 'status', header: 'Stage', width: 18 },
+    { key: 'milkInputL', header: 'Milk Input L', width: 15, numberFormat: '0.00' },
+    { key: 'outputKg', header: 'Paneer Output kg', width: 18, numberFormat: '0.00' },
+    { key: 'creamKg', header: 'Cream Recovered kg', width: 20, numberFormat: '0.00' },
+    { key: 'creamBuckets', header: 'Cream Bucket Weights kg', width: 30 },
+    { key: 'cuttingType', header: 'Cutting Type', width: 18 },
+    { key: 'clingBlocks', header: 'Clingwrapped Blocks', width: 19, numberFormat: '0' },
+    { key: 'clingKg', header: 'Clingwrapped kg', width: 17, numberFormat: '0.00' },
+    { key: 'clingWeights', header: 'Clingwrapped Weights kg', width: 30 },
+    { key: 'finalBlocks', header: 'Final Blocks', width: 14, numberFormat: '0' },
+    { key: 'finalKg', header: 'Final Block Weight kg', width: 21, numberFormat: '0.00' },
+    { key: 'finalWeights', header: 'Final Block Weights kg', width: 30 },
+    { key: 'packedSkus', header: 'Packed SKU Summary', width: 38 },
+    { key: 'packedKg', header: 'Packed Weight kg', width: 18, numberFormat: '0.00' },
+    { key: 'pan111Kg', header: 'PAN111 kg', width: 13, numberFormat: '0.00' },
+    { key: 'sppKg', header: 'Sent to SPP kg', width: 16, numberFormat: '0.00' },
+    { key: 'remainingKg', header: 'Remaining kg', width: 15, numberFormat: '0.00' },
+    { key: 'started', header: 'Started At', width: 21 },
+    { key: 'completed', header: 'Completed At', width: 21 },
+    { key: 'team', header: 'Team', width: 24 },
+  ];
+  const summaryRows = paneerRounds.map(round => ({
+    shift: round.shiftNumber,
+    round: round.roundNumber,
+    batch: productionBatchCode(round),
+    type: round.type,
+    status: round.status,
+    milkInputL: getRoundMilkInput(round),
+    outputKg: round.outputWeight || 0,
+    creamKg: round.creamRecovered || 0,
+    creamBuckets: (round.creamBucketWeights || []).map(weight => weight.toFixed(2)).join(', '),
+    cuttingType: round.cuttingType || '',
+    clingBlocks: round.storedNumberOfBlocks ?? round.storedBlockWeights?.length ?? 0,
+    clingKg: round.storedOutputWeight ?? sum(round.storedBlockWeights),
+    clingWeights: (round.storedBlockWeights || []).map(weight => weight.toFixed(2)).join(', '),
+    finalBlocks: round.numberOfBlocks ?? round.blockWeights?.length ?? 0,
+    finalKg: sum(round.blockWeights) || round.outputWeight || 0,
+    finalWeights: (round.blockWeights || []).map(weight => weight.toFixed(2)).join(', '),
+    packedSkus: packingSummary(round),
+    packedKg: (round.packedSkus || []).reduce((total, pack) => total + packWeight(pack), 0),
+    pan111Kg: roundPan111Weight(round),
+    sppKg: round.sppRecordedWeight || 0,
+    remainingKg: round.remainingBalance ?? '',
+    started: excelDate(round.startTime),
+    completed: excelDate(round.completedAt),
+    team: (round.team || []).join(', '),
+  }));
+  const detailColumns = [
+    { key: 'shift', header: 'Shift', width: 9, numberFormat: '0' },
+    { key: 'round', header: 'Round', width: 9, numberFormat: '0' },
+    { key: 'batch', header: 'Batch Code', width: 25 },
+    { key: 'sku', header: 'SKU', width: 18 },
+    { key: 'cases', header: 'Cases', width: 11, numberFormat: '0' },
+    { key: 'loose', header: 'Loose Units', width: 13, numberFormat: '0' },
+    { key: 'looseWeightKg', header: 'Loose Weight kg', width: 17, numberFormat: '0.00' },
+    { key: 'weightKg', header: 'Calculated Weight kg', width: 21, numberFormat: '0.00' },
+    { key: 'location', header: 'Current Location', width: 31 },
+    { key: 'verified', header: 'Owner Verified', width: 15 },
+    { key: 'verifiedBy', header: 'Verified By', width: 17 },
+    { key: 'verifiedAt', header: 'Verified At', width: 21 },
+  ];
+  const detailRows = paneerRounds.flatMap(round => (round.packedSkus || []).map((pack, packIndex) => ({
+    shift: round.shiftNumber,
+    round: round.roundNumber,
+    batch: productionBatchCode(round),
+    sku: normalizeFinishedGoodsSku(pack.sku),
+    cases: pack.cases || 0,
+    loose: pack.loose || 0,
+    looseWeightKg: pack.looseWeightKg || 0,
+    weightKg: packWeight(pack),
+    location: packingLocation(round, packIndex, finishedStock),
+    verified: Boolean(round.verifiedPackedSkus?.some(verified => normalizeFinishedGoodsSku(verified.sku) === normalizeFinishedGoodsSku(pack.sku))),
+    verifiedBy: round.verifiedSkuBy || '',
+    verifiedAt: excelDate(round.verifiedSkuAt),
+  })));
+  return {
+    name: 'Paneer',
+    title: `Production Board — Paneer — Lot ${metadata?.find(([label]) => label === 'Milk lot')?.[1] || ''}`,
+    metadata: summaryRows.length ? metadata : [...(metadata || []), ['Record status', emptyMessage]],
+    tableTitle: 'Round Summary — one row per production round',
+    columns: summaryColumns,
+    rows: summaryRows.length ? summaryRows : [{ shift: emptyMessage }],
+    sections: [{
+      title: 'SKU Packing Detail — one row per round and SKU',
+      columns: detailColumns,
+      rows: detailRows.length ? detailRows : [{ shift: 'No paneer SKU packing has been recorded' }],
+    }],
+  };
+}
+
+function gheeWorkbookSheet(
+  rounds: ProductionRound[],
+  metadata: ExcelSheet['metadata'],
+  finishedStock: FinishedStockLot[],
+  emptyMessage: string,
+): ExcelSheet {
+  const gheeRounds = sortedRounds(rounds.filter(round => round.type === 'Ghee'));
+  const base = gheeSheet(gheeRounds, metadata);
+  const summaryRows = gheeRounds.map((round, index) => ({
+    ...base.rows[index],
+    packedSkus: packingSummary(round),
+    location: [...new Set((round.packedSkus || []).map((_, packIndex) => packingLocation(round, packIndex, finishedStock)))].join('; '),
+  }));
+  const summaryColumns = [
+    ...base.columns.slice(0, 9),
+    { key: 'packedSkus', header: 'Packed SKU Summary', width: 38 },
+    ...base.columns.slice(9, 12),
+    { key: 'location', header: 'Current Location', width: 31 },
+    ...base.columns.slice(12),
+  ];
+  const detailColumns = [
+    { key: 'date', header: 'Production Date', width: 17 },
+    { key: 'batch', header: 'Ghee Batch', width: 25 },
+    { key: 'sku', header: 'SKU', width: 18 },
+    { key: 'cases', header: 'Cases', width: 11, numberFormat: '0' },
+    { key: 'loose', header: 'Loose Buckets', width: 15, numberFormat: '0' },
+    { key: 'weightKg', header: 'Packed Weight kg', width: 18, numberFormat: '0.00' },
+    { key: 'location', header: 'Current Location', width: 31 },
+  ];
+  const detailRows = gheeRounds.flatMap(round => (round.packedSkus || []).map((pack, packIndex) => ({
+    date: excelDate(round.roundDate || round.startTime),
+    batch: productionBatchCode(round),
+    sku: normalizeFinishedGoodsSku(pack.sku),
+    cases: pack.cases || 0,
+    loose: pack.loose || 0,
+    weightKg: packWeight(pack),
+    location: packingLocation(round, packIndex, finishedStock),
+  })));
+  return {
+    name: 'Ghee',
+    title: 'Production Board — Ghee Production and Packing',
+    metadata: summaryRows.length ? metadata : [...(metadata || []), ['Record status', emptyMessage]],
+    tableTitle: 'Ghee Batch Summary — one row per batch',
+    columns: summaryColumns,
+    rows: summaryRows.length ? summaryRows : [{ date: emptyMessage }],
+    sections: [{
+      title: 'Ghee SKU Packing Detail — one row per batch and SKU',
+      columns: detailColumns,
+      rows: detailRows.length ? detailRows : [{ date: 'No ghee SKU packing has been recorded' }],
+    }],
+  };
 }
 
 function roundLedgerSheet(
@@ -811,95 +995,57 @@ function crumbingSheets(
   ];
 }
 
+function crumbingWorkbookSheet(
+  batches: CrumbingBatchExportRecord[],
+  lot: MilkLot,
+  lotRounds: ProductionRound[],
+): ExcelSheet {
+  const [spp, jp, jpBuckets, hcp] = crumbingSheets(batches, lot, lotRounds);
+  return {
+    name: 'Crumbing',
+    title: `Production Board — Crumbing — Lot ${lot.lotCode}`,
+    metadata: [
+      ...exportedAtMetadata(),
+      ['Milk lot', lot.lotCode],
+      ['JP scope', 'Standalone JP register; JP is not filtered by milk lot'],
+    ],
+    tableTitle: 'SPP Crumbing',
+    columns: spp.columns,
+    rows: spp.rows,
+    sections: [
+      { title: 'JP Crumbing — standalone register', columns: jp.columns, rows: jp.rows },
+      { title: 'JP Jalapeño Bucket Inspection', columns: jpBuckets.columns, rows: jpBuckets.rows },
+      { title: 'HCP Crumbing', columns: hcp.columns, rows: hcp.rows },
+    ],
+  };
+}
+
 export function buildProductionBoardWorkbook(input: {
   lot: MilkLot;
   shifts: ProductionShift[];
   rounds: ProductionRound[];
   cipRecords: CipRecord[];
   crumbingBatches?: CrumbingBatchExportRecord[];
+  finishedStock?: FinishedStockLot[];
 }): ExcelWorkbookExport {
   const { lot } = input;
   const lotRounds = input.rounds.filter(round => round.milkLotId === lot.id || round.milkLotCode === lot.lotCode);
   const paneerRounds = lotRounds.filter(round => round.type === 'D' || round.type === 'C/S');
-  const lotShifts = input.shifts.filter(shift => shift.milkLotId === lot.id || shift.milkLotCode === lot.lotCode);
-  const lotCip = input.cipRecords.filter(record => record.milkLotId === lot.id || record.milkLotCode === lot.lotCode);
+  const finishedStock = input.finishedStock || [];
   const metadata: ExcelSheet['metadata'] = [
     ...exportedAtMetadata(),
     ['Milk lot', lot.lotCode],
     ['Scope', 'All records for the selected milk lot; on-screen filters do not remove rows'],
   ];
-  const shiftSheet: ExcelSheet = {
-    name: 'Shifts',
-    title: `Production Board — Shifts — Lot ${lot.lotCode}`,
-    metadata,
-    columns: [
-      { key: 'shift', header: 'Shift', width: 10, numberFormat: '0' },
-      { key: 'status', header: 'Status', width: 14 },
-      { key: 'started', header: 'Started At', width: 21 },
-      { key: 'ended', header: 'Ended At', width: 21 },
-      { key: 'team', header: 'Team', width: 26 },
-      { key: 'notes', header: 'Team Notes', width: 35 },
-    ],
-    rows: lotShifts.slice().sort((a, b) => a.shiftNumber - b.shiftNumber).map(shift => ({
-      shift: shift.shiftNumber,
-      status: shift.status,
-      started: excelDate(shift.startedAt),
-      ended: excelDate(shift.endedAt),
-      team: shift.team.join(', '),
-      notes: shift.teamNotes || '',
-    })),
-  };
-  const cipSheet: ExcelSheet = {
-    name: 'CIP Records',
-    title: `Production Board — CIP Records — Lot ${lot.lotCode}`,
-    metadata,
-    columns: [
-      { key: 'frequency', header: 'Frequency', width: 13 },
-      { key: 'cycle', header: 'Cycle', width: 17 },
-      { key: 'status', header: 'Status', width: 15 },
-      { key: 'shift', header: 'Shift', width: 10 },
-      { key: 'performed', header: 'Performed At', width: 21 },
-      { key: 'recordedBy', header: 'Recorded By', width: 17 },
-      { key: 'chemical', header: 'Chemical', width: 16 },
-      { key: 'chemicalL', header: 'Chemical L', width: 13, numberFormat: '0.00' },
-      { key: 'waterL', header: 'Water L', width: 11, numberFormat: '0.00' },
-      { key: 'temperatureC', header: 'Temperature °C', width: 16, numberFormat: '0.0' },
-      { key: 'minutes', header: 'Circulation min', width: 16, numberFormat: '0' },
-      { key: 'supervisor', header: 'Supervisor', width: 18 },
-      { key: 'notes', header: 'Notes', width: 30 },
-    ],
-    rows: lotCip.map(record => ({
-      frequency: record.frequency,
-      cycle: record.cycle,
-      status: record.status || 'completed',
-      shift: record.shiftNumber ?? '',
-      performed: excelDate(record.performedAt),
-      recordedBy: record.recordedBy,
-      chemical: record.chemicalName || '',
-      chemicalL: record.chemicalVolumeLitres || 0,
-      waterL: record.waterVolumeLitres || 0,
-      temperatureC: record.waterTemperatureC || 0,
-      minutes: (record.circulationMinutes || 0) + (record.extensionMinutes || 0),
-      supervisor: record.supervisorName || '',
-      notes: record.notes || '',
-    })),
-  };
   return {
     filename: `vejoy-production-board-${lot.lotCode}-${exportDateStamp()}.xlsx`,
     sheets: [
-      withNoRecords(productionSummarySheet(lotRounds, metadata), `No production rounds recorded for milk lot ${lot.lotCode}`),
-      withNoRecords(roundLedgerSheet(paneerRounds, `Production Board — Paneer Rounds — Lot ${lot.lotCode}`, metadata, 'Paneer Rounds'), `No paneer rounds recorded for milk lot ${lot.lotCode}`),
-      withNoRecords(cuttingSheet(paneerRounds, metadata), `No paneer cutting records recorded for milk lot ${lot.lotCode}`),
-      withNoRecords(packingSheet(paneerRounds, `Production Board — Paneer Packing — Lot ${lot.lotCode}`, metadata, 'Paneer Packing'), `No paneer packing recorded for milk lot ${lot.lotCode}`),
-      withNoRecords(measurementSheet(paneerRounds, metadata, 'Paneer Weights'), `No paneer block weights recorded for milk lot ${lot.lotCode}`),
-      withNoRecords(creamSheet(lotRounds, metadata), `No cream recovery recorded for milk lot ${lot.lotCode}`),
+      paneerWorkbookSheet(paneerRounds, metadata, finishedStock, `No paneer rounds recorded for milk lot ${lot.lotCode}`),
       withNoRecords(butterSheet(lotRounds, metadata), `No butter production recorded for milk lot ${lot.lotCode}`),
-      withNoRecords(gheeSheet(lotRounds, metadata), `No ghee production recorded for milk lot ${lot.lotCode}`),
+      gheeWorkbookSheet(lotRounds, metadata, finishedStock, `No ghee production recorded for milk lot ${lot.lotCode}`),
       withNoRecords(halloumiSheet(lotRounds, metadata), `No Halloumi production recorded for milk lot ${lot.lotCode}`),
       withNoRecords(amassiSheet(lotRounds, metadata), `No Amassi production recorded for milk lot ${lot.lotCode}`),
-      ...crumbingSheets(input.crumbingBatches || [], lot, lotRounds),
-      withNoRecords(shiftSheet, `No shifts recorded for milk lot ${lot.lotCode}`),
-      withNoRecords(cipSheet, `No CIP records recorded for milk lot ${lot.lotCode}`),
+      crumbingWorkbookSheet(input.crumbingBatches || [], lot, lotRounds),
     ],
   };
 }

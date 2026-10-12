@@ -1471,6 +1471,7 @@ export default function ProductionBoard() {
         rounds: productionRounds,
         cipRecords,
         crumbingBatches,
+        finishedStock,
       });
       showToast('success', `Production Board for lot ${activeMilkLot.lotCode} exported to Excel`);
     } catch (error) {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { strFromU8, unzipSync } from 'fflate';
 import writeXlsxFile from 'write-excel-file/node';
 import { MilkLot, ProductionRound, ProductionShift } from '../data/mockData';
-import { buildExcelFileSheets } from './excelExport';
+import { buildExcelFileSheets, excelAutoFilterFeature } from './excelExport';
 import { buildMilkReceivingWorkbook, buildProductionBoardWorkbook } from './operationalExports';
 
 const lot: MilkLot = {
@@ -56,7 +57,10 @@ describe('Production Board Excel export', () => {
         blockWeights: [10, 11],
         numberOfBlocks: 2,
         cuttingType: '1kg blocks',
-        packedSkus: [{ sku: 'MPAN100', cases: 2, loose: 1 }],
+        packedSkus: [
+          { sku: 'MPAN100', cases: 2, loose: 1 },
+          { sku: 'MPAN200', cases: 1, loose: 2 },
+        ],
       }),
       productionRound({
         id: 'cream',
@@ -153,42 +157,55 @@ describe('Production Board Excel export', () => {
           createdAt: '2026-10-01T11:00:00.000Z',
         },
       ],
+      finishedStock: [
+        {
+          id: 'stock-ghee',
+          sku: 'GHEE-400-24',
+          productName: 'Ghee 400g — 24 bucket case',
+          packingRunId: 'legacy-ghee-0',
+          cases: 2,
+          loosePackets: 0,
+          totalPackets: 48,
+          storageLocation: 'Coldroom',
+          status: 'handed_over',
+          createdAt: '2026-10-01T12:00:00.000Z',
+          sourceBatchCodes: ['011026/S1/R4/Ghee'],
+        },
+      ],
     });
 
-    expect(workbook.sheets[0].name).toBe('Production Summary');
-    expect(workbook.sheets[0].rows).toHaveLength(6);
-    expect(workbook.sheets.map(sheet => sheet.name)).toEqual(expect.arrayContaining([
-      'Paneer Rounds',
-      'Paneer Cutting',
-      'Paneer Packing',
-      'Paneer Weights',
-      'Cream Recovery',
+    expect(workbook.sheets.map(sheet => sheet.name)).toEqual([
+      'Paneer',
       'Butter',
       'Ghee',
       'Halloumi',
       'Amassi',
-      'SPP Crumbing',
-      'JP Crumbing Standalone',
-      'JP Bucket Detail',
-      'HCP Crumbing',
-      'Shifts',
-      'CIP Records',
-    ]));
+      'Crumbing',
+    ]);
 
     const sheet = (name: string) => workbook.sheets.find(candidate => candidate.name === name)!;
-    expect(sheet('Paneer Cutting').rows).toHaveLength(2);
-    expect(sheet('Paneer Packing').rows).toHaveLength(1);
-    expect(sheet('Cream Recovery').rows[0]).toMatchObject({ recordedKg: 33.6, bucketTotalKg: 33.6 });
+    expect(sheet('Paneer').rows).toHaveLength(2);
+    expect(sheet('Paneer').rows[0]).toMatchObject({ creamKg: 0, packedSkus: 'MPAN100: 2 cs + 1 loose; MPAN200: 1 cs + 2 loose', packedKg: 36.2 });
+    expect(sheet('Paneer').rows[1]).toMatchObject({ creamKg: 33.6, creamBuckets: '16.80, 16.80' });
+    expect(sheet('Paneer').sections?.[0].rows).toHaveLength(2);
+    expect(sheet('Paneer').sections?.[0].rows[0]).toMatchObject({ sku: 'MPAN100', weightKg: 31 });
     expect(sheet('Butter').rows[0]).toMatchObject({ creamInputKg: 100, butterKg: 42, buttermilkKg: 55 });
-    expect(sheet('Ghee').rows[0]).toMatchObject({ butterKg: 50, afOilKg: 12.5, totalInputKg: 62.5, outputKg: 58 });
+    expect(sheet('Ghee').rows[0]).toMatchObject({ butterKg: 50, afOilKg: 12.5, totalInputKg: 62.5, outputKg: 58, location: 'Coldroom' });
+    expect(sheet('Ghee').sections?.[0].rows[0]).toMatchObject({ sku: 'GHEE-400-24', cases: 2, weightKg: 19.2, location: 'Coldroom' });
     expect(sheet('Halloumi').rows[0]).toMatchObject({ outputKg: 64, vacuumedKg: 60 });
     expect(sheet('Amassi').rows[0]).toMatchObject({ bottles18: 20, bottles2: 10, totalBottles: 30 });
-    expect(sheet('SPP Crumbing').rows[0]).toMatchObject({ batch: 'SPP-1', packedCases: 2 });
-    expect(sheet('JP Crumbing Standalone').rows[0]).toMatchObject({ batch: 'JP-1', packedCases: 3 });
-    expect(sheet('HCP Crumbing').rows[0]).toMatchObject({ batch: 'HCP-1', packedCases: 1 });
+    expect(sheet('Crumbing').rows[0]).toMatchObject({ batch: 'SPP-1', packedCases: 2 });
+    expect(sheet('Crumbing').sections?.[0].rows[0]).toMatchObject({ batch: 'JP-1', packedCases: 3 });
+    expect(sheet('Crumbing').sections?.[2].rows[0]).toMatchObject({ batch: 'HCP-1', packedCases: 1 });
 
-    const file = await writeXlsxFile(buildExcelFileSheets(workbook)).toBuffer();
+    const file = await (writeXlsxFile as any)(buildExcelFileSheets(workbook), { features: [excelAutoFilterFeature] }).toBuffer();
     expect(file.byteLength).toBeGreaterThan(1_000);
+    const archive = unzipSync(file);
+    const workbookXml = strFromU8(archive['xl/workbook.xml']);
+    expect(workbookXml.match(/<sheet /g)).toHaveLength(6);
+    expect(workbookXml).toContain('name="Paneer"');
+    expect(workbookXml).toContain('name="Crumbing"');
+    expect(strFromU8(archive['xl/worksheets/sheet1.xml'])).toContain('<autoFilter ref="A7:X9"/>');
   });
 
   it('does not export rounds belonging to another milk lot', () => {
@@ -202,6 +219,7 @@ describe('Production Board Excel export', () => {
       cipRecords: [],
     });
 
+    expect(workbook.sheets[0].name).toBe('Paneer');
     expect(workbook.sheets[0].rows).toHaveLength(1);
     const gheeSheet = workbook.sheets.find(sheet => sheet.name === 'Ghee')!;
     expect(gheeSheet.metadata).toContainEqual(['Record status', 'No ghee production recorded for milk lot 011026']);
