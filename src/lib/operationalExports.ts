@@ -19,7 +19,7 @@ import {
   paneerSkuByCode,
 } from '../data/skuConfig';
 import { getProductionPackingEntries } from './finishedStock';
-import { excelDate, ExcelSheet, exportDateStamp, exportExcelWorkbook } from './excelExport';
+import { excelDate, ExcelSheet, ExcelWorkbookExport, exportDateStamp, exportExcelWorkbook } from './excelExport';
 import { getMilkLotVesselBalances, getMilkSaleVesselSource } from './milkVesselAllocation';
 
 interface CrumbingBatchExportRecord {
@@ -109,6 +109,338 @@ function roundInput(round: ProductionRound) {
   if (round.type === 'Ghee') return { quantity: getGheeRoundInput(round), unit: 'kg' };
   if (round.type === 'Butter') return { quantity: Math.max(0, round.actualInput || round.plannedInput), unit: 'kg' };
   return { quantity: getRoundMilkInput(round), unit: 'L' };
+}
+
+function sortedRounds(rounds: ProductionRound[]) {
+  return rounds.slice().sort((a, b) =>
+    a.shiftNumber - b.shiftNumber
+    || a.roundNumber - b.roundNumber
+    || a.startTime.localeCompare(b.startTime),
+  );
+}
+
+function sum(values: number[] | undefined) {
+  return (values || []).reduce((total, value) => total + Math.max(0, value || 0), 0);
+}
+
+function productionSummarySheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
+  return {
+    name: 'Production Summary',
+    title: 'Production Board — Complete Production Summary',
+    metadata,
+    columns: [
+      { key: 'lot', header: 'Milk Lot', width: 14 },
+      { key: 'shift', header: 'Shift', width: 9 },
+      { key: 'round', header: 'Round', width: 9 },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'type', header: 'Product / Process', width: 18 },
+      { key: 'status', header: 'Current Stage', width: 19 },
+      { key: 'input', header: 'Input', width: 12, numberFormat: '0.00' },
+      { key: 'inputUnit', header: 'Input Unit', width: 11 },
+      { key: 'outputKg', header: 'Recorded Output kg', width: 19, numberFormat: '0.00' },
+      { key: 'creamKg', header: 'Cream Recovered kg', width: 19, numberFormat: '0.00' },
+      { key: 'blocks', header: 'Blocks', width: 10, numberFormat: '0' },
+      { key: 'packedCases', header: 'Packed Cases', width: 14, numberFormat: '0' },
+      { key: 'packedLoose', header: 'Packed Loose Units', width: 18, numberFormat: '0' },
+      { key: 'packedWeightKg', header: 'Packed Weight kg', width: 18, numberFormat: '0.00' },
+      { key: 'amassiBottles', header: 'Amassi Bottles', width: 15, numberFormat: '0' },
+      { key: 'remainingKg', header: 'Remaining kg', width: 15, numberFormat: '0.00' },
+      { key: 'started', header: 'Started At', width: 21 },
+      { key: 'completed', header: 'Completed At', width: 21 },
+      { key: 'team', header: 'Team', width: 24 },
+    ],
+    rows: sortedRounds(rounds).map(round => {
+      const input = roundInput(round);
+      const packs = round.packedSkus || [];
+      return {
+        lot: round.milkLotCode,
+        shift: round.shiftNumber || '',
+        round: round.roundNumber,
+        batch: productionBatchCode(round),
+        type: round.type,
+        status: round.status,
+        input: input.quantity,
+        inputUnit: input.unit,
+        outputKg: round.outputWeight || round.butterOutput || 0,
+        creamKg: round.creamRecovered || 0,
+        blocks: round.numberOfBlocks || round.storedNumberOfBlocks || 0,
+        packedCases: packs.reduce((total, pack) => total + Math.max(0, pack.cases || 0), 0),
+        packedLoose: packs.reduce((total, pack) => total + Math.max(0, pack.loose || 0), 0),
+        packedWeightKg: packs.reduce((total, pack) => total + packWeight(pack), 0),
+        amassiBottles: (round.amassiPacked || []).reduce((total, pack) => total + Math.max(0, pack.bottles || 0), 0),
+        remainingKg: round.remainingBalance ?? '',
+        started: excelDate(round.startTime),
+        completed: excelDate(round.completedAt),
+        team: (round.team || []).join(', '),
+      };
+    }),
+  };
+}
+
+function cuttingSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
+  const paneerRounds = sortedRounds(rounds.filter(round => round.type === 'D' || round.type === 'C/S'));
+  return {
+    name: 'Paneer Cutting',
+    title: 'Production Board — Paneer Cutting and Balance Ledger',
+    metadata,
+    columns: [
+      { key: 'lot', header: 'Milk Lot', width: 14 },
+      { key: 'shift', header: 'Shift', width: 9 },
+      { key: 'round', header: 'Round', width: 9 },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'type', header: 'Type', width: 10 },
+      { key: 'cuttingType', header: 'Cutting Type', width: 18 },
+      { key: 'storedBlocks', header: 'Clingwrapped Blocks', width: 20, numberFormat: '0' },
+      { key: 'storedWeightKg', header: 'Clingwrapped Weight kg', width: 22, numberFormat: '0.00' },
+      { key: 'storedWeights', header: 'Clingwrapped Individual Weights kg', width: 34 },
+      { key: 'finalBlocks', header: 'Final Blocks', width: 14, numberFormat: '0' },
+      { key: 'finalWeightKg', header: 'Final Block Weight kg', width: 21, numberFormat: '0.00' },
+      { key: 'finalWeights', header: 'Final Individual Weights kg', width: 32 },
+      { key: 'sppKg', header: 'Sent to SPP kg', width: 16, numberFormat: '0.00' },
+      { key: 'balanceKg', header: 'Balance Paneer kg', width: 18, numberFormat: '0.00' },
+      { key: 'remainingKg', header: 'Remaining to Pack kg', width: 20, numberFormat: '0.00' },
+      { key: 'cutBy', header: 'Final Cut By', width: 17 },
+      { key: 'storedBy', header: 'Clingwrapped By', width: 18 },
+      { key: 'clingwrappedAt', header: 'Clingwrapped At', width: 21 },
+      { key: 'status', header: 'Status', width: 18 },
+    ],
+    rows: paneerRounds.map(round => ({
+      lot: round.milkLotCode,
+      shift: round.shiftNumber,
+      round: round.roundNumber,
+      batch: productionBatchCode(round),
+      type: round.type,
+      cuttingType: round.cuttingType || '',
+      storedBlocks: round.storedNumberOfBlocks ?? round.storedBlockWeights?.length ?? 0,
+      storedWeightKg: round.storedOutputWeight ?? sum(round.storedBlockWeights),
+      storedWeights: (round.storedBlockWeights || []).map(value => value.toFixed(2)).join(', '),
+      finalBlocks: round.numberOfBlocks ?? round.blockWeights?.length ?? 0,
+      finalWeightKg: sum(round.blockWeights) || round.outputWeight || 0,
+      finalWeights: (round.blockWeights || []).map(value => value.toFixed(2)).join(', '),
+      sppKg: round.sppRecordedWeight || 0,
+      balanceKg: round.balancePaneerWeight || 0,
+      remainingKg: round.remainingBalance ?? '',
+      cutBy: round.cutBy || '',
+      storedBy: round.storedCutBy || '',
+      clingwrappedAt: excelDate(round.clingwrappedAt),
+      status: round.status,
+    })),
+  };
+}
+
+function creamSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
+  const creamRounds = sortedRounds(rounds.filter(round => round.type === 'C/S' || (round.creamRecovered || 0) > 0 || (round.creamBucketWeights || []).length > 0));
+  return {
+    name: 'Cream Recovery',
+    title: 'Production Board — Cream Recovery',
+    metadata,
+    columns: [
+      { key: 'lot', header: 'Milk Lot', width: 14 },
+      { key: 'shift', header: 'Shift', width: 9 },
+      { key: 'round', header: 'Round', width: 9 },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'recordedKg', header: 'Recorded Cream kg', width: 19, numberFormat: '0.00' },
+      { key: 'bucketCount', header: 'Buckets', width: 11, numberFormat: '0' },
+      { key: 'bucketTotalKg', header: 'Bucket Total kg', width: 17, numberFormat: '0.00' },
+      { key: 'varianceKg', header: 'Recorded - Bucket kg', width: 21, numberFormat: '0.00' },
+      { key: 'bucketWeights', header: 'Individual Bucket Weights kg', width: 35 },
+      { key: 'recordedBy', header: 'Recorded By', width: 18 },
+      { key: 'recordedAt', header: 'Recorded At', width: 21 },
+    ],
+    rows: creamRounds.map(round => {
+      const bucketTotal = sum(round.creamBucketWeights);
+      const recorded = Math.max(0, round.creamRecovered || 0);
+      return {
+        lot: round.milkLotCode,
+        shift: round.shiftNumber,
+        round: round.roundNumber,
+        batch: productionBatchCode(round),
+        recordedKg: recorded,
+        bucketCount: round.creamBucketWeights?.length || 0,
+        bucketTotalKg: bucketTotal,
+        varianceKg: recorded - bucketTotal,
+        bucketWeights: (round.creamBucketWeights || []).map(value => value.toFixed(2)).join(', '),
+        recordedBy: round.creamRecoveredBy || '',
+        recordedAt: excelDate(round.creamRecoveredAt),
+      };
+    }),
+  };
+}
+
+function butterSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
+  return {
+    name: 'Butter',
+    title: 'Production Board — Butter Production',
+    metadata,
+    columns: [
+      { key: 'date', header: 'Production Date', width: 17 },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'status', header: 'Status', width: 18 },
+      { key: 'creamSource', header: 'Cream Source', width: 16 },
+      { key: 'creamLot', header: 'Cream Lot / Source Batch', width: 25 },
+      { key: 'creamInputKg', header: 'Cream Input kg', width: 17, numberFormat: '0.00' },
+      { key: 'butterKg', header: 'Butter Output kg', width: 18, numberFormat: '0.00' },
+      { key: 'buttermilkKg', header: 'Buttermilk Output kg', width: 21, numberFormat: '0.00' },
+      { key: 'destination', header: 'Destination', width: 16 },
+      { key: 'pool', header: 'Pool', width: 12 },
+      { key: 'saltKg', header: 'Salt kg', width: 11, numberFormat: '0.00' },
+      { key: 'replacerKg', header: 'Replacer kg', width: 13, numberFormat: '0.00' },
+      { key: 'gheeKg', header: 'Used in Ghee kg', width: 17, numberFormat: '0.00' },
+      { key: 'blendKg', header: 'Blending Input kg', width: 18, numberFormat: '0.00' },
+      { key: 'packedKg', header: 'Packed Butter kg', width: 17, numberFormat: '0.00' },
+      { key: 'remainingKg', header: 'Remaining kg', width: 15, numberFormat: '0.00' },
+      { key: 'team', header: 'Team', width: 22 },
+      { key: 'notes', header: 'Notes', width: 30 },
+    ],
+    rows: sortedRounds(rounds.filter(round => round.type === 'Butter')).map(round => ({
+      date: excelDate(round.roundDate || round.startTime),
+      batch: productionBatchCode(round),
+      status: round.status,
+      creamSource: round.creamSource || '',
+      creamLot: round.creamLotId || round.sourceBatchCode || '',
+      creamInputKg: Math.max(0, round.actualInput || round.plannedInput || 0),
+      butterKg: round.butterOutput || round.outputWeight || 0,
+      buttermilkKg: round.buttermilkOutput || 0,
+      destination: round.destination || '',
+      pool: round.pool || '',
+      saltKg: round.saltQuantity || 0,
+      replacerKg: round.replacerQuantity || 0,
+      gheeKg: round.usedInGhee || 0,
+      blendKg: round.blendingInput || 0,
+      packedKg: round.packedButterWeight || 0,
+      remainingKg: round.remainingBalance ?? '',
+      team: (round.team || []).join(', '),
+      notes: round.notes || '',
+    })),
+  };
+}
+
+function gheeSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
+  return {
+    name: 'Ghee',
+    title: 'Production Board — Ghee Production and Packing',
+    metadata,
+    columns: [
+      { key: 'date', header: 'Production Date', width: 17 },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'source', header: 'Butter Source Batch', width: 25 },
+      { key: 'status', header: 'Status', width: 18 },
+      { key: 'butterKg', header: 'Butter Input kg', width: 17, numberFormat: '0.00' },
+      { key: 'afOilKg', header: 'AF Oil Input kg', width: 17, numberFormat: '0.00' },
+      { key: 'totalInputKg', header: 'Total Input kg', width: 16, numberFormat: '0.00' },
+      { key: 'expectedKg', header: 'Expected Yield kg', width: 18, numberFormat: '0.00' },
+      { key: 'outputKg', header: 'Ghee Output kg', width: 17, numberFormat: '0.00' },
+      { key: 'packedCases', header: 'Packed Cases', width: 14, numberFormat: '0' },
+      { key: 'packedLoose', header: 'Packed Loose', width: 14, numberFormat: '0' },
+      { key: 'packedKg', header: 'Packed Weight kg', width: 18, numberFormat: '0.00' },
+      { key: 'remainingKg', header: 'Remaining kg', width: 15, numberFormat: '0.00' },
+      { key: 'team', header: 'Team', width: 22 },
+      { key: 'notes', header: 'Notes', width: 30 },
+    ],
+    rows: sortedRounds(rounds.filter(round => round.type === 'Ghee')).map(round => ({
+      date: excelDate(round.roundDate || round.startTime),
+      batch: productionBatchCode(round),
+      source: round.sourceBatchCode || '',
+      status: round.status,
+      butterKg: round.butterInput || round.actualInput || 0,
+      afOilKg: round.afOilInput || 0,
+      totalInputKg: getGheeRoundInput(round),
+      expectedKg: round.expectedYield || 0,
+      outputKg: round.outputWeight || 0,
+      packedCases: (round.packedSkus || []).reduce((total, pack) => total + Math.max(0, pack.cases || 0), 0),
+      packedLoose: (round.packedSkus || []).reduce((total, pack) => total + Math.max(0, pack.loose || 0), 0),
+      packedKg: (round.packedSkus || []).reduce((total, pack) => total + packWeight(pack), 0),
+      remainingKg: round.remainingBalance ?? '',
+      team: (round.team || []).join(', '),
+      notes: round.notes || '',
+    })),
+  };
+}
+
+function halloumiSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
+  return {
+    name: 'Halloumi',
+    title: 'Production Board — Halloumi Production',
+    metadata,
+    columns: [
+      { key: 'lot', header: 'Milk Lot', width: 14 },
+      { key: 'shift', header: 'Shift', width: 9 },
+      { key: 'round', header: 'Round', width: 9 },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'status', header: 'Status', width: 18 },
+      { key: 'milkInputL', header: 'Milk Input L', width: 15, numberFormat: '0.00' },
+      { key: 'outputKg', header: 'Halloumi Output kg', width: 20, numberFormat: '0.00' },
+      { key: 'vacuumedKg', header: 'Vacuumed / Chiller kg', width: 22, numberFormat: '0.00' },
+      { key: 'remainingKg', header: 'Remaining kg', width: 15, numberFormat: '0.00' },
+      { key: 'curdSetting', header: 'Curd Setting Started', width: 22 },
+      { key: 'curdCutting', header: 'Curd Cutting Started', width: 22 },
+      { key: 'completed', header: 'Completed At', width: 21 },
+      { key: 'team', header: 'Team', width: 22 },
+      { key: 'notes', header: 'Notes', width: 30 },
+    ],
+    rows: sortedRounds(rounds.filter(round => round.type === 'Halloumi')).map(round => ({
+      lot: round.milkLotCode,
+      shift: round.shiftNumber,
+      round: round.roundNumber,
+      batch: productionBatchCode(round),
+      status: round.status,
+      milkInputL: getRoundMilkInput(round),
+      outputKg: round.outputWeight || 0,
+      vacuumedKg: round.vacuumPackedWeight || 0,
+      remainingKg: round.remainingBalance ?? '',
+      curdSetting: excelDate(round.curdSettingStartedAt),
+      curdCutting: excelDate(round.curdCuttingStartedAt),
+      completed: excelDate(round.completedAt),
+      team: (round.team || []).join(', '),
+      notes: round.notes || '',
+    })),
+  };
+}
+
+function amassiSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
+  return {
+    name: 'Amassi',
+    title: 'Production Board — Amassi Production and Packing',
+    metadata,
+    columns: [
+      { key: 'lot', header: 'Milk Lot', width: 14 },
+      { key: 'shift', header: 'Shift', width: 9 },
+      { key: 'round', header: 'Round', width: 9 },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'type', header: 'Amassi Type', width: 14 },
+      { key: 'status', header: 'Status', width: 18 },
+      { key: 'milkInputL', header: 'Milk Input L', width: 15, numberFormat: '0.00' },
+      { key: 'incubation', header: 'Incubation Started', width: 22 },
+      { key: 'phBeforeFreeze', header: 'pH Before Freezing', width: 19, numberFormat: '0.00' },
+      { key: 'finalPh', header: 'Final pH', width: 12, numberFormat: '0.00' },
+      { key: 'bottles18', header: '1.8 L Bottles', width: 15, numberFormat: '0' },
+      { key: 'bottles2', header: '2 L Bottles', width: 14, numberFormat: '0' },
+      { key: 'totalBottles', header: 'Total Bottles', width: 15, numberFormat: '0' },
+      { key: 'team', header: 'Team', width: 22 },
+      { key: 'notes', header: 'Notes', width: 30 },
+    ],
+    rows: sortedRounds(rounds.filter(round => round.type === 'Amassi')).map(round => {
+      const bottles18 = (round.amassiPacked || []).filter(pack => pack.sku === 'AMASSI 1.8L').reduce((total, pack) => total + pack.bottles, 0);
+      const bottles2 = (round.amassiPacked || []).filter(pack => pack.sku === 'AMASSI 2L').reduce((total, pack) => total + pack.bottles, 0);
+      return {
+        lot: round.milkLotCode,
+        shift: round.shiftNumber,
+        round: round.roundNumber,
+        batch: productionBatchCode(round),
+        type: round.amassiType || '',
+        status: round.status,
+        milkInputL: getRoundMilkInput(round),
+        incubation: excelDate(round.amassiIncubationStartedAt),
+        phBeforeFreeze: round.amassiPhBeforeFreezing ?? '',
+        finalPh: round.amassiFinalPh ?? '',
+        bottles18,
+        bottles2,
+        totalBottles: bottles18 + bottles2,
+        team: (round.team || []).join(', '),
+        notes: round.notes || '',
+      };
+    }),
+  };
 }
 
 function packWeight(pack: { sku: string; cases: number; loose?: number; looseWeightKg?: number; weightKg?: number }) {
@@ -416,13 +748,13 @@ function crumbingSheets(batches: CrumbingBatchExportRecord[]): ExcelSheet[] {
   return [overview, ingredients, packed, jpBuckets];
 }
 
-export async function exportProductionBoardWorkbook(input: {
+export function buildProductionBoardWorkbook(input: {
   lot: MilkLot;
   shifts: ProductionShift[];
   rounds: ProductionRound[];
   cipRecords: CipRecord[];
   crumbingBatches?: CrumbingBatchExportRecord[];
-}) {
+}): ExcelWorkbookExport {
   const { lot } = input;
   const lotRounds = input.rounds.filter(round => round.milkLotId === lot.id || round.milkLotCode === lot.lotCode);
   const lotShifts = input.shifts.filter(shift => shift.milkLotId === lot.id || shift.milkLotCode === lot.lotCode);
@@ -488,17 +820,28 @@ export async function exportProductionBoardWorkbook(input: {
       notes: record.notes || '',
     })),
   };
-  await exportExcelWorkbook({
+  return {
     filename: `vejoy-production-board-${lot.lotCode}-${exportDateStamp()}.xlsx`,
     sheets: [
-      shiftSheet,
+      productionSummarySheet(lotRounds, metadata),
       roundLedgerSheet(lotRounds, `Production Board — Round Ledger — Lot ${lot.lotCode}`, metadata),
+      cuttingSheet(lotRounds, metadata),
       packingSheet(lotRounds, `Production Board — Packed SKUs — Lot ${lot.lotCode}`, metadata),
       measurementSheet(lotRounds, metadata),
-      cipSheet,
+      creamSheet(lotRounds, metadata),
+      butterSheet(lotRounds, metadata),
+      gheeSheet(lotRounds, metadata),
+      halloumiSheet(lotRounds, metadata),
+      amassiSheet(lotRounds, metadata),
       ...crumbingSheets(input.crumbingBatches || []),
+      shiftSheet,
+      cipSheet,
     ],
-  });
+  };
+}
+
+export async function exportProductionBoardWorkbook(input: Parameters<typeof buildProductionBoardWorkbook>[0]) {
+  await exportExcelWorkbook(buildProductionBoardWorkbook(input));
 }
 
 function packedSkuSummary(lot: MilkLot, rounds: ProductionRound[]) {
