@@ -73,30 +73,58 @@ describe('Production Board Excel export', () => {
         id: 'butter',
         roundNumber: 3,
         type: 'Butter',
+        batchCode: 'BUT-011026',
+        sourceBatchCode: 'CREAM-011026',
+        creamSource: 'internal',
         plannedInput: 100,
         actualInput: 100,
         butterOutput: 42,
         buttermilkOutput: 55,
+        usedInGhee: 10,
+        packedButterWeight: 9,
+        packedSkus: [{ sku: 'PUBB', cases: 0, loose: 18 }],
+        remainingBalance: 8,
       }),
       productionRound({
         id: 'ghee',
         roundNumber: 4,
         type: 'Ghee',
+        batchCode: 'GHEE-011026',
         butterInput: 50,
         afOilInput: 12.5,
         outputWeight: 58,
         packedSkus: [{ sku: 'GHEE-400-24', cases: 2, loose: 0 }],
       }),
       productionRound({
-        id: 'halloumi',
+        id: 'butter-blend',
         roundNumber: 5,
+        type: 'Butter',
+        batchCode: 'PUBBB-011026',
+        sourceBatchCode: 'BUT-011026',
+        status: 'pubbb_pool',
+        plannedInput: 15,
+        actualInput: 15,
+        butterOutput: 15,
+        outputWeight: 15,
+        blendingInput: 15,
+        blendingInternalButterQuantity: 15,
+        replacerQuantity: 4.55,
+        pool: 'PUBBB',
+        packedButterWeight: 10,
+        packedSkus: [{ sku: 'PUBBB', cases: 0, loose: 20 }],
+        remainingBalance: 5,
+        blendedPoolId: 'blend-1',
+      }),
+      productionRound({
+        id: 'halloumi',
+        roundNumber: 6,
         type: 'Halloumi',
         outputWeight: 64,
         vacuumPackedWeight: 60,
       }),
       productionRound({
         id: 'amassi',
-        roundNumber: 6,
+        roundNumber: 7,
         type: 'Amassi',
         amassiType: 'BM',
         amassiPhBeforeFreezing: 4.6,
@@ -189,7 +217,25 @@ describe('Production Board Excel export', () => {
     expect(sheet('Paneer').rows[1]).toMatchObject({ creamKg: 33.6, creamBuckets: '16.80, 16.80' });
     expect(sheet('Paneer').sections?.[0].rows).toHaveLength(2);
     expect(sheet('Paneer').sections?.[0].rows[0]).toMatchObject({ sku: 'MPAN100', weightKg: 31 });
-    expect(sheet('Butter').rows[0]).toMatchObject({ creamInputKg: 100, butterKg: 42, buttermilkKg: 55 });
+    expect(sheet('Butter').rows).toHaveLength(1);
+    expect(sheet('Butter').rows[0]).toMatchObject({
+      batch: 'BUT-011026/R3',
+      creamLot: 'CREAM-011026',
+      creamInputKg: 100,
+      butterKg: 42,
+      buttermilkKg: 55,
+      gheeKg: 10,
+      pubbKg: 9,
+      blendKg: 15,
+      remainingKg: 8,
+      accountedKg: 42,
+      varianceKg: 0,
+    });
+    expect(sheet('Butter').sections?.[0].rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ usageType: 'Ghee Production', sourceBatch: 'BUT-011026/R3', butterConsumedKg: 10 }),
+      expect.objectContaining({ usageType: 'Pure Butter Packing', sku: 'PUBB', butterConsumedKg: 9, loose: 18 }),
+      expect.objectContaining({ usageType: 'Blended Butter Production', destinationBatch: 'PUBBB-011026', butterConsumedKg: 15, finishedKg: 10 }),
+    ]));
     expect(sheet('Ghee').rows[0]).toMatchObject({ butterKg: 50, afOilKg: 12.5, totalInputKg: 62.5, outputKg: 58, location: 'Coldroom' });
     expect(sheet('Ghee').sections?.[0].rows[0]).toMatchObject({ sku: 'GHEE-400-24', cases: 2, weightKg: 19.2, location: 'Coldroom' });
     expect(sheet('Halloumi').rows[0]).toMatchObject({ outputKg: 64, vacuumedKg: 60 });

@@ -21,7 +21,7 @@ import {
   paneerSkuByCode,
 } from '../data/skuConfig';
 import { getProductionPackingEntries } from './finishedStock';
-import { excelDate, ExcelSheet, ExcelWorkbookExport, exportDateStamp, exportExcelWorkbook } from './excelExport';
+import { excelDate, ExcelCellValue, ExcelSheet, ExcelWorkbookExport, exportDateStamp, exportExcelWorkbook } from './excelExport';
 import { getMilkLotVesselBalances, getMilkSaleVesselSource } from './milkVesselAllocation';
 
 interface CrumbingBatchExportRecord {
@@ -279,51 +279,328 @@ function creamSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata'])
   };
 }
 
-function butterSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
-  return {
-    name: 'Butter',
-    title: 'Production Board — Butter Production',
-    metadata,
-    columns: [
-      { key: 'date', header: 'Production Date', width: 17 },
-      { key: 'batch', header: 'Batch Code', width: 25 },
-      { key: 'status', header: 'Status', width: 18 },
-      { key: 'creamSource', header: 'Cream Source', width: 16 },
-      { key: 'creamLot', header: 'Cream Lot / Source Batch', width: 25 },
-      { key: 'creamInputKg', header: 'Cream Input kg', width: 17, numberFormat: '0.00' },
-      { key: 'butterKg', header: 'Butter Output kg', width: 18, numberFormat: '0.00' },
-      { key: 'buttermilkKg', header: 'Buttermilk Output kg', width: 21, numberFormat: '0.00' },
-      { key: 'destination', header: 'Destination', width: 16 },
-      { key: 'pool', header: 'Pool', width: 12 },
-      { key: 'saltKg', header: 'Salt kg', width: 11, numberFormat: '0.00' },
-      { key: 'replacerKg', header: 'Replacer kg', width: 13, numberFormat: '0.00' },
-      { key: 'gheeKg', header: 'Used in Ghee kg', width: 17, numberFormat: '0.00' },
-      { key: 'blendKg', header: 'Blending Input kg', width: 18, numberFormat: '0.00' },
-      { key: 'packedKg', header: 'Packed Butter kg', width: 17, numberFormat: '0.00' },
-      { key: 'remainingKg', header: 'Remaining kg', width: 15, numberFormat: '0.00' },
-      { key: 'team', header: 'Team', width: 22 },
-      { key: 'notes', header: 'Notes', width: 30 },
-    ],
-    rows: sortedRounds(rounds.filter(round => round.type === 'Butter')).map(round => ({
+const butterSkuPacking: Record<string, { unitsPerCase: number; unitWeightKg: number }> = {
+  PUBB: { unitsPerCase: 36, unitWeightKg: 0.5 },
+  PUBBB: { unitsPerCase: 36, unitWeightKg: 0.5 },
+  PSBBB: { unitsPerCase: 36, unitWeightKg: 0.5 },
+  BB05: { unitsPerCase: 30, unitWeightKg: 0.5 },
+  BBO5: { unitsPerCase: 30, unitWeightKg: 0.5 },
+};
+
+function butterPackWeight(pack: { sku: string; cases: number; loose?: number; weightKg?: number }) {
+  const definition = butterSkuPacking[normalizeFinishedGoodsSku(pack.sku)];
+  if (!definition) return Math.max(0, pack.weightKg || 0);
+  return Math.round((
+    (Math.max(0, pack.cases || 0) * definition.unitsPerCase + Math.max(0, pack.loose || 0))
+    * definition.unitWeightKg
+    + Number.EPSILON
+  ) * 100) / 100;
+}
+
+function butterBatchCode(round: ProductionRound) {
+  const batch = productionBatchCode(round);
+  return round.batchCode && !/\/R\d+(?:\/|$)/i.test(batch)
+    ? `${batch}/R${round.roundNumber}`
+    : batch;
+}
+
+function isBlendedButterRound(round: ProductionRound) {
+  return Boolean(round.blendedPoolId || (round.blendingInput || 0) > 0);
+}
+
+function packedButterKg(round: ProductionRound) {
+  const packed = (round.packedSkus || []).reduce((total, pack) => total + butterPackWeight(pack), 0);
+  return packed > 0 ? packed : Math.max(0, round.packedButterWeight || 0);
+}
+
+function inferredBlendUseKg(round: ProductionRound) {
+  const produced = Math.max(0, round.butterOutput || round.outputWeight || 0);
+  const remaining = Math.max(0, round.remainingBalance ?? produced);
+  return Math.max(0, produced - Math.max(0, round.usedInGhee || 0) - packedButterKg(round) - remaining);
+}
+
+function butterStockForPacking(
+  round: ProductionRound,
+  packIndex: number,
+  finishedStock: FinishedStockLot[],
+) {
+  const entry = getProductionPackingEntries([round]).find(candidate => candidate.packIndex === packIndex);
+  if (!entry) return undefined;
+  return finishedStock.find(candidate => candidate.packingRunId === entry.packingRunId)
+    || finishedStock.find(candidate =>
+      normalizeFinishedGoodsSku(candidate.sku) === entry.pack.sku
+      && (candidate.sourceBatchCodes || []).includes(entry.sourceBatchCode)
+    );
+}
+
+function butterWorkbookSheet(
+  rounds: ProductionRound[],
+  metadata: ExcelSheet['metadata'],
+  finishedStock: FinishedStockLot[],
+  emptyMessage: string,
+): ExcelSheet {
+  const butterRounds = sortedRounds(rounds.filter(round => round.type === 'Butter'));
+  const sourceRounds = butterRounds.filter(round => !isBlendedButterRound(round));
+  const blendRounds = butterRounds.filter(isBlendedButterRound);
+  const gheeRounds = sortedRounds(rounds.filter(round => round.type === 'Ghee'));
+
+  const summaryColumns = [
+    { key: 'date', header: 'Production Date', width: 17 },
+    { key: 'batch', header: 'Butter Batch', width: 25 },
+    { key: 'creamSource', header: 'Cream Source', width: 16 },
+    { key: 'creamLot', header: 'Source Cream Lot / Batch', width: 27 },
+    { key: 'creamInputKg', header: 'Cream Consumed kg', width: 19, numberFormat: '0.00' },
+    { key: 'butterKg', header: 'Butter Produced kg', width: 19, numberFormat: '0.00' },
+    { key: 'buttermilkKg', header: 'Buttermilk Produced kg', width: 22, numberFormat: '0.00' },
+    { key: 'gheeKg', header: 'Used for Ghee kg', width: 18, numberFormat: '0.00' },
+    { key: 'pubbKg', header: 'Packed as PUBB kg', width: 19, numberFormat: '0.00' },
+    { key: 'blendKg', header: 'Used in Blends kg', width: 19, numberFormat: '0.00' },
+    { key: 'remainingKg', header: 'Butter Remaining kg', width: 20, numberFormat: '0.00' },
+    { key: 'accountedKg', header: 'Total Accounted kg', width: 19, numberFormat: '0.00' },
+    { key: 'varianceKg', header: 'Unrecorded Variance kg', width: 21, numberFormat: '0.00' },
+    { key: 'destination', header: 'Destination / Use', width: 29 },
+    { key: 'location', header: 'Current Location', width: 31 },
+    { key: 'status', header: 'Status', width: 18 },
+    { key: 'team', header: 'Team', width: 22 },
+    { key: 'notes', header: 'Notes', width: 30 },
+  ];
+
+  const summaryRows = sourceRounds.map(round => {
+    const produced = Math.max(0, round.butterOutput || round.outputWeight || 0);
+    const gheeKg = Math.max(0, round.usedInGhee || 0);
+    const pubbKg = packedButterKg(round);
+    const blendKg = inferredBlendUseKg(round);
+    const remainingKg = Math.max(0, round.remainingBalance ?? Math.max(0, produced - gheeKg - pubbKg - blendKg));
+    const accountedKg = gheeKg + pubbKg + blendKg + remainingKg;
+    const packedLocations = [...new Set((round.packedSkus || []).map((_, packIndex) =>
+      butterStockForPacking(round, packIndex, finishedStock)?.storageLocation || 'Dairy Container (Finished Stock)'
+    ))];
+    const uses = [
+      gheeKg > 0 ? 'Ghee' : '',
+      pubbKg > 0 ? 'PUBB' : '',
+      blendKg > 0 ? 'Blending' : '',
+      remainingKg > 0 ? 'Butter pool' : '',
+    ].filter(Boolean);
+    const locations = [
+      remainingKg > 0 ? 'Butter Pool (On Site)' : '',
+      ...packedLocations,
+      remainingKg === 0 && packedLocations.length === 0 ? 'Fully Allocated to Production' : '',
+    ].filter(Boolean);
+    return {
       date: excelDate(round.roundDate || round.startTime),
-      batch: productionBatchCode(round),
-      status: round.status,
+      batch: butterBatchCode(round),
       creamSource: round.creamSource || '',
-      creamLot: round.creamLotId || round.sourceBatchCode || '',
+      creamLot: round.sourceBatchCode || round.creamLotId || '',
       creamInputKg: Math.max(0, round.actualInput || round.plannedInput || 0),
-      butterKg: round.butterOutput || round.outputWeight || 0,
-      buttermilkKg: round.buttermilkOutput || 0,
-      destination: round.destination || '',
-      pool: round.pool || '',
-      saltKg: round.saltQuantity || 0,
-      replacerKg: round.replacerQuantity || 0,
-      gheeKg: round.usedInGhee || 0,
-      blendKg: round.blendingInput || 0,
-      packedKg: round.packedButterWeight || 0,
-      remainingKg: round.remainingBalance ?? '',
+      butterKg: produced,
+      buttermilkKg: Math.max(0, round.buttermilkOutput || 0),
+      gheeKg,
+      pubbKg,
+      blendKg,
+      remainingKg,
+      accountedKg,
+      varianceKg: Math.round((produced - accountedKg + Number.EPSILON) * 100) / 100,
+      destination: uses.join('; '),
+      location: [...new Set(locations)].join('; '),
+      status: round.status,
       team: (round.team || []).join(', '),
       notes: round.notes || '',
-    })),
+    };
+  });
+
+  const usageColumns = [
+    { key: 'date', header: 'Date', width: 17 },
+    { key: 'sourceBatch', header: 'Source Butter Batch', width: 25 },
+    { key: 'usageType', header: 'Usage Type', width: 22 },
+    { key: 'destinationBatch', header: 'Destination Batch', width: 27 },
+    { key: 'sku', header: 'SKU / Resulting SKUs', width: 30 },
+    { key: 'butterConsumedKg', header: 'Butter Consumed kg', width: 20, numberFormat: '0.00' },
+    { key: 'cases', header: 'Cases', width: 11, numberFormat: '0' },
+    { key: 'loose', header: 'Loose Units', width: 13, numberFormat: '0' },
+    { key: 'finishedKg', header: 'Finished Weight kg', width: 20, numberFormat: '0.00' },
+    { key: 'location', header: 'Current Location', width: 31 },
+    { key: 'status', header: 'Status', width: 18 },
+    { key: 'team', header: 'Recorded By / Team', width: 23 },
+    { key: 'notes', header: 'Notes', width: 34 },
+  ];
+
+  const usageRows: Array<Record<string, ExcelCellValue>> = [];
+  const gheeQueue = gheeRounds.map(round => ({
+    round,
+    remainingKg: Math.max(0, round.butterInput || round.actualInput || 0),
+  }));
+  sourceRounds.forEach(source => {
+    let remainingSourceUse = Math.max(0, source.usedInGhee || 0);
+    gheeQueue.forEach(target => {
+      if (remainingSourceUse <= 0 || target.remainingKg <= 0) return;
+      const consumed = Math.min(remainingSourceUse, target.remainingKg);
+      usageRows.push({
+        date: excelDate(target.round.roundDate || target.round.startTime),
+        sourceBatch: butterBatchCode(source),
+        usageType: 'Ghee Production',
+        destinationBatch: productionBatchCode(target.round),
+        sku: 'Ghee',
+        butterConsumedKg: consumed,
+        cases: '',
+        loose: '',
+        finishedKg: '',
+        location: 'Ghee Production',
+        status: target.round.status,
+        team: (target.round.team || []).join(', '),
+        notes: '',
+      });
+      remainingSourceUse -= consumed;
+      target.remainingKg -= consumed;
+    });
+    if (remainingSourceUse > 0) {
+      usageRows.push({
+        date: excelDate(source.roundDate || source.startTime),
+        sourceBatch: butterBatchCode(source),
+        usageType: 'Ghee Production',
+        destinationBatch: 'Ghee batch not linked in historical record',
+        sku: 'Ghee',
+        butterConsumedKg: remainingSourceUse,
+        cases: '',
+        loose: '',
+        finishedKg: '',
+        location: 'Ghee Production',
+        status: source.status,
+        team: (source.team || []).join(', '),
+        notes: 'Butter use is recorded, but the destination ghee batch is not linked.',
+      });
+    }
+  });
+  gheeQueue.forEach(target => {
+    if (target.remainingKg <= 0) return;
+    usageRows.push({
+      date: excelDate(target.round.roundDate || target.round.startTime),
+      sourceBatch: 'Source butter batch not identified',
+      usageType: 'Ghee Production',
+      destinationBatch: productionBatchCode(target.round),
+      sku: 'Ghee',
+      butterConsumedKg: target.remainingKg,
+      cases: '',
+      loose: '',
+      finishedKg: '',
+      location: 'Ghee Production',
+      status: target.round.status,
+      team: (target.round.team || []).join(', '),
+      notes: 'The ghee input is recorded, but its source butter batch is not linked.',
+    });
+  });
+
+  sourceRounds.forEach(round => {
+    (round.packedSkus || []).forEach((pack, packIndex) => {
+      if (normalizeFinishedGoodsSku(pack.sku) !== 'PUBB') return;
+      const stock = butterStockForPacking(round, packIndex, finishedStock);
+      const weightKg = butterPackWeight(pack);
+      usageRows.push({
+        date: excelDate(stock?.createdAt || round.completedAt || round.startTime),
+        sourceBatch: butterBatchCode(round),
+        usageType: 'Pure Butter Packing',
+        destinationBatch: stock?.finishedGoodsBatchCode || productionBatchCode(round),
+        sku: 'PUBB',
+        butterConsumedKg: weightKg,
+        cases: Math.max(0, pack.cases || 0),
+        loose: Math.max(0, pack.loose || 0),
+        finishedKg: weightKg,
+        location: stock?.storageLocation || 'Dairy Container (Finished Stock)',
+        status: stock?.status || round.status,
+        team: (round.team || []).join(', '),
+        notes: '',
+      });
+    });
+  });
+
+  (['internal', 'external'] as const).forEach(origin => {
+    const sourceQueue = sourceRounds
+      .filter(round => (round.creamSource || 'internal') === origin)
+      .map(round => ({ round, remainingKg: inferredBlendUseKg(round) }));
+    blendRounds.forEach(blend => {
+      let remainingBlendInput = Math.max(0, origin === 'internal'
+        ? blend.blendingInternalButterQuantity || 0
+        : blend.blendingExternalButterQuantity || 0);
+      const packs = blend.packedSkus || [];
+      const packedSummary = packs.map(pack => `${normalizeFinishedGoodsSku(pack.sku)}: ${pack.cases || 0} cs${pack.loose ? ` + ${pack.loose} loose` : ''}`).join('; ');
+      const locations = [...new Set(packs.map((_, packIndex) =>
+        butterStockForPacking(blend, packIndex, finishedStock)?.storageLocation || 'Dairy Container (Finished Stock)'
+      ))].join('; ');
+      sourceQueue.forEach(source => {
+        if (remainingBlendInput <= 0 || source.remainingKg <= 0) return;
+        const consumed = Math.min(remainingBlendInput, source.remainingKg);
+        usageRows.push({
+          date: excelDate(blend.roundDate || blend.startTime),
+          sourceBatch: butterBatchCode(source.round),
+          usageType: 'Blended Butter Production',
+          destinationBatch: productionBatchCode(blend),
+          sku: packedSummary || blend.pool || '',
+          butterConsumedKg: consumed,
+          cases: packs.reduce((total, pack) => total + Math.max(0, pack.cases || 0), 0),
+          loose: packs.reduce((total, pack) => total + Math.max(0, pack.loose || 0), 0),
+          finishedKg: packs.reduce((total, pack) => total + butterPackWeight(pack), 0),
+          location: locations || (Math.max(0, blend.remainingBalance || 0) > 0 ? 'Blended Butter Pool (On Site)' : 'Fully Packed / Allocated'),
+          status: blend.status,
+          team: (blend.team || []).join(', '),
+          notes: [
+            blend.replacerQuantity ? `Replacer: ${blend.replacerQuantity.toFixed(2)} kg` : '',
+            blend.saltQuantity ? `Salt: ${blend.saltQuantity.toFixed(3)} kg` : '',
+          ].filter(Boolean).join('; '),
+        });
+        remainingBlendInput -= consumed;
+        source.remainingKg -= consumed;
+      });
+      if (remainingBlendInput > 0) {
+        usageRows.push({
+          date: excelDate(blend.roundDate || blend.startTime),
+          sourceBatch: `${origin} butter source not linked`,
+          usageType: 'Blended Butter Production',
+          destinationBatch: productionBatchCode(blend),
+          sku: packedSummary || blend.pool || '',
+          butterConsumedKg: remainingBlendInput,
+          cases: packs.reduce((total, pack) => total + Math.max(0, pack.cases || 0), 0),
+          loose: packs.reduce((total, pack) => total + Math.max(0, pack.loose || 0), 0),
+          finishedKg: packs.reduce((total, pack) => total + butterPackWeight(pack), 0),
+          location: locations || 'Blended Butter Pool (On Site)',
+          status: blend.status,
+          team: (blend.team || []).join(', '),
+          notes: 'The blend quantity is recorded, but its source butter batch is not linked.',
+        });
+      }
+    });
+    sourceQueue.forEach(source => {
+      if (source.remainingKg <= 0) return;
+      usageRows.push({
+        date: excelDate(source.round.roundDate || source.round.startTime),
+        sourceBatch: butterBatchCode(source.round),
+        usageType: 'Blended Butter Production',
+        destinationBatch: 'Blend batch not linked in historical record',
+        sku: '',
+        butterConsumedKg: source.remainingKg,
+        cases: '',
+        loose: '',
+        finishedKg: '',
+        location: 'Blending',
+        status: source.round.status,
+        team: (source.round.team || []).join(', '),
+        notes: 'Butter was deducted for blending, but the destination blend batch is not linked.',
+      });
+    });
+  });
+
+  return {
+    name: 'Butter',
+    title: 'Production Board — Butter Production and Usage',
+    metadata: summaryRows.length
+      ? [...(metadata || []), ['Accounting basis', 'Butter remaining = produced − ghee use − PUBB packing − blending use']]
+      : [...(metadata || []), ['Record status', emptyMessage]],
+    tableTitle: 'Butter Batch Summary — one row per butter production batch',
+    columns: summaryColumns,
+    rows: summaryRows.length ? summaryRows : [{ date: emptyMessage }],
+    sections: [{
+      title: 'Butter Usage Ledger — one row per use or destination',
+      columns: usageColumns,
+      rows: usageRows.length ? usageRows : [{ date: 'No butter use has been recorded' }],
+    }],
   };
 }
 
@@ -1041,7 +1318,7 @@ export function buildProductionBoardWorkbook(input: {
     filename: `vejoy-production-board-${lot.lotCode}-${exportDateStamp()}.xlsx`,
     sheets: [
       paneerWorkbookSheet(paneerRounds, metadata, finishedStock, `No paneer rounds recorded for milk lot ${lot.lotCode}`),
-      withNoRecords(butterSheet(lotRounds, metadata), `No butter production recorded for milk lot ${lot.lotCode}`),
+      butterWorkbookSheet(lotRounds, metadata, finishedStock, `No butter production recorded for milk lot ${lot.lotCode}`),
       gheeWorkbookSheet(lotRounds, metadata, finishedStock, `No ghee production recorded for milk lot ${lot.lotCode}`),
       withNoRecords(halloumiSheet(lotRounds, metadata), `No Halloumi production recorded for milk lot ${lot.lotCode}`),
       withNoRecords(amassiSheet(lotRounds, metadata), `No Amassi production recorded for milk lot ${lot.lotCode}`),
