@@ -28,6 +28,7 @@ import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipCheckl
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { exportProductionBoardWorkbook } from '../lib/operationalExports';
+import { buildProductionRoundHistory, formatRoundHistoryTime } from '../lib/productionRoundHistory';
 import HalloumiTab from './HalloumiTab';
 import AmassiTab from './AmassiTab';
 import ButterTab from './ButterTab';
@@ -91,7 +92,7 @@ export default function ProductionBoard() {
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots, finishedStock,
     cipRecords,
-    advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
+    advanceRoundStatus, updateProductionRound, recordProductionRoundActivity, addProductionRound, createProductionRound,
     addProductionShift, updateProductionShift, addIntermediateLot, updateIntermediateLot,
     cancelProductionRound, addWasteEvent, requestProductionRoundTypeChange, reviewProductionRoundTypeChange,
     addFinishedStock, updateFinishedStock, addCipRecord, updateCipRecord
@@ -100,6 +101,9 @@ export default function ProductionBoard() {
   const [crumbingBatches, setCrumbingBatches] = useSupabaseState<CrumbingBatch[]>('vejoy_crumbingBatches', []);
   const [isExporting, setIsExporting] = useState(false);
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
+  const currentActor = typeof window === 'undefined'
+    ? 'System'
+    : window.localStorage.getItem('vejoy_user_username') || currentRole || 'User';
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
   const canRequestTypeChange = ['staff', 'admin', 'owner'].includes(currentRole);
   const canEditCream = canForceStage;
@@ -355,11 +359,19 @@ export default function ProductionBoard() {
     const round = productionRounds.find(r => r.id === selectedRound);
     if (!round) return;
 
-    updateProductionRound(selectedRound, { 
+    const occurredAt = new Date().toISOString();
+    recordProductionRoundActivity(selectedRound, {
       vat: selectedVat,
       status: 'in_production',
       actualInput: round.plannedInput,
       startingTemperature: startingTemperature
+    }, {
+      type: 'in_production',
+      stage: 'In Production',
+      occurredAt,
+      details: `${selectedVat === 'vat2' ? 'Vat 2' : 'Vat 3'} · Starting temp: ${startingTemperature}°C · ${round.plannedInput} L`,
+      recordedBy: currentActor,
+      source: 'workflow',
     });
     showToast('success', `Started production in ${selectedVat === 'vat2' ? 'Vat 2' : 'Vat 3'} at ${startingTemperature}°C`);
     setShowTemperatureModal(false);
@@ -368,37 +380,55 @@ export default function ProductionBoard() {
   };
 
   const handleStartCoagulation = (roundId: string) => {
-    updateProductionRound(roundId, { status: 'coagulation' });
+    recordProductionRoundActivity(roundId, { status: 'coagulation' }, {
+      type: 'coagulation', stage: 'Coagulation', details: 'Coagulation started', recordedBy: currentActor, source: 'workflow',
+    });
     showToast('success', 'Started coagulation');
   };
 
   const handleStartPressing = (roundId: string) => {
-    updateProductionRound(roundId, { 
+    const occurredAt = new Date().toISOString();
+    recordProductionRoundActivity(roundId, {
       status: 'pressing',
-      pressingStartedAt: new Date().toISOString()
+      pressingStartedAt: occurredAt
+    }, {
+      type: 'pressing', stage: 'Pressing', occurredAt, details: '30 min timer started', recordedBy: currentActor, source: 'workflow',
     });
     showToast('success', 'Started pressing (30 min)');
   };
 
   const handleStartCooling = (roundId: string, location: 'tank' | 'chiller') => {
-    updateProductionRound(roundId, { 
+    const occurredAt = new Date().toISOString();
+    recordProductionRoundActivity(roundId, {
       coolingLocation: location,
       status: 'cooling',
-      coolingStartedAt: new Date().toISOString()
+      coolingStartedAt: occurredAt
+    }, {
+      type: 'cooling',
+      stage: 'Cooling',
+      occurredAt,
+      details: location === 'tank' ? 'Cooling Tank · 90 min' : 'Chiller · 120 min',
+      recordedBy: currentActor,
+      source: 'workflow',
     });
     showToast('success', `Started cooling in ${location === 'tank' ? 'Cooling Tank (90min)' : 'Chiller (120min)'}`);
   };
 
   const handleStartResting = (roundId: string) => {
-    updateProductionRound(roundId, { 
+    const occurredAt = new Date().toISOString();
+    recordProductionRoundActivity(roundId, {
       status: 'resting',
-      restingStartedAt: new Date().toISOString()
+      restingStartedAt: occurredAt
+    }, {
+      type: 'resting', stage: 'Resting', occurredAt, details: '90 min timer started', recordedBy: currentActor, source: 'workflow',
     });
     showToast('success', 'Started resting (90min)');
   };
 
   const handleReadyForCutting = (roundId: string) => {
-    updateProductionRound(roundId, { status: 'ready_cutting' });
+    recordProductionRoundActivity(roundId, { status: 'ready_cutting' }, {
+      type: 'ready_cutting', stage: 'Ready for Cutting', details: 'Paneer confirmed ready to cut', recordedBy: currentActor, source: 'workflow',
+    });
     showToast('success', 'Ready for cutting');
   };
 
@@ -439,13 +469,19 @@ export default function ProductionBoard() {
         showToast('error', 'Enter cutter, block count, and block weights for SPP');
         return;
       }
-      updateProductionRound(roundId, {
+      recordProductionRoundActivity(roundId, {
         status: 'spp_pending',
         cutBy: cutForm.cutBy,
         numberOfBlocks: cutForm.numberOfBlocks,
         blockWeights: cutForm.blockWeights,
         outputWeight: totalWeight,
         cuttingType: 'SPP pieces',
+      }, {
+        type: 'cut',
+        stage: 'Cut for SPP',
+        details: `${cutForm.numberOfBlocks} blocks · ${totalWeight.toFixed(2)} kg · By ${cutForm.cutBy}`,
+        recordedBy: currentActor,
+        source: 'workflow',
       });
       setSppForm({ cutBy: cutForm.cutBy, numberOfBlocks: cutForm.numberOfBlocks, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 });
       setShowCutModal(false);
@@ -456,7 +492,8 @@ export default function ProductionBoard() {
     const isClingwrapStorage = cutForm.cuttingType === 'Clingwrapped / Stored';
     const isFinalCutAfterStorage = round.status === 'clingwrapped';
     if (isClingwrapStorage) {
-      updateProductionRound(roundId, {
+      const occurredAt = new Date().toISOString();
+      recordProductionRoundActivity(roundId, {
         status: 'clingwrapped',
         cutBy: cutForm.cutBy,
         cuttingType: 'Clingwrapped / Stored',
@@ -468,7 +505,14 @@ export default function ProductionBoard() {
         storedNumberOfBlocks: cutForm.numberOfBlocks,
         storedBlockWeights: cutForm.blockWeights,
         storedOutputWeight: totalWeight,
-        clingwrappedAt: new Date().toISOString(),
+        clingwrappedAt: occurredAt,
+      }, {
+        type: 'clingwrapped',
+        stage: 'Clingwrapped / Stored',
+        occurredAt,
+        details: `${cutForm.numberOfBlocks} blocks · ${totalWeight.toFixed(2)} kg · By ${cutForm.cutBy}`,
+        recordedBy: currentActor,
+        source: 'workflow',
       });
       showToast('success', `Stored ${cutForm.numberOfBlocks} clingwrapped blocks (${totalWeight.toFixed(2)} kg)`);
       setShowCutModal(false);
@@ -476,7 +520,7 @@ export default function ProductionBoard() {
       return;
     }
     
-    updateProductionRound(roundId, {
+    recordProductionRoundActivity(roundId, {
       status: 'cut',
       cutBy: cutForm.cutBy,
       cuttingType: cutForm.cuttingType,
@@ -491,6 +535,12 @@ export default function ProductionBoard() {
         storedCutBy: round.storedCutBy || round.cutBy,
         storedOutputWeight: round.storedOutputWeight || round.outputWeight,
       } : {}),
+    }, {
+      type: 'cut',
+      stage: isFinalCutAfterStorage ? 'Final Cut' : 'Cut',
+      details: `${cutForm.cuttingType} · ${cutForm.numberOfBlocks} blocks · ${totalWeight.toFixed(2)} kg · By ${cutForm.cutBy}`,
+      recordedBy: currentActor,
+      source: 'workflow',
     });
 
     showToast('success', `Cut recorded: ${cutForm.numberOfBlocks} blocks, ${totalWeight.toFixed(2)} kg`);
@@ -511,7 +561,7 @@ export default function ProductionBoard() {
       showToast('error', 'Record how the balance Paneer was used');
       return;
     }
-    updateProductionRound(roundId, {
+    recordProductionRoundActivity(roundId, {
       status: 'cut',
       cutBy: sppForm.cutBy,
       numberOfBlocks: sppForm.numberOfBlocks,
@@ -522,6 +572,12 @@ export default function ProductionBoard() {
       balancePaneerWeight: Math.max(0, balance),
       balanceDisposition: balance > 0 ? sppForm.balanceDisposition : undefined,
       balanceDispositionWeight: balance > 0 ? balance : undefined,
+    }, {
+      type: 'spp_weight_recorded',
+      stage: 'SPP Weight Recorded',
+      details: `${sppForm.recordedWeight.toFixed(2)} kg for SPP · ${Math.max(0, balance).toFixed(2)} kg balance · By ${sppForm.cutBy}`,
+      recordedBy: currentActor,
+      source: 'workflow',
     });
     setShowSppModal(false);
     showToast('success', `Recorded ${sppForm.recordedWeight.toFixed(2)} kg for SPP`);
@@ -549,7 +605,7 @@ export default function ProductionBoard() {
       return;
     }
     const reportedAt = new Date().toISOString();
-    updateProductionRound(roundId, {
+    recordProductionRoundActivity(roundId, {
       status: 'spoilage_pending',
       locked: false,
       spoilageApprovalStatus: 'pending',
@@ -560,6 +616,13 @@ export default function ProductionBoard() {
       spoilageReportedBy: spoilageForm.reportedBy.trim(),
       spoilageReportedAt: reportedAt,
       spoilagePreviousStatus: round.status,
+    }, {
+      type: 'spoilage_reported',
+      stage: 'Spoilage Reported',
+      occurredAt: reportedAt,
+      details: `${spoilageForm.quantity.toFixed(2)} ${spoilageForm.unit} · ${spoilageForm.reason.trim()} · Reported by ${spoilageForm.reportedBy.trim()}`,
+      recordedBy: spoilageForm.reportedBy.trim(),
+      source: 'workflow',
     });
     setShowSpoilageModal(false);
     setSpoilageForm({ quantity: 0, unit: 'kg', reason: '', notes: '', reportedBy: '' });
@@ -582,13 +645,17 @@ export default function ProductionBoard() {
       batchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}`,
       isRecoverable: false,
     });
-    updateProductionRound(roundId, {
+    recordProductionRoundActivity(roundId, {
       status: 'spoiled',
       locked: true,
       completedAt: approvedAt,
       spoilageApprovalStatus: 'approved',
       spoilageApprovedAt: approvedAt,
       spoilageApprovedBy: currentRole,
+    }, {
+      type: 'spoilage_approved', stage: 'Spoilage Approved', occurredAt: approvedAt,
+      details: `${quantity.toFixed(2)} ${round.spoilageUnit || 'kg'} · ${round.spoilageReason || 'No reason recorded'}`,
+      recordedBy: currentActor, source: 'approval',
     });
     showToast('success', `${roundDisplayCode(round)} spoilage approved and recorded in Waste & Yield`);
   };
@@ -597,23 +664,32 @@ export default function ProductionBoard() {
     if (!isOwner) return;
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.spoilageApprovalStatus !== 'pending') return;
-    updateProductionRound(roundId, {
+    const rejectedAt = new Date().toISOString();
+    recordProductionRoundActivity(roundId, {
       status: round.spoilagePreviousStatus || 'resting',
       locked: false,
       spoilageApprovalStatus: 'rejected',
-      spoilageRejectedAt: new Date().toISOString(),
+      spoilageRejectedAt: rejectedAt,
       spoilageRejectedBy: currentRole,
+    }, {
+      type: 'spoilage_rejected', stage: 'Spoilage Rejected', occurredAt: rejectedAt,
+      details: `Round returned to ${statusLabels[round.spoilagePreviousStatus || 'resting'] || round.spoilagePreviousStatus || 'Resting'}`,
+      recordedBy: currentActor, source: 'approval',
     });
     showToast('success', `${roundDisplayCode(round)} spoilage rejected; round returned to its previous stage`);
   };
 
   const handleFreeze = (roundId: string) => {
-    updateProductionRound(roundId, { status: 'frozen' });
+    recordProductionRoundActivity(roundId, { status: 'frozen' }, {
+      type: 'frozen', stage: 'Frozen', details: 'Moved to freezer', recordedBy: currentActor, source: 'workflow',
+    });
     showToast('success', 'Moved to freezer');
   };
 
   const handleStoreInChiller = (roundId: string) => {
-    updateProductionRound(roundId, { status: 'chiller_storage' });
+    recordProductionRoundActivity(roundId, { status: 'chiller_storage' }, {
+      type: 'chiller_storage', stage: 'Chiller Storage', details: 'Restaurant blocks stored fresh in the chiller', recordedBy: currentActor, source: 'workflow',
+    });
     showToast('success', 'Restaurant blocks stored in chiller');
   };
 
@@ -648,14 +724,19 @@ export default function ProductionBoard() {
         showToast('error', `PAN111 weight cannot exceed the available balance of ${currentBalance.toFixed(2)} kg`);
         return;
       }
-      updateProductionRound(roundId, {
+      const occurredAt = new Date().toISOString();
+      recordProductionRoundActivity(roundId, {
         status: 'pan111_pending',
         locked: false,
         pan111ApprovalStatus: 'pending',
         pan111ApprovalReason: packForm.reason.trim(),
         pan111RequestedWeight: totalWeightPacked,
         pan111PreviousStatus: round.status,
-        pan111ApprovalRequestedAt: new Date().toISOString(),
+        pan111ApprovalRequestedAt: occurredAt,
+      }, {
+        type: 'pan111_requested', stage: 'PAN111 Requested', occurredAt,
+        details: `${totalWeightPacked.toFixed(2)} kg · ${packForm.reason.trim()}`,
+        recordedBy: currentActor, source: 'workflow',
       });
       setShowPackModal(false);
       setPackForm(emptyPackForm);
@@ -718,10 +799,21 @@ export default function ProductionBoard() {
       addFinishedStock(finishedStockInput);
     }
 
-    updateProductionRound(roundId, {
+    const packingDetails = definition.packMode === 'weight_only'
+      ? `${packForm.sku} · ${totalWeightPacked.toFixed(2)} kg`
+      : definition.packMode === 'weight_loose'
+        ? `${packForm.sku} · ${packForm.cases} cases + ${packForm.looseWeightKg.toFixed(2)} kg loose`
+        : `${packForm.sku} · ${packForm.cases} cases + ${packForm.loose} loose`;
+    recordProductionRoundActivity(roundId, {
       status: newStatus,
       packedSkus: newPackedSkus,
       remainingBalance: newBalance,
+    }, {
+      type: editingPackIndex !== null ? 'packing_corrected' : 'packing_recorded',
+      stage: editingPackIndex !== null ? 'Packing Corrected' : 'Packing Recorded',
+      details: `${packingDetails} · Balance ${newBalance.toFixed(2)} kg`,
+      recordedBy: currentActor,
+      source: editingPackIndex !== null ? 'correction' : 'workflow',
     });
 
     if (newBalance < 0) {
@@ -752,10 +844,13 @@ export default function ProductionBoard() {
       sourceMilkLotCode: round.milkLotCode, sourceShift: round.shiftNumber, sourceRound: round.roundNumber,
       qualityClass: 'round_recovered', shelfLifeDays: 7, useByDate: useByDate.toISOString(), priorityUse: true,
     });
-    updateProductionRound(roundId, {
+    recordProductionRoundActivity(roundId, {
       status: 'packed', locked: true, packedSkus, remainingBalance: 0,
       pan111ApprovalStatus: 'approved', pan111ApprovedAt: now.toISOString(), pan111ApprovedBy: currentRole,
       pan111RequestedWeight: undefined, pan111PreviousStatus: undefined,
+    }, {
+      type: 'pan111_approved', stage: 'PAN111 Approved', occurredAt: now.toISOString(),
+      details: `${weight.toFixed(2)} kg approved for priority use`, recordedBy: currentActor, source: 'approval',
     });
     showToast('success', `PAN111 approved: ${weight.toFixed(2)} kg is now available for priority use`);
   };
@@ -763,10 +858,14 @@ export default function ProductionBoard() {
   const handleRejectPan111 = (roundId: string) => {
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.pan111ApprovalStatus !== 'pending') return;
-    updateProductionRound(roundId, {
+    const rejectedAt = new Date().toISOString();
+    recordProductionRoundActivity(roundId, {
       status: round.pan111PreviousStatus || 'cut', locked: false, pan111ApprovalStatus: 'rejected',
-      pan111RejectedAt: new Date().toISOString(), pan111RejectedBy: currentRole,
+      pan111RejectedAt: rejectedAt, pan111RejectedBy: currentRole,
       pan111RequestedWeight: undefined, pan111PreviousStatus: undefined,
+    }, {
+      type: 'pan111_rejected', stage: 'PAN111 Rejected', occurredAt: rejectedAt,
+      details: 'Balance returned to normal Paneer packing or SPP routing', recordedBy: currentActor, source: 'approval',
     });
     showToast('success', 'PAN111 request rejected. The balance is available for normal paneer packing or SPP routing.');
   };
@@ -833,11 +932,19 @@ export default function ProductionBoard() {
     const weightDelta = roundToTwo(totalWeight - previousWeight);
     const recoveredBy = creamForm.recordedBy.trim() || round.creamRecoveredBy;
 
-    updateProductionRound(selectedRound, {
+    const occurredAt = new Date().toISOString();
+    recordProductionRoundActivity(selectedRound, {
       creamRecovered: totalWeight,
       creamBucketWeights: roundedBucketWeights,
-      creamRecoveredAt: new Date().toISOString(),
+      creamRecoveredAt: occurredAt,
       creamRecoveredBy: recoveredBy,
+    }, {
+      type: isEditing ? 'cream_corrected' : 'cream_recorded',
+      stage: isEditing ? 'Cream Recovery Corrected' : 'Cream Recovered',
+      occurredAt,
+      details: `${totalWeight.toFixed(2)} kg · ${roundedBucketWeights.length} buckets${isEditing ? ` · Previously ${previousWeight.toFixed(2)} kg` : ''}`,
+      recordedBy: recoveredBy || currentActor,
+      source: isEditing ? 'correction' : 'workflow',
     });
 
     // Also create or update the intermediate cream lot. Editing a recovery
@@ -1298,7 +1405,14 @@ export default function ProductionBoard() {
       stageUpdates.coolingStartedAt = undefined;
     }
     if (nextStatus === 'resting') stageUpdates.restingStartedAt = now;
-    updateProductionRound(roundId, stageUpdates);
+    recordProductionRoundActivity(roundId, stageUpdates, {
+      type: 'stage_override',
+      stage: 'Stage Override',
+      occurredAt: now,
+      details: `${statusLabels[round.status] || round.status} → ${statusLabels[nextStatus] || nextStatus}`,
+      recordedBy: currentActor,
+      source: 'override',
+    });
     showToast('success', `Stage changed to ${statusLabels[nextStatus] || nextStatus}`);
   };
 
@@ -1325,11 +1439,19 @@ export default function ProductionBoard() {
     }
     const totalWeight = blockWeightsDraft.reduce((sum, weight) => sum + weight, 0);
     const sppBalance = round.sppRecordedWeight !== undefined ? Math.max(0, totalWeight - round.sppRecordedWeight) : undefined;
-    updateProductionRound(blockWeightsRoundId, {
+    const previousBlockCount = round.numberOfBlocks || round.blockWeights?.length || 0;
+    const previousTotalWeight = (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
+    recordProductionRoundActivity(blockWeightsRoundId, {
       blockWeights: blockWeightsDraft,
       numberOfBlocks: blockWeightsDraft.length,
       outputWeight: totalWeight,
       ...(sppBalance !== undefined ? { balancePaneerWeight: sppBalance, remainingBalance: sppBalance } : {}),
+    }, {
+      type: 'block_weights_corrected',
+      stage: 'Block Count / Weights Corrected',
+      details: `${previousBlockCount} blocks / ${previousTotalWeight.toFixed(2)} kg → ${blockWeightsDraft.length} blocks / ${totalWeight.toFixed(2)} kg`,
+      recordedBy: currentActor,
+      source: 'correction',
     });
     setBlockWeightsRoundId(null);
     showToast('success', `Corrected to ${blockWeightsDraft.length} blocks (${totalWeight.toFixed(2)} kg)`);
@@ -2485,141 +2607,7 @@ export default function ProductionBoard() {
           const round = productionRounds.find(r => r.id === historyRoundId);
           if (!round) return <div className="text-slate-500">Round not found</div>;
           
-          const history: { stage: string; time: string; details: string }[] = [];
-          
-          // Build history based on round data
-          history.push({
-            stage: 'Scheduled',
-            time: new Date(round.startTime).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-            details: `Round created for ${round.plannedInput}L`
-          });
-
-          if (round.typeChangeRequest) {
-            const request = round.typeChangeRequest;
-            history.push({
-              stage: `Type-change request ${request.status}`,
-              time: request.decidedAt || request.requestedAt
-                ? new Date(request.decidedAt || request.requestedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-                : '',
-              details: `${request.from} → ${request.to} · ${request.reason} · Requested by ${request.requestedBy}${request.decidedBy ? ` · Reviewed by ${request.decidedBy}` : ''}${request.decisionReason ? ` · ${request.decisionReason}` : ''}`,
-            });
-          }
-
-          round.typeChangeHistory?.forEach(change => {
-            history.push({
-              stage: `Type corrected: ${change.from} → ${change.to}`,
-              time: change.changedAt ? new Date(change.changedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
-              details: `${change.reason} · By ${change.changedBy || 'Admin'}`,
-            });
-          });
-          
-          if (round.vat) {
-            history.push({
-              stage: 'In Production',
-              time: round.startingTemperature ? 'Recorded' : '',
-              details: `${round.vat === 'vat2' ? 'Vat 2' : 'Vat 3'} • Starting temp: ${round.startingTemperature || 'N/A'}°C`
-            });
-          }
-          
-          if (round.pressingStartedAt) {
-            history.push({
-              stage: 'Pressing',
-              time: new Date(round.pressingStartedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-              details: '30 min timer'
-            });
-          }
-          
-          if (round.coolingStartedAt) {
-            history.push({
-              stage: 'Cooling',
-              time: new Date(round.coolingStartedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-              details: round.coolingLocation === 'tank' ? 'Cooling Tank (90 min)' : round.coolingLocation === 'chiller' ? 'Chiller (120 min)' : 'Cooling location not selected'
-            });
-          }
-          
-          if (round.restingStartedAt) {
-            history.push({
-              stage: 'Resting',
-              time: new Date(round.restingStartedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-              details: '90 min timer'
-            });
-          }
-          
-          if (round.status === 'ready_cutting' || ['cut', 'clingwrapped', 'frozen', 'packed', 'handed_over'].includes(round.status)) {
-            history.push({
-              stage: 'Ready for Cutting',
-              time: '',
-              details: 'Paneer ready to cut'
-            });
-          }
-          
-          if (round.cutBy) {
-            history.push({
-              stage: 'Cut',
-              time: '',
-              details: `By ${round.cutBy} • ${round.cuttingType || 'N/A'} • ${round.numberOfBlocks || 0} blocks • ${round.outputWeight || 0} kg`
-            });
-          }
-          
-          if (round.status === 'clingwrapped') {
-            history.push({
-              stage: 'Clingwrapped',
-              time: '',
-              details: 'Stored in chiller'
-            });
-          }
-
-          if (round.status === 'chiller_storage') {
-            history.push({
-              stage: 'Chiller Storage',
-              time: '',
-              details: 'Restaurant blocks stored fresh in the chiller'
-            });
-          }
-          
-          if (round.status === 'frozen' || ['packed', 'handed_over'].includes(round.status)) {
-            history.push({
-              stage: 'Frozen',
-              time: '',
-              details: 'Moved to freezer'
-            });
-          }
-          
-          if (round.packedSkus && round.packedSkus.length > 0) {
-            round.packedSkus.forEach((pack, idx) => {
-              history.push({
-                stage: `Packing ${idx + 1}`,
-                time: '',
-                details: `${pack.sku} • ${pack.cases} cases + ${pack.loose} loose`
-              });
-            });
-          }
-          
-          if (round.creamRecovered) {
-            history.push({
-              stage: 'Cream Recovered',
-              time: round.creamRecoveredAt ? new Date(round.creamRecoveredAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
-              details: `${round.creamRecovered.toFixed(2)} kg ${round.creamRecoveredBy ? `by ${round.creamRecoveredBy}` : ''}`
-            });
-          }
-          
-          if (round.status === 'handed_over') {
-            history.push({
-              stage: 'Handed Over',
-              time: round.completedAt ? new Date(round.completedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
-              details: 'Distribution pickup'
-            });
-          }
-
-          if (round.spoilageApprovalStatus) {
-            history.push({
-              stage: round.spoilageApprovalStatus === 'approved' ? 'Spoilage Approved' : round.spoilageApprovalStatus === 'rejected' ? 'Spoilage Rejected' : 'Spoilage Reported',
-              time: round.spoilageApprovedAt || round.spoilageRejectedAt || round.spoilageReportedAt
-                ? new Date(round.spoilageApprovedAt || round.spoilageRejectedAt || round.spoilageReportedAt || '').toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-                : '',
-              details: `${round.spoilageRequestedQuantity?.toFixed(2) || '0.00'} ${round.spoilageUnit || 'kg'} • ${round.spoilageReason || 'No reason recorded'} • Reported by ${round.spoilageReportedBy || 'Staff'}`
-            });
-          }
+          const history = buildProductionRoundHistory(round);
           
           return (
             <div className="space-y-3">
@@ -2628,15 +2616,16 @@ export default function ProductionBoard() {
                 <p className="text-xs text-slate-500 mt-1">Team: {round.team.join(', ')}</p>
               </div>
               <div className="space-y-2">
-                {history.map((item, idx) => (
-                  <div key={idx} className="flex gap-3 pb-3 border-b border-slate-100 last:border-0">
+                {history.map((item) => (
+                  <div key={item.key} className="flex gap-3 pb-3 border-b border-slate-100 last:border-0">
                     <div className="flex-shrink-0 w-2 h-2 rounded-full bg-indigo-500 mt-1.5"></div>
                     <div className="flex-1">
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-medium text-slate-900">{item.stage}</p>
-                        {item.time && <p className="text-xs text-slate-500">{item.time}</p>}
+                        <p className={`text-right text-xs ${item.legacyTimestampMissing ? 'font-medium text-amber-700' : 'text-slate-500'}`}>{formatRoundHistoryTime(item.occurredAt)}</p>
                       </div>
                       <p className="text-xs text-slate-600 mt-0.5">{item.details}</p>
+                      {item.recordedBy && <p className="mt-0.5 text-[11px] text-slate-400">Recorded by {item.recordedBy}</p>}
                     </div>
                   </div>
                 ))}

@@ -14,6 +14,7 @@ import {
   CreamLot,
   ProductionShift,
   ProductionRound,
+  ProductionRoundHistoryEvent,
   IntermediateLot,
   FinishedStockLot,
   TemperatureReading,
@@ -58,6 +59,11 @@ interface AppContextType extends AppState {
   removeProductionRound: (id: string) => boolean;
   cancelProductionRound: (id: string, reason?: string) => boolean;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
+  recordProductionRoundActivity: (
+    id: string,
+    updates: Partial<ProductionRound>,
+    event: Omit<ProductionRoundHistoryEvent, 'id' | 'occurredAt'> & { occurredAt?: string }
+  ) => void;
   requestProductionRoundTypeChange: (id: string, newType: 'D' | 'C/S', reason: string) => Promise<boolean>;
   reviewProductionRoundTypeChange: (id: string, decision: 'approve' | 'reject', decisionReason?: string) => Promise<boolean>;
   advanceRoundStatus: (id: string) => void;
@@ -238,12 +244,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const round = productionRounds.find(item => item.id === id);
     if (!round || round.locked || round.status === 'cancelled') return false;
     const cancellationNote = reason?.trim() ? `Cancellation: ${reason.trim()}` : 'Cancellation: created by mistake';
+    const occurredAt = new Date().toISOString();
+    const recordedBy = typeof window === 'undefined' ? 'System' : window.localStorage.getItem('vejoy_user_username') || window.localStorage.getItem('vejoy_user_role') || 'User';
     setProductionRounds(currentRounds => currentRounds.map(item => item.id === id ? {
       ...item,
       status: 'cancelled',
       locked: true,
-      completedAt: new Date().toISOString(),
+      completedAt: occurredAt,
       notes: item.notes ? `${item.notes}\n${cancellationNote}` : cancellationNote,
+      historyEvents: [...(item.historyEvents || []), {
+        id: `round-event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'cancelled',
+        stage: 'Cancelled',
+        occurredAt,
+        details: cancellationNote.replace(/^Cancellation:\s*/, ''),
+        recordedBy,
+        source: 'override',
+      }],
     } : item));
     return true;
   };
@@ -288,6 +305,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Actual input may remain zero while a scheduled round is waiting to
       // start, but a zero planned input would make the milk ledger silently
       // under-account the round.
+      if (isMilkProductionRound(nextRound) && nextRound.plannedInput <= 0) return round;
+      return nextRound;
+    }));
+  };
+
+  const recordProductionRoundActivity: AppContextType['recordProductionRoundActivity'] = (id, updates, event) => {
+    setProductionRounds(currentRounds => currentRounds.map(round => {
+      if (round.id !== id) return round;
+      const occurredAt = event.occurredAt || new Date().toISOString();
+      const nextRound: ProductionRound = {
+        ...round,
+        ...updates,
+        historyEvents: [...(round.historyEvents || []), {
+          ...event,
+          id: `round-event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          occurredAt,
+        }],
+      };
       if (isMilkProductionRound(nextRound) && nextRound.plannedInput <= 0) return round;
       return nextRound;
     }));
@@ -584,6 +619,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeProductionRound,
     cancelProductionRound,
     updateProductionRound,
+    recordProductionRoundActivity,
     requestProductionRoundTypeChange,
     reviewProductionRoundTypeChange,
     advanceRoundStatus,

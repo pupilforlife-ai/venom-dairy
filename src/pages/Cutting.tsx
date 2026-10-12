@@ -14,8 +14,9 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 
 export default function Cutting() {
-  const { productionRounds, intermediateLots, addIntermediateLot, updateIntermediateLot, updateProductionRound } = useApp();
+  const { productionRounds, intermediateLots, addIntermediateLot, updateIntermediateLot, recordProductionRoundActivity } = useApp();
   const { showToast } = useToast();
+  const currentActor = typeof window === 'undefined' ? 'System' : window.localStorage.getItem('vejoy_user_username') || window.localStorage.getItem('vejoy_user_role') || 'User';
 
   const [showCutModal, setShowCutModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState('');
@@ -51,12 +52,18 @@ export default function Cutting() {
     if (!round) return;
 
     // Update round status to 'cut'
-    updateProductionRound(round.id, {
+    recordProductionRoundActivity(round.id, {
       status: 'cut',
       cutBy: cutForm.cutBy,
       cuttingType: cutForm.cutType,
       intermediateBalance: cutForm.outputWeight,
       notes: cutForm.notes || round.notes,
+    }, {
+      type: 'cut',
+      stage: 'Cut',
+      details: `${cutForm.cutType} · ${cutForm.outputWeight.toFixed(2)} kg · By ${cutForm.cutBy}`,
+      recordedBy: currentActor,
+      source: 'workflow',
     });
 
     // Create intermediate lot for the cut product

@@ -156,6 +156,7 @@ export default function Distribution() {
     updateFinishedStock,
     updateMilkLot,
     updateProductionRound,
+    recordProductionRoundActivity,
   } = useApp();
   const { showToast } = useToast();
   const [handovers, setHandovers] = useSupabaseState<DistributionHandover[]>('vejoy_distributionHandovers', []);
@@ -522,11 +523,17 @@ export default function Distribution() {
               : {}),
         });
         const newBalance = currentBalance - selectedFinishedExtraWeight;
-        updateProductionRound(extraRound.id, {
+        recordProductionRoundActivity(extraRound.id, {
           status: newBalance <= 0 ? 'packed' : extraRound.status,
           packedSkus: [...(extraRound.packedSkus || []), extraEntry],
           remainingBalance: newBalance,
           intermediateBalance: newBalance,
+        }, {
+          type: 'packing_recorded',
+          stage: 'Physical Count Packing Adjustment',
+          details: `${extraEntry.sku} · ${extraEntry.cases} cases + ${extraEntry.loose} loose · Balance ${newBalance.toFixed(2)} kg`,
+          recordedBy: currentUsername || currentRole || 'User',
+          source: 'correction',
         });
       }
     }
@@ -687,10 +694,18 @@ export default function Distribution() {
     }
 
     if (selectedCandidate?.sourceType === 'production_round') {
-      updateProductionRound(selectedCandidate.sourceId, {
+      const occurredAt = new Date().toISOString();
+      recordProductionRoundActivity(selectedCandidate.sourceId, {
         status: 'handed_over',
         locked: true,
-        completedAt: new Date().toISOString(),
+        completedAt: occurredAt,
+      }, {
+        type: 'handed_over',
+        stage: 'Handed Over',
+        occurredAt,
+        details: `${form.quantity} ${form.unit} · ${form.destination}`,
+        recordedBy: form.handedOverBy || currentUsername || currentRole || 'User',
+        source: 'workflow',
       });
     }
 

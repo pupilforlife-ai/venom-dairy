@@ -16,8 +16,9 @@ import { paneerSkuDefinitions, paneerSkuByCode, getAllowedPaneerSkus, getPaneerP
 import { reconcileFinishedStock } from '../lib/finishedStock';
 
 export default function Packing() {
-  const { intermediateLots, finishedStock, addFinishedStock, updateIntermediateLot, updateProductionRound, productionRounds } = useApp();
+  const { intermediateLots, finishedStock, addFinishedStock, updateIntermediateLot, recordProductionRoundActivity, productionRounds } = useApp();
   const { showToast } = useToast();
+  const currentActor = typeof window === 'undefined' ? 'System' : window.localStorage.getItem('vejoy_user_username') || window.localStorage.getItem('vejoy_user_role') || 'User';
   const awaitingFinishedStock = useMemo(
     () => reconcileFinishedStock(productionRounds, finishedStock).filter(stock => stock.status === 'awaiting_handover'),
     [finishedStock, productionRounds],
@@ -124,11 +125,17 @@ export default function Packing() {
             ? { looseWeightKg: packForm.looseWeightKg }
             : {}),
       };
-      updateProductionRound(round.id, {
+      recordProductionRoundActivity(round.id, {
         status: newQuantity <= 0 ? 'packed' : round.status,
         packedSkus: [...(round.packedSkus || []), packedEntry],
         remainingBalance: newQuantity,
         intermediateBalance: newQuantity,
+      }, {
+        type: 'packing_recorded',
+        stage: 'Packing Recorded',
+        details: `${packedEntry.sku} · ${packedEntry.cases} cases + ${packedEntry.loose} loose · Balance ${newQuantity.toFixed(2)} kg`,
+        recordedBy: currentActor,
+        source: 'workflow',
       });
     }
 

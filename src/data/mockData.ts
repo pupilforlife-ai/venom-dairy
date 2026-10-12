@@ -81,6 +81,19 @@ export interface PackedSku {
 // preserving type-safe access everywhere rounds are displayed or audited.
 export type ProductionPackedSku = PackedSku & { loose: number };
 
+// Append-only audit entries for production rounds. Stage fields describe the
+// current state; this ledger records when each action actually happened and
+// who recorded it, including repeated actions such as packing corrections.
+export interface ProductionRoundHistoryEvent {
+  id: string;
+  type: string;
+  stage: string;
+  occurredAt: string;
+  details: string;
+  recordedBy?: string;
+  source?: 'workflow' | 'correction' | 'override' | 'approval';
+}
+
 export interface ProductionRoundTypeChange {
   from: 'D' | 'C/S';
   to: 'D' | 'C/S';
@@ -468,6 +481,7 @@ export interface ProductionRound {
   vacuumPackedWeight?: number; // kg vacuumed and stored in the Halloumi chiller
   startTime: string;
   completedAt?: string;
+  historyEvents?: ProductionRoundHistoryEvent[];
   
   // Production details (paneer)
   vat?: 'vat2' | 'vat3';
