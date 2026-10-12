@@ -22,7 +22,7 @@ import {
   getPaneerPackWeight,
   paneerSkuByCode,
 } from '../data/skuConfig';
-import { reconcileFinishedStock, ReconciledFinishedStockLine } from '../lib/finishedStock';
+import { getProductionPackingEntries, reconcileFinishedStock, ReconciledFinishedStockLine } from '../lib/finishedStock';
 import { useApp } from '../store/AppContext';
 
 type CandidateUnit = 'kg' | 'packets' | 'bottles';
@@ -292,7 +292,7 @@ export default function Distribution() {
         // candidate; that would make one physical stock line transferable
         // twice. Keep the round fallback only for legacy rows with no linked
         // FinishedStock record.
-        if (round.type === 'D' || round.type === 'C/S') return false;
+        if (getProductionPackingEntries([round]).length > 0) return false;
         if (round.type === 'Amassi') return Boolean(round.amassiPacked?.length);
         return round.outputWeight > 0;
       })

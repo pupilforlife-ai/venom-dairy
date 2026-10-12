@@ -26,6 +26,16 @@ import {
 import { useApp } from '../store/AppContext';
 import { getMilkLotAccounting, getRoundMilkInput, statusLabels } from '../data/mockData';
 import { reconcileFinishedStock } from '../lib/finishedStock';
+import { useSupabaseState } from '../hooks/useSupabaseState';
+
+interface DashboardCrumbingBatch {
+  id: string;
+  status: string;
+  type: string;
+  createdAt: string;
+  productionCompletedAt?: string;
+  packedSkus?: Array<{ sku: string; cases: number; loose: number }>;
+}
 
 type DashboardMetric = {
   label: string;
@@ -76,26 +86,51 @@ export default function Dashboard() {
     intermediateLots,
     wasteEvents,
   } = useApp();
+  const [crumbingBatches] = useSupabaseState<DashboardCrumbingBatch[]>('vejoy_crumbingBatches', []);
   
-  const activeMilkLot = milkLots.find((m) => m.status === 'active') ?? milkLots[0];
+  const activeMilkLot = [...milkLots]
+    .sort((left, right) => new Date(`${right.receiptDate}T${right.receiptTime || '00:00'}`).getTime() - new Date(`${left.receiptDate}T${left.receiptTime || '00:00'}`).getTime())
+    .find((lot) => lot.status === 'active') ?? [...milkLots]
+      .sort((left, right) => new Date(`${right.receiptDate}T${right.receiptTime || '00:00'}`).getTime() - new Date(`${left.receiptDate}T${left.receiptTime || '00:00'}`).getTime())[0];
   const activeLotCode = activeMilkLot?.lotCode;
   const activeLotRounds = productionRounds.filter((r) => r.milkLotCode === activeLotCode || r.milkLotId === activeMilkLot?.id);
   const milkAccounting = activeMilkLot
     ? getMilkLotAccounting(activeMilkLot, productionRounds)
     : { consumed: 0, sold: 0, remaining: 0, overdraw: 0, rawRemaining: 0 };
   const activeRounds = activeLotRounds.filter((r) => !['handed_over', 'packed', 'frozen', 'cancelled', 'spoiled'].includes(r.status));
-  const outOfRangeTemps = temperatureReadings.filter((t) => !t.inRange);
+  const latestTemperatureReadings = [...temperatureReadings]
+    .sort((left, right) => new Date(right.recordedAt).getTime() - new Date(left.recordedAt).getTime())
+    .filter((reading, index, readings) => readings.findIndex(candidate => candidate.location === reading.location) === index);
+  const outOfRangeTemps = latestTemperatureReadings.filter((t) => !t.inRange);
   const reconciledFinishedStock = reconcileFinishedStock(productionRounds, finishedStock);
   const awaitingHandover = reconciledFinishedStock.filter((stock) => stock.status === 'awaiting_handover');
   const totalCases = awaitingHandover.reduce((sum, stock) => sum + (stock.cases || 0), 0);
-  const readyHandoverSkus = awaitingHandover
-    .map((item) => item.sku)
+  const reconciledRoundIds = new Set(reconciledFinishedStock.map(stock => stock.sourceRoundId).filter(Boolean));
+  const otherRoundCases = productionRounds
+    .filter(round => !reconciledRoundIds.has(round.id) && !['handed_over', 'cancelled', 'spoiled'].includes(round.status))
+    .reduce((sum, round) => sum + (round.packedSkus || []).reduce((packSum, pack) => packSum + Math.max(0, pack.cases || 0), 0), 0);
+  const crumbingCases = crumbingBatches
+    .filter(batch => batch.status === 'packed')
+    .reduce((sum, batch) => sum + (batch.packedSkus || []).reduce((packSum, pack) => packSum + Math.max(0, pack.cases || 0), 0), 0);
+  const readyHandoverSkus = [
+    ...awaitingHandover.map((item) => item.sku),
+    ...productionRounds
+      .filter(round => !reconciledRoundIds.has(round.id) && !['handed_over', 'cancelled', 'spoiled'].includes(round.status))
+      .flatMap(round => (round.packedSkus || []).map(pack => pack.sku)),
+    ...crumbingBatches.filter(batch => batch.status === 'packed').flatMap(batch => (batch.packedSkus || []).map(pack => pack.sku)),
+  ]
     .filter((sku, index, values) => values.indexOf(sku) === index);
   const totalOutput = activeLotRounds.reduce((s, r) => s + r.outputWeight, 0);
   const paneerRounds = activeLotRounds.filter((r) => r.type === 'D' || r.type === 'C/S');
   const paneerOutput = paneerRounds.reduce((s, r) => s + r.outputWeight, 0);
   const paneerInput = paneerRounds.reduce((s, r) => s + getRoundMilkInput(r), 0);
   const paneerYield = paneerInput > 0 ? (paneerOutput / paneerInput) * 100 : 0;
+  const directRounds = paneerRounds.filter(round => round.type === 'D');
+  const csRounds = paneerRounds.filter(round => round.type === 'C/S');
+  const directInput = directRounds.reduce((sum, round) => sum + getRoundMilkInput(round), 0);
+  const csInput = csRounds.reduce((sum, round) => sum + getRoundMilkInput(round), 0);
+  const directYield = directInput > 0 ? (directRounds.reduce((sum, round) => sum + round.outputWeight, 0) / directInput) * 100 : 0;
+  const csYield = csInput > 0 ? (csRounds.reduce((sum, round) => sum + round.outputWeight, 0) / csInput) * 100 : 0;
   const totalWasteKg = wasteEvents.filter(event => event.unit.toLowerCase() === 'kg').reduce((s, event) => s + event.quantity, 0);
   const totalWasteL = wasteEvents.filter(event => event.unit.toLowerCase() === 'l').reduce((s, event) => s + event.quantity, 0);
   const intermediateSourceRoundIds = new Set(intermediateLots.map((lot) => lot.sourceBatchId));
@@ -116,11 +151,21 @@ export default function Dashboard() {
     { label: 'Paneer Yield', value: paneerYield.toFixed(1), unit: '%', trend: 'stable', trendValue: paneerInput > 0 ? 'Calculated from rounds' : 'No paneer input recorded', color: 'teal' },
     { label: 'Frozen Stock', value: frozenStock.toFixed(1), unit: 'kg', trend: 'up', trendValue: 'Available intermediate stock', color: 'indigo' },
     { label: 'Recorded Waste', value: `${totalWasteKg.toFixed(1)} / ${totalWasteL.toFixed(1)}`, unit: 'kg / L', trend: 'down', trendValue: `${wasteEvents.length} recorded events`, color: 'red' },
-    { label: 'Cases Ready', value: totalCases, unit: 'cases', trend: 'up', trendValue: 'Awaiting handover', color: 'purple' },
-    { label: 'Cold Chain', value: `${temperatureReadings.filter((t) => t.inRange).length}/${temperatureReadings.length}`, unit: 'OK', trend: 'stable', trendValue: `${outOfRangeTemps.length} excursion(s)`, color: 'amber' },
+    { label: 'Cases Ready', value: totalCases + otherRoundCases + crumbingCases, unit: 'cases', trend: 'up', trendValue: 'Awaiting handover across all packed products', color: 'purple' },
+    { label: 'Cold Chain', value: `${latestTemperatureReadings.filter((t) => t.inRange).length}/${latestTemperatureReadings.length}`, unit: 'OK', trend: 'stable', trendValue: `${outOfRangeTemps.length} current excursion(s)`, color: 'amber' },
     { label: 'Weekly Fuel Cost', value: '—', unit: '', trend: 'stable', trendValue: 'Available after Utilities data is complete', color: 'orange' },
   ];
-  const weeklyProduction = activeLotRounds.reduce<Record<string, { day: string; paneer: number; halloumi: number; butter: number; poppers: number }>>((days, round) => {
+  const now = new Date();
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
+  const thisWeekRounds = productionRounds.filter(round => {
+    const timestamp = new Date(round.startTime).getTime();
+    return Number.isFinite(timestamp) && timestamp >= weekStart.getTime() && timestamp < weekEnd.getTime();
+  });
+  const weeklyProduction = thisWeekRounds.reduce<Record<string, { day: string; paneer: number; halloumi: number; butter: number; poppers: number }>>((days, round) => {
     const day = new Date(round.startTime).toLocaleDateString('en-US', { weekday: 'short' });
     const entry = days[day] ?? { day, paneer: 0, halloumi: 0, butter: 0, poppers: 0 };
     if (round.type === 'D' || round.type === 'C/S') entry.paneer += round.outputWeight;
@@ -129,6 +174,15 @@ export default function Dashboard() {
     days[day] = entry;
     return days;
   }, {});
+  crumbingBatches.forEach(batch => {
+    if (!['packed', 'handed_over'].includes(batch.status)) return;
+    const completedAt = new Date(batch.productionCompletedAt || batch.createdAt);
+    if (!Number.isFinite(completedAt.getTime()) || completedAt < weekStart || completedAt >= weekEnd) return;
+    const day = completedAt.toLocaleDateString('en-US', { weekday: 'short' });
+    const entry = weeklyProduction[day] ?? { day, paneer: 0, halloumi: 0, butter: 0, poppers: 0 };
+    entry.poppers += (batch.packedSkus || []).reduce((sum, pack) => sum + (pack.cases || 0) * 12 * 0.25 + (pack.loose || 0) * 0.25, 0);
+    weeklyProduction[day] = entry;
+  });
   const weeklyProductionData = Object.values(weeklyProduction);
 
   return (
@@ -218,7 +272,7 @@ export default function Dashboard() {
             <div className="flex items-start gap-2 p-2 bg-blue-50 rounded-lg">
               <Package className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
               <div>
-                <p className="text-xs font-medium text-blue-700">{totalCases} cases awaiting handover</p>
+                <p className="text-xs font-medium text-blue-700">{totalCases + otherRoundCases + crumbingCases} cases awaiting handover</p>
                 <p className="text-xs text-blue-600">{readyHandoverSkus.join(', ') || 'None'}</p>
               </div>
             </div>
@@ -291,7 +345,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <h3 className="text-sm font-semibold text-slate-900 mb-4">Paneer Yield Trend (kg/100L)</h3>
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={[{ week: activeLotCode ?? 'Current', malai: paneerYield, rozana: paneerYield, target: 14.5 }]}>
+            <LineChart data={[{ week: activeLotCode ?? 'Current', malai: directYield, rozana: csYield, target: 14.5 }]}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="week" tick={{ fontSize: 12 }} stroke="#94a3b8" />
               <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" domain={[12.5, 15.5]} />

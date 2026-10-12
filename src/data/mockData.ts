@@ -1322,7 +1322,7 @@ export const finishedStock: FinishedStockLot[] = [
     packingRunId: 'pk-001',
     cases: 15,
     loosePackets: 0,
-    totalPackets: 225, // 15 cases × 15 packets/case (wait, 24 packets/case for MPAN400)
+    totalPackets: 360, // 15 cases × 24 packets/case
     storageLocation: 'Dairy Container (Finished Stock)',
     status: 'awaiting_handover',
     createdAt: '2026-06-17T04:00:00',
@@ -1343,7 +1343,7 @@ export const finishedStock: FinishedStockLot[] = [
   },
   {
     id: 'fs-003',
-    sku: 'SPP-200',
+    sku: 'SPP',
     productName: 'Spicy Paneer Poppers 200g',
     packingRunId: 'pk-003',
     cases: 37,

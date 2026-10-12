@@ -1,5 +1,27 @@
 import { FinishedStockLot, ProductionPackedSku, ProductionRound } from '../data/mockData';
-import { normalizeFinishedGoodsSku, paneerSkuByCode } from '../data/skuConfig';
+import { gheeSkuByCode, normalizeFinishedGoodsSku, paneerSkuByCode } from '../data/skuConfig';
+
+const butterPackingBySku: Record<string, { productName: string; unitsPerCase: number }> = {
+  PUBB: { productName: 'Pure Unsalted Butter Balls', unitsPerCase: 36 },
+  PUBBB: { productName: 'Pure Unsalted Blended Butter Balls', unitsPerCase: 36 },
+  PSBBB: { productName: 'Pure Salted Blended Butter Balls', unitsPerCase: 36 },
+  BB05: { productName: 'Butter Bricks 500g', unitsPerCase: 30 },
+  BBO5: { productName: 'Butter Bricks 500g', unitsPerCase: 30 },
+};
+
+function getFinishedPackingDefinition(sku: string) {
+  const paneer = paneerSkuByCode[sku];
+  if (paneer) return {
+    productName: paneer.productName,
+    unitsPerCase: paneer.unitsPerCase || 0,
+    unitBased: paneer.packMode === 'units',
+  };
+  const ghee = gheeSkuByCode[sku];
+  if (ghee) return { productName: ghee.productName, unitsPerCase: ghee.bucketsPerCase, unitBased: true };
+  const butter = butterPackingBySku[sku];
+  if (butter) return { ...butter, unitBased: true };
+  return undefined;
+}
 
 export interface ReconciledFinishedStockLine extends FinishedStockLot {
   persisted: boolean;
@@ -33,12 +55,14 @@ export function getLegacyPackingRunId(roundId: string, packIndex: number) {
  */
 export function getProductionPackingEntries(rounds: ProductionRound[]): ProductionPackingEntry[] {
   return rounds.flatMap((round) => {
-    if ((round.type !== 'D' && round.type !== 'C/S') || ['cancelled', 'spoiled'].includes(round.status)) return [];
+    if (['cancelled', 'spoiled'].includes(round.status)) return [];
     const sourceBatchCode = getProductionSourceBatchCode(round);
     return (round.packedSkus || []).flatMap((rawPack, packIndex) => {
       const sku = normalizeFinishedGoodsSku(rawPack.sku);
       // PAN111 remains an intermediate recovery lot; it is not finished stock.
-      if (sku === 'PAN111' || !paneerSkuByCode[sku]) return [];
+      // Only SKUs with a defined pack configuration can enter the finished
+      // goods ledger; this prevents an arbitrary label from inventing stock.
+      if (sku === 'PAN111' || !getFinishedPackingDefinition(sku)) return [];
       const pack: ProductionPackedSku = { ...rawPack, sku };
       return [{
         round,
@@ -95,9 +119,9 @@ export function reconcileFinishedStock(
       };
     }
 
-    const definition = paneerSkuByCode[entry.pack.sku];
-    const totalPackets = definition?.packMode === 'units'
-      ? (entry.pack.cases || 0) * (definition.unitsPerCase || 0) + (entry.pack.loose || 0)
+    const definition = getFinishedPackingDefinition(entry.pack.sku);
+    const totalPackets = definition?.unitBased
+      ? (entry.pack.cases || 0) * definition.unitsPerCase + (entry.pack.loose || 0)
       : 0;
 
     return {

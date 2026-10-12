@@ -522,9 +522,12 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       showToast('error', `Only ${pool.availableBalance.toFixed(2)} kg remains available to pack from this pool`);
       return;
     }
-    const packets = Math.floor(packingForm.quantity / unitsPerPacket);
-    const cases = Math.floor(packets / packetsPerCase);
-    const looseUnits = packingForm.quantity % unitsPerPacket;
+    const unitsPerCase = unitsPerPacket * packetsPerCase;
+    const cases = Math.floor(packingForm.quantity / unitsPerCase);
+    // Store every unit outside a full case. The previous `% unitsPerPacket`
+    // calculation silently discarded complete loose packets (for example,
+    // 24 butter balls became 0 cases + 0 loose).
+    const looseUnits = packingForm.quantity - (cases * unitsPerCase);
 
     const packingDelta = totalWeight;
     let remainingToPack = packingDelta;

@@ -94,38 +94,6 @@ function readLocalValue<T>(key: string, initialValue: T): T {
   }
 }
 
-// A milk receipt can exist only in an open device's cache if an older client
-// overwrote the shared array before realtime synchronization was available.
-// Recover only recent, complete receipts and never replace a server lot. This
-// is deliberately limited to milk lots; other collections must not resurrect
-// records that were intentionally removed during maintenance.
-function recoverRecentCachedMilkLots<T>(key: string, cached: T, remote: T): T {
-  if (key !== 'vejoy_milkLots' || !Array.isArray(cached) || !Array.isArray(remote)) return remote;
-
-  const remoteRecords = remote.filter(isRecord);
-  const remoteIds = new Set(remoteRecords.map(item => String(item.id || '')));
-  const remoteCodes = new Set(remoteRecords.map(item => String(item.lotCode || '')));
-  const recentCutoff = Date.now() - (14 * 24 * 60 * 60 * 1000);
-  const recoverableByCode = new Map<string, JsonRecord>();
-
-  cached.forEach(item => {
-    if (!isRecord(item)) return;
-    const id = typeof item.id === 'string' ? item.id : '';
-    const lotCode = typeof item.lotCode === 'string' ? item.lotCode.trim() : '';
-    const receiptDate = typeof item.receiptDate === 'string' ? item.receiptDate : '';
-    const receiptTimestamp = Date.parse(`${receiptDate}T00:00:00`);
-    if (!id || !lotCode || !Number.isFinite(receiptTimestamp) || receiptTimestamp < recentCutoff) return;
-    if (remoteIds.has(id) || remoteCodes.has(lotCode)) return;
-
-    // New lots are appended, so if a user had to enter the same receipt twice
-    // the last cached copy is the one linked to the latest production records.
-    recoverableByCode.set(lotCode, item);
-  });
-
-  if (recoverableByCode.size === 0) return remote;
-  return [...remote, ...recoverableByCode.values()] as T;
-}
-
 export function useSupabaseState<T>(key: string, initialValue: T) {
   // When Supabase is enabled, browser localStorage is only a cache. Never use
   // an old demo/cache snapshot as the initial production source of truth.
@@ -141,13 +109,34 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
   const localWriteVersionRef = useRef(0);
   const serverValueRef = useRef<T | undefined>(undefined);
+  const serverVersionRef = useRef(0);
   const pendingWritesRef = useRef(0);
+  const deferredRealtimeRowRef = useRef<AppStateRow<T> | null>(null);
 
   const applyServerValue = (row: AppStateRow<T>) => {
     serverValueRef.current = row.value;
+    serverVersionRef.current = row.version || 0;
     valueRef.current = row.value;
     setStoredValue(row.value);
-    window.localStorage.setItem(key, JSON.stringify(row.value));
+    try {
+      window.localStorage.setItem(key, JSON.stringify(row.value));
+    } catch (error) {
+      console.error(`Error caching ${key} from Supabase:`, error);
+    }
+  };
+
+  // RPCs have already committed their change. Reflect the returned record in
+  // this browser without issuing a second whole-collection write.
+  const applyCommittedValue = (value: T | ((currentValue: T) => T)) => {
+    const nextValue = value instanceof Function ? value(valueRef.current) : value;
+    valueRef.current = nextValue;
+    serverValueRef.current = nextValue;
+    setStoredValue(nextValue);
+    try {
+      window.localStorage.setItem(key, JSON.stringify(nextValue));
+    } catch (error) {
+      console.error(`Error caching committed ${key} value:`, error);
+    }
   };
 
   const queuePersist = (baseValue: T, nextValue: T, localVersion: number) => {
@@ -218,13 +207,19 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
       })
       .finally(() => {
         pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
+        if (pendingWritesRef.current === 0) {
+          const deferredRow = deferredRealtimeRowRef.current;
+          deferredRealtimeRowRef.current = null;
+          if (deferredRow && deferredRow.version > serverVersionRef.current) {
+            applyServerValue(deferredRow);
+          }
+        }
       });
   };
 
   useEffect(() => {
     let cancelled = false;
     const loadVersion = localWriteVersionRef.current;
-    const cachedValue = readLocalValue(key, initialValue);
     const client = supabase;
 
     const loadValue = async () => {
@@ -250,18 +245,6 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
           setHasLoaded(true);
           return;
         }
-        const recoveredValue = recoverRecentCachedMilkLots(key, cachedValue, data.value);
-        if (!jsonEqual(recoveredValue, data.value)) {
-          localWriteVersionRef.current += 1;
-          const recoveryVersion = localWriteVersionRef.current;
-          valueRef.current = recoveredValue;
-          setStoredValue(recoveredValue);
-          window.localStorage.setItem(key, JSON.stringify(recoveredValue));
-          setHasLoaded(true);
-          queuePersist(data.value, recoveredValue, recoveryVersion);
-          return;
-        }
-
         applyServerValue(data);
         setHasLoaded(true);
         return;
@@ -285,7 +268,11 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
           const row = payload.new as AppStateRow<T>;
           if (!row?.key || row.key !== key) return;
           serverValueRef.current = row.value;
-          if (pendingWritesRef.current === 0) applyServerValue(row);
+          if (pendingWritesRef.current === 0) {
+            applyServerValue(row);
+          } else if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) {
+            deferredRealtimeRowRef.current = row;
+          }
         },
       )
       .subscribe();
@@ -314,5 +301,5 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
     queuePersist(baseValue, nextValue, localVersion);
   };
 
-  return [storedValue, setValue, hasLoaded] as const;
+  return [storedValue, setValue, hasLoaded, applyCommittedValue] as const;
 }

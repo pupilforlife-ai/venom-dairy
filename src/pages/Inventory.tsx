@@ -17,7 +17,7 @@ import { ProductionRound } from '../data/mockData';
 import { isOnSiteFinishedStock, reconcileFinishedStock, ReconciledFinishedStockLine } from '../lib/finishedStock';
 
 type Tab = 'intermediate' | 'finished';
-type TransferKind = 'intermediate' | 'finished';
+type TransferKind = 'intermediate';
 
 const standardLocations = [
   'Chiller',
@@ -26,6 +26,14 @@ const standardLocations = [
   'Coldroom',
   'Distribution Coldroom',
   'Rental Cold Storage',
+];
+
+// Finished goods leave production only through the Distribution handover,
+// where the physical quantity, destination and batch code are verified.
+const intermediateTransferLocations = [
+  'Chiller',
+  'Dairy Container (Intermediate Freezer)',
+  'Coldroom',
 ];
 
 function formatQuantity(value: number) {
@@ -69,7 +77,6 @@ export default function Inventory() {
     finishedStock,
     productionRounds,
     updateIntermediateLot,
-    updateFinishedStock,
   } = useApp();
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('intermediate');
@@ -172,8 +179,7 @@ export default function Inventory() {
 
   const transferItems = useMemo(() => ({
     intermediate: intermediateLots.filter((lot) => isCurrentIntermediateStock(lot.status, lot.currentQuantity)),
-    finished: inventoryFinishedStock.filter((stock) => stock.persisted && isOnSiteFinishedStock(stock)),
-  }), [inventoryFinishedStock, intermediateLots]);
+  }), [intermediateLots]);
 
   const openTransferModal = (kind?: TransferKind, id?: string) => {
     const target = kind && id ? `${kind}|${id}` : '';
@@ -189,25 +195,18 @@ export default function Inventory() {
       return;
     }
 
-    if (kind === 'intermediate') {
-      const lot = intermediateLots.find((item) => item.id === id);
-      if (!lot) return;
-      if (lot.storageLocation === transferDestination) {
-        showToast('error', 'The stock is already at that location');
-        return;
-      }
-      updateIntermediateLot(id, { storageLocation: transferDestination });
-      showToast('success', `${lot.productName} transferred to ${transferDestination}`);
-    } else {
-      const stock = finishedStock.find((item) => item.id === id);
-      if (!stock) return;
-      if (stock.storageLocation === transferDestination) {
-        showToast('error', 'The stock is already at that location');
-        return;
-      }
-      updateFinishedStock(id, { storageLocation: transferDestination });
-      showToast('success', `${stock.productName} transferred to ${transferDestination}`);
+    const lot = intermediateLots.find((item) => item.id === id);
+    if (!lot) return;
+    if (!intermediateTransferLocations.includes(transferDestination)) {
+      showToast('error', 'Use Distribution to hand finished goods to external storage');
+      return;
     }
+    if (lot.storageLocation === transferDestination) {
+      showToast('error', 'The stock is already at that location');
+      return;
+    }
+    updateIntermediateLot(id, { storageLocation: transferDestination });
+    showToast('success', `${lot.productName} transferred to ${transferDestination}`);
 
     setShowTransferModal(false);
     setTransferTarget('');
@@ -221,8 +220,7 @@ export default function Inventory() {
       const lot = transferItems.intermediate.find((item) => item.id === id);
       return lot ? `${lot.productName} · ${formatQuantity(lot.currentQuantity)} ${lot.uom}` : '';
     }
-    const stock = transferItems.finished.find((item) => item.id === id);
-    return stock ? `${stock.productName} · ${formatQuantity(stock.totalPackets || 0)} packets` : '';
+    return '';
   })();
 
   return (
@@ -247,7 +245,7 @@ export default function Inventory() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
           >
             <ArrowRightLeft className="w-4 h-4" />
-            Transfer stock
+            Move intermediate stock
           </button>
         </div>
       </div>
@@ -365,13 +363,12 @@ export default function Inventory() {
                                     <tbody className="divide-y divide-slate-100">
                                       {group.lines.map(item => {
                                         const lineRounds = [...new Map((item.sourceBatchCodes || []).flatMap(code => productionRounds.filter(round => roundMatchesBatchCode(round, code))).map(round => [round.id, round])).values()];
-                                        const isPersistedFinishedStock = item.persisted;
                                         return <tr key={item.id} className="align-top">
                                           <td className="px-3 py-2 text-slate-600">{new Date(item.createdAt).toLocaleString()}<div className="mt-1 font-mono text-[10px] text-slate-400">{item.packingRunId}</div></td>
                                           <td className="px-3 py-2"><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Finished batch: {item.finishedGoodsBatchCode || 'Assigned at Distribution'}</div>{item.finishedGoodsBatchCodeReviewedBy && <div className="mb-1 text-[10px] text-indigo-700">Reviewed by {item.finishedGoodsBatchCodeReviewedBy}{item.finishedGoodsBatchCodeReviewMethod === 'owner_admin_override' ? ' · changed' : ''}</div>}<div className="flex max-w-sm flex-wrap gap-1">{(item.sourceBatchCodes || []).map((code, index) => <code key={`${code}-${index}`} className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-700">{code}</code>)}</div>{lineRounds.length > 0 && <div className="mt-1 text-[10px] text-indigo-700">Linked to {lineRounds.length} production round{lineRounds.length === 1 ? '' : 's'}</div>}</td>
                                           <td className="px-3 py-2 font-medium text-slate-700">{item.cases || 0} cases · {item.loosePackets || 0} loose<div className="text-slate-500">{item.totalPackets || 0} packets{item.weightKg !== undefined ? ` · ${formatQuantity(item.weightKg)} kg` : item.looseWeightKg !== undefined ? ` · ${formatQuantity(item.looseWeightKg)} kg loose` : ''}</div></td>
-                                          <td className="px-3 py-2"><div className="text-slate-600">{item.storageLocation}</div><span className={`mt-1 inline-flex rounded-full px-2 py-0.5 font-medium ${item.status === 'awaiting_handover' ? 'bg-amber-100 text-amber-700' : item.status === 'handed_over' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{item.status === 'awaiting_handover' ? 'Awaiting' : item.status === 'handed_over' ? 'Handed Over' : 'Returned'}</span>{!isPersistedFinishedStock && <div className="mt-1 text-[10px] text-slate-400">Legacy round record</div>}</td>
-                                          <td className="px-3 py-2"><button type="button" onClick={(event) => { event.stopPropagation(); openTransferModal('finished', item.id); }} disabled={!isOnSiteFinishedStock(item) || !isPersistedFinishedStock} title={!isPersistedFinishedStock ? 'Use Distribution to reconcile and hand over this Production Board record' : undefined} className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 font-medium text-slate-600 hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"><ArrowRightLeft className="h-3 w-3" />Move</button></td>
+                                          <td className="px-3 py-2"><div className="text-slate-600">{item.storageLocation}</div><span className={`mt-1 inline-flex rounded-full px-2 py-0.5 font-medium ${item.status === 'awaiting_handover' ? 'bg-amber-100 text-amber-700' : item.status === 'handed_over' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{item.status === 'awaiting_handover' ? 'Awaiting' : item.status === 'handed_over' ? 'Handed Over' : 'Returned'}</span>{!item.persisted && <div className="mt-1 text-[10px] text-slate-400">Legacy round record</div>}</td>
+                                          <td className="px-3 py-2"><span className="text-[10px] text-slate-500">{isOnSiteFinishedStock(item) ? 'Hand over in Distribution' : 'Movement recorded in Distribution'}{!item.persisted && <span className="block text-slate-400">Legacy round record</span>}</span></td>
                                         </tr>;
                                       })}
                                     </tbody>
@@ -409,19 +406,18 @@ export default function Inventory() {
         </div>
       </div>
 
-      <Modal isOpen={showTransferModal} onClose={() => setShowTransferModal(false)} title="Transfer stock">
+      <Modal isOpen={showTransferModal} onClose={() => setShowTransferModal(false)} title="Move intermediate stock">
         <div className="space-y-4">
-          <p className="text-sm text-slate-600">Move a complete stock line to another storage location. The quantity and genealogy remain unchanged.</p>
+          <p className="text-sm text-slate-600">Move an intermediate stock line within production storage. Finished-goods handovers are recorded in Distribution.</p>
           <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Stock line</span>
             <select value={transferTarget} onChange={(event) => setTransferTarget(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
               <option value="">Select stock…</option>
               <optgroup label="Intermediate stock">{transferItems.intermediate.map((lot) => <option key={`intermediate|${lot.id}`} value={`intermediate|${lot.id}`}>{lot.productName} · {formatQuantity(lot.currentQuantity)} {lot.uom} · {lot.storageLocation}</option>)}</optgroup>
-              <optgroup label="Finished stock">{transferItems.finished.map((stock) => <option key={`finished|${stock.id}`} value={`finished|${stock.id}`}>{stock.productName} · {formatQuantity(stock.totalPackets || 0)} packets · {stock.storageLocation}</option>)}</optgroup>
             </select>
           </label>
           {selectedTransferLabel && <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Selected: <strong>{selectedTransferLabel}</strong></div>}
           <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Move to</span>
-            <select value={transferDestination} onChange={(event) => setTransferDestination(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select destination…</option>{locations.map((location) => <option key={location} value={location}>{location}</option>)}</select>
+            <select value={transferDestination} onChange={(event) => setTransferDestination(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select destination…</option>{intermediateTransferLocations.map((location) => <option key={location} value={location}>{location}</option>)}</select>
           </label>
           <div className="flex gap-2 pt-2"><button type="button" onClick={handleTransfer} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700">Save transfer</button><button type="button" onClick={() => setShowTransferModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button></div>
         </div>

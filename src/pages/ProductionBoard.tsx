@@ -92,8 +92,8 @@ export default function ProductionBoard() {
     productionRounds, productionShifts, intermediateLots, milkLots, finishedStock,
     cipRecords,
     advanceRoundStatus, updateProductionRound, addProductionRound, createProductionRound,
-    addProductionShift, removeProductionShift, updateProductionShift, addIntermediateLot, updateIntermediateLot,
-    removeProductionRound, cancelProductionRound, addWasteEvent, requestProductionRoundTypeChange, reviewProductionRoundTypeChange,
+    addProductionShift, updateProductionShift, addIntermediateLot, updateIntermediateLot,
+    cancelProductionRound, addWasteEvent, requestProductionRoundTypeChange, reviewProductionRoundTypeChange,
     addFinishedStock, updateFinishedStock, addCipRecord, updateCipRecord
   } = useApp();
   const { showToast } = useToast();
@@ -1079,17 +1079,21 @@ export default function ProductionBoard() {
   const handleDeleteShift = (shiftId: string) => {
     if (!canForceStage) return;
     const shift = productionShifts.find(item => item.id === shiftId);
-    if (!shift || !window.confirm(`Delete Shift ${shift.shiftNumber} from milk lot ${shift.milkLotCode}? This is only available when the shift has no rounds.`)) return;
-    if (removeProductionShift(shiftId)) showToast('success', `Shift ${shift.shiftNumber} deleted`);
-    else showToast('error', 'This shift has rounds and cannot be deleted. Cancel its rounds instead.');
+    if (!shift || productionRounds.some(round => round.shiftId === shiftId)) {
+      showToast('error', 'This shift has rounds and cannot be closed as unused. Cancel its rounds instead.');
+      return;
+    }
+    if (!window.confirm(`Close unused Shift ${shift.shiftNumber} for milk lot ${shift.milkLotCode}? Its audit record will be retained.`)) return;
+    updateProductionShift(shiftId, { status: 'completed', endedAt: new Date().toISOString() });
+    showToast('success', `Unused Shift ${shift.shiftNumber} closed; its audit record was retained`);
   };
 
   const handleDeleteRound = (roundId: string) => {
     if (!canForceStage) return;
     const round = productionRounds.find(item => item.id === roundId);
-    if (!round || !window.confirm(`${roundDisplayCode(round)} has not started production. Delete it permanently?`)) return;
-    if (removeProductionRound(roundId)) showToast('success', `${roundDisplayCode(round)} deleted`);
-    else showToast('error', 'This round already has production data. Use Cancel round instead.');
+    if (!round || !window.confirm(`Cancel ${roundDisplayCode(round)} as created by mistake? Its audit record will be retained.`)) return;
+    if (cancelProductionRound(roundId, 'Created by mistake before production started')) showToast('success', `${roundDisplayCode(round)} cancelled and retained for audit`);
+    else showToast('error', 'This round cannot be cancelled because it is locked or already closed.');
   };
 
   const handleCancelRound = (roundId: string) => {
@@ -1819,7 +1823,7 @@ export default function ProductionBoard() {
                   <span className="text-xs text-slate-500">{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>
                   {canForceStage && !productionRounds.some(round => round.shiftId === shift.id) && (
                     <button onClick={() => handleDeleteShift(shift.id)} className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors">
-                      <Trash2 className="w-3 h-3" /> Delete shift
+                      <Trash2 className="w-3 h-3" /> Close unused shift
                     </button>
                   )}
                   {shift.status === 'active' && (
@@ -1963,7 +1967,7 @@ export default function ProductionBoard() {
                             {!round.locked && (
                               <div className="flex gap-1 flex-wrap">
                                 {getActionButtons(round)}
-                                {canForceStage && round.status === 'scheduled' && <button onClick={() => handleDeleteRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-100"><Trash2 className="h-3 w-3" />Delete</button>}
+                                {canForceStage && round.status === 'scheduled' && <button onClick={() => handleDeleteRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-100"><Trash2 className="h-3 w-3" />Cancel</button>}
                                 {canForceStage && round.status !== 'scheduled' && <button onClick={() => handleCancelRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-100"><XCircle className="h-3 w-3" />Cancel</button>}
                               </div>
                             )}

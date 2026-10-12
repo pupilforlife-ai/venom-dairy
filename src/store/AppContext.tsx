@@ -1,4 +1,4 @@
-import { createContext, useContext, ReactNode, useEffect } from 'react';
+import { createContext, useContext, ReactNode } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { supabase } from '../lib/supabase';
 import { 
@@ -121,30 +121,14 @@ function normalizeTemperatureReading(reading: TemperatureReading): TemperatureRe
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [storedMilkLots, setMilkLots, milkLotsLoaded] = useSupabaseState<MilkLot[]>('vejoy_milkLots', initialMilkLots);
+  const [storedMilkLots, setMilkLots] = useSupabaseState<MilkLot[]>('vejoy_milkLots', initialMilkLots);
   const [creamLots, setCreamLots] = useSupabaseState<CreamLot[]>('vejoy_creamLots', []);
   const [productionShifts, setProductionShifts] = useSupabaseState<ProductionShift[]>('vejoy_productionShifts', initialShifts);
-  const [productionRounds, setProductionRounds, productionRoundsLoaded] = useSupabaseState<ProductionRound[]>('vejoy_productionRounds', initialRounds);
+  const [productionRounds, setProductionRounds, , applyCommittedProductionRounds] = useSupabaseState<ProductionRound[]>('vejoy_productionRounds', initialRounds);
   const milkLots = storedMilkLots.map(lot => ({
     ...lot,
     creamPool: getMilkLotCreamPool(lot, productionRounds),
   }));
-  useEffect(() => {
-    // Keep the persisted pool snapshot correct for exports and direct database
-    // audits, while every screen continues to calculate from the round ledger.
-    // Wait for both collections to load so a slow initial rounds request can
-    // never replace a valid pool with an empty total.
-    if (!milkLotsLoaded || !productionRoundsLoaded) return;
-    const needsReconciliation = storedMilkLots.some(lot =>
-      JSON.stringify(lot.creamPool) !== JSON.stringify(getMilkLotCreamPool(lot, productionRounds))
-    );
-    if (!needsReconciliation) return;
-
-    setMilkLots(currentLots => currentLots.map(lot => ({
-      ...lot,
-      creamPool: getMilkLotCreamPool(lot, productionRounds),
-    })));
-  }, [milkLotsLoaded, productionRounds, productionRoundsLoaded, storedMilkLots]);
   const [storedIntermediateLots, setIntermediateLots] = useSupabaseState<IntermediateLot[]>('vejoy_intermediateLots', initialIntermediate);
   const intermediateLots = storedIntermediateLots.map(lot => lot.storageLocation === 'Intermediate Freezer'
     ? { ...lot, storageLocation: 'Dairy Container (Intermediate Freezer)' }
@@ -289,8 +273,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!data) {
       throw new Error('The server returned no round after creation');
     }
-    setProductionRounds(current => [...current, data as ProductionRound]);
-    return data as ProductionRound;
+    const committedRound = data as ProductionRound;
+    applyCommittedProductionRounds(current => current.some(item => item.id === committedRound.id)
+      ? current.map(item => item.id === committedRound.id ? committedRound : item)
+      : [...current, committedRound]);
+    return committedRound;
   };
 
   const updateProductionRound = (id: string, updates: Partial<ProductionRound>) => {
@@ -346,7 +333,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error(error.message || 'The server could not submit this type-change request');
       }
       if (!data) throw new Error('The server returned no updated round');
-      setProductionRounds(current => current.map(item => item.id === id ? data as ProductionRound : item));
+      applyCommittedProductionRounds(current => current.map(item => item.id === id ? data as ProductionRound : item));
       return true;
     }
 
@@ -387,7 +374,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error(error.message || 'The server could not review this type-change request');
       }
       if (!data) throw new Error('The server returned no reviewed round');
-      setProductionRounds(current => current.map(item => item.id === id ? data as ProductionRound : item));
+      applyCommittedProductionRounds(current => current.map(item => item.id === id ? data as ProductionRound : item));
       return true;
     }
 
@@ -434,7 +421,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.error('Error forcing round stage:', error);
       return false;
     }
-    setProductionRounds(current => current.map(round => round.id === id ? data as ProductionRound : round));
+    applyCommittedProductionRounds(current => current.map(round => round.id === id ? data as ProductionRound : round));
     return true;
   };
 
