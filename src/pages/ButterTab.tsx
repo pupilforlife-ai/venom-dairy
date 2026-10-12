@@ -120,6 +120,11 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     acc[date].push(round);
     return acc;
   }, {} as Record<string, typeof butterRounds>);
+  const visibleButterTotals = visibleChurningRounds.reduce((totals, round) => ({
+    creamInputKg: totals.creamInputKg + Math.max(0, round.actualInput || 0),
+    butterOutputKg: totals.butterOutputKg + Math.max(0, round.butterOutput || 0),
+    buttermilkOutputKg: totals.buttermilkOutputKg + Math.max(0, round.buttermilkOutput || 0),
+  }), { creamInputKg: 0, butterOutputKg: 0, buttermilkOutputKg: 0 });
 
   // Get available cream pools (internal cream from milk lots)
   const internalCreamPools = milkLots.filter(lot =>
@@ -760,6 +765,12 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
             acc[key] = (acc[key] || 0) + (round.butterOutput || 0);
             return acc;
           }, {} as Record<string, number>));
+          const dateTotals = rounds.reduce((totals, round) => ({
+            creamInputKg: totals.creamInputKg + Math.max(0, round.actualInput || 0),
+            butterOutputKg: totals.butterOutputKg + Math.max(0, round.butterOutput || 0),
+            buttermilkOutputKg: totals.buttermilkOutputKg + Math.max(0, round.buttermilkOutput || 0),
+            balanceKg: totals.balanceKg + Math.max(0, round.remainingBalance || 0),
+          }), { creamInputKg: 0, butterOutputKg: 0, buttermilkOutputKg: 0, balanceKg: 0 });
 
           return (
             <div key={roundDate} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -826,9 +837,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                             {butterStatusLabels[round.status as ButterStatus]}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-600 text-xs">{round.actualInput} kg</td>
-                        <td className="px-4 py-3 text-slate-600 text-xs">{round.butterOutput || '—'} kg</td>
-                        <td className="px-4 py-3 text-slate-600 text-xs">{round.buttermilkOutput || '—'} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{Math.max(0, round.actualInput || 0).toFixed(2)} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{Math.max(0, round.butterOutput || 0).toFixed(2)} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{Math.max(0, round.buttermilkOutput || 0).toFixed(2)} kg</td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{round.remainingBalance || '—'} kg</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1 flex-wrap">
@@ -838,11 +849,43 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-indigo-200 bg-indigo-50 font-semibold text-indigo-950">
+                      <td colSpan={3} className="px-4 py-3 text-right text-xs uppercase tracking-wide">Date total</td>
+                      <td className="px-4 py-3 text-xs">{dateTotals.creamInputKg.toFixed(2)} kg</td>
+                      <td className="px-4 py-3 text-xs">{dateTotals.butterOutputKg.toFixed(2)} kg</td>
+                      <td className="px-4 py-3 text-xs">{dateTotals.buttermilkOutputKg.toFixed(2)} kg</td>
+                      <td className="px-4 py-3 text-xs">{dateTotals.balanceKg.toFixed(2)} kg</td>
+                      <td className="px-4 py-3" />
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
           );
         })}
+
+        {visibleChurningRounds.length > 0 && (
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-indigo-800">
+              Total across visible {creamSourceTab === 'internal' ? 'internal-cream' : 'purchased-cream'} butter rounds
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border border-indigo-200 bg-white p-3">
+                <div className="text-xs text-slate-500">Cream used</div>
+                <div className="mt-1 text-lg font-bold text-slate-900">{visibleButterTotals.creamInputKg.toFixed(2)} kg</div>
+              </div>
+              <div className="rounded-lg border border-indigo-200 bg-white p-3">
+                <div className="text-xs text-slate-500">Butter produced</div>
+                <div className="mt-1 text-lg font-bold text-slate-900">{visibleButterTotals.butterOutputKg.toFixed(2)} kg</div>
+              </div>
+              <div className="rounded-lg border border-indigo-200 bg-white p-3">
+                <div className="text-xs text-slate-500">Buttermilk recorded</div>
+                <div className="mt-1 text-lg font-bold text-slate-900">{visibleButterTotals.buttermilkOutputKg.toFixed(2)} kg</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {visibleChurningRounds.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
