@@ -3,11 +3,12 @@ import { Plus, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, milkStorageVessels } from '../data/mockData';
+import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation } from '../data/mockData';
 import { getPaneerPackWeight, normalizeFinishedGoodsSku, paneerSkuByCode } from '../data/skuConfig';
 import { getProductionPackingEntries } from '../lib/finishedStock';
 import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { exportMilkReceivingWorkbook } from '../lib/operationalExports';
+import { getMilkLotVesselBalances, getMilkSaleSourceAvailability, getMilkSaleVesselSource } from '../lib/milkVesselAllocation';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
@@ -130,50 +131,6 @@ export default function MilkReceiving() {
     setExpandedLots(newExpanded);
   };
 
-  const getAllocations = (lot: typeof milkLots[number]) => {
-    const accounting = getMilkLotAccounting(lot, productionRounds);
-    let receiptRemainder = Math.max(0, lot.litresReceived);
-    const allocations = milkStorageVessels.map((vessel) => {
-      const litres = vessel.capacity === null ? receiptRemainder : Math.min(vessel.capacity, receiptRemainder);
-      receiptRemainder = Math.max(0, receiptRemainder - litres);
-      return { ...vessel, litres };
-    });
-
-    // New rounds identify their source vessel. Use the same draw rule as the
-    // milk ledger so scheduled rounds do not reduce vessel balances early.
-    const sourceDraws = new Map<string, number>();
-    productionRounds
-      .filter((round) => round.milkLotId === lot.id && round.sourceVessel)
-      .forEach((round) => {
-        const draw = getRoundMilkInput(round);
-        if (draw <= 0) return;
-        const vesselId = round.sourceVessel === 'holding-tank' ? 'bmc-2' : round.sourceVessel!;
-        sourceDraws.set(vesselId, (sourceDraws.get(vesselId) || 0) + Math.max(0, draw));
-      });
-    allocations.forEach((allocation) => {
-      const draw = sourceDraws.get(allocation.id) || 0;
-      allocation.litres = Math.max(0, allocation.litres - draw);
-    });
-
-    // Historical rounds do not have a vessel recorded. Reconcile that legacy
-    // drawdown against the receiving fill order so the displayed quantities
-    // still add up to the lot's current remaining figure.
-    const knownDraw = [...sourceDraws.values()].reduce((sum, draw) => sum + draw, 0);
-    let legacyDraw = Math.max(0, lot.litresReceived - accounting.remaining - knownDraw);
-    allocations.forEach((allocation) => {
-      if (legacyDraw <= 0) return;
-      const draw = Math.min(allocation.litres, legacyDraw);
-      allocation.litres -= draw;
-      legacyDraw -= draw;
-    });
-
-    const displayedTotal = allocations.reduce((sum, allocation) => sum + allocation.litres, 0);
-    const reconciliationDifference = Math.max(0, accounting.remaining - displayedTotal);
-    const auxiliary = allocations.find((allocation) => allocation.id === 'auxiliary');
-    if (auxiliary) auxiliary.litres += reconciliationDifference;
-    return allocations.filter((allocation) => allocation.litres > 0 || sourceDraws.has(allocation.id));
-  };
-
   const packedSkuSummary = useMemo(() => {
     if (!displayedLot) return [];
     const boardEntries = getProductionPackingEntries(productionRounds)
@@ -207,6 +164,10 @@ export default function MilkReceiving() {
     received: displayedLot.litresReceived,
     ...getMilkLotAccounting(displayedLot, productionRounds),
   } : { received: 0, consumed: 0, sold: 0, remaining: 0 };
+  const displayedSaleSource = getMilkSaleVesselSource(milkSale.quantity);
+  const displayedSaleAvailability = displayedLot
+    ? getMilkSaleSourceAvailability(displayedLot, productionRounds)
+    : { ibc: 0, auxiliary: 0 };
 
   const handleExport = async () => {
     if (!displayedLot || isExporting) return;
@@ -280,6 +241,17 @@ export default function MilkReceiving() {
       showToast('error', `Only ${available.toLocaleString()} L is available in this lot`);
       return;
     }
+    const sourceVessel = getMilkSaleVesselSource(milkSale.quantity);
+    if (!sourceVessel) {
+      showToast('error', 'Milk sales must be an exact multiple of 1,000 L (IBC) or less than 400 L (auxiliary)');
+      return;
+    }
+    const sourceAvailability = getMilkSaleSourceAvailability(lot, productionRounds);
+    if (milkSale.quantity > sourceAvailability[sourceVessel]) {
+      const sourceLabel = sourceVessel === 'ibc' ? 'IBCs' : 'auxiliary storage';
+      showToast('error', `Only ${sourceAvailability[sourceVessel].toLocaleString()} L is available in ${sourceLabel}`);
+      return;
+    }
     updateMilkLot(lot.id, {
       litresConsumed: getMilkLotAccounting(lot, productionRounds).consumed,
       litresSold: (lot.litresSold || 0) + milkSale.quantity,
@@ -290,9 +262,10 @@ export default function MilkReceiving() {
         saleDate: milkSale.saleDate,
         customer: milkSale.customer.trim(),
         quantity: milkSale.quantity,
+        sourceVessel,
       }],
     });
-    showToast('success', `${milkSale.quantity.toLocaleString()} L sold from lot ${lot.lotCode}`);
+    showToast('success', `${milkSale.quantity.toLocaleString()} L sold from ${sourceVessel === 'ibc' ? 'IBC stock' : 'auxiliary storage'}`);
     setShowMilkSaleModal(false);
   };
 
@@ -500,6 +473,7 @@ export default function MilkReceiving() {
                 const isExpanded = expandedLots.has(lot.id);
                 const lotAccounting = getMilkLotAccounting(lot, productionRounds);
                 const lotReconciliation = getMilkLotProductionReconciliation(lot, productionRounds);
+                const vesselAllocation = getMilkLotVesselBalances(lot, productionRounds);
                 const milkLeft = lotAccounting.remaining;
                 
                 return (
@@ -726,19 +700,31 @@ export default function MilkReceiving() {
                               </div>
                               <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
                                 <h3 className="text-sm font-bold text-slate-900 mb-1">Vessel / location allocation</h3>
-                                <p className="text-xs text-slate-500 mb-3">Bars show quantity against each vessel’s capacity. New rounds reduce the selected BMC; older rounds are reconciled as legacy drawdown. Direct production is normally 2,000 L and can use up to 3,000 L when required.</p>
+                                <p className="text-xs text-slate-500 mb-3">Production is deducted automatically in this order: Direct to production → BMC #2 → Silo → BMC #1 → BMC #3 → Auxiliary → IBCs. Sales use IBCs for exact 1,000 L multiples and Auxiliary for quantities below 400 L.</p>
                                 <div className="space-y-2">
-                                  {getAllocations(lot).length > 0 ? getAllocations(lot).map((allocation) => {
+                                  {vesselAllocation.vessels.length > 0 ? vesselAllocation.vessels.map((allocation) => {
                                     const fillPercent = allocation.capacity ? Math.min(100, (allocation.litres / allocation.capacity) * 100) : 100;
                                     return (
-                                      <div key={allocation.id} className="flex items-center gap-2 text-xs">
-                                        <span className="w-40 shrink-0 text-slate-600">{allocation.label}</span>
-                                        <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${fillPercent}%` }} /></div>
-                                        <span className="w-28 text-right font-semibold text-slate-800">{allocation.litres.toLocaleString()} L{allocation.capacity ? ` / ${allocation.capacity.toLocaleString()} L` : ''}</span>
+                                      <div key={allocation.id} className="rounded-lg border border-slate-100 px-2 py-2">
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <span className="w-40 shrink-0 text-slate-600">{allocation.label}</span>
+                                          <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${fillPercent}%` }} /></div>
+                                          <span className="w-28 text-right font-semibold text-slate-800">{allocation.litres.toLocaleString()} L{allocation.capacity ? ` / ${allocation.capacity.toLocaleString()} L` : ''}</span>
+                                        </div>
+                                        {(allocation.productionDrawLitres > 0 || allocation.salesDrawLitres > 0 || allocation.otherDrawLitres > 0) && (
+                                          <p className="mt-1 text-[11px] text-slate-500">
+                                            Opened {allocation.openingLitres.toLocaleString()} L · Production {allocation.productionDrawLitres.toLocaleString()} L · Sales {allocation.salesDrawLitres.toLocaleString()} L · Other {allocation.otherDrawLitres.toLocaleString()} L
+                                          </p>
+                                        )}
                                       </div>
                                     );
                                   }) : <p className="text-xs text-slate-400">No remaining milk to allocate</p>}
                                 </div>
+                                {vesselAllocation.ruleShortfallLitres > 0.01 && (
+                                  <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                                    Vessel allocation shortfall: {vesselAllocation.ruleShortfallLitres.toLocaleString()} L. The recorded milk use exceeds the opening vessel stock or a sale’s required source.
+                                  </div>
+                                )}
                               </div>
                             </div>
 
@@ -760,6 +746,7 @@ export default function MilkReceiving() {
                                     <tr className="bg-white border-b border-slate-200">
                                       <th className="px-4 py-2 text-left font-semibold text-slate-700 text-xs uppercase tracking-wider">Milk Sale Date</th>
                                       <th className="px-4 py-2 text-left font-semibold text-slate-700 text-xs uppercase tracking-wider">Customer</th>
+                                      <th className="px-4 py-2 text-left font-semibold text-slate-700 text-xs uppercase tracking-wider">Deducted From</th>
                                       <th className="px-4 py-2 text-right font-semibold text-slate-700 text-xs uppercase tracking-wider">Quantity</th>
                                     </tr>
                                   </thead>
@@ -768,6 +755,13 @@ export default function MilkReceiving() {
                                       <tr key={sale.id} className="hover:bg-slate-50">
                                         <td className="px-4 py-3 text-slate-700">{formatDate(sale.saleDate)}</td>
                                         <td className="px-4 py-3 text-slate-900 font-medium">{sale.customer}</td>
+                                        <td className="px-4 py-3 text-slate-700">
+                                          {(sale.sourceVessel || getMilkSaleVesselSource(sale.quantity)) === 'ibc'
+                                            ? 'IBC stock'
+                                            : (sale.sourceVessel || getMilkSaleVesselSource(sale.quantity)) === 'auxiliary'
+                                              ? 'Auxiliary storage'
+                                              : 'Legacy / unassigned'}
+                                        </td>
                                         <td className="px-4 py-3 text-right text-slate-700 font-semibold">{sale.quantity.toLocaleString()} L</td>
                                       </tr>
                                     ))}
@@ -919,8 +913,21 @@ export default function MilkReceiving() {
 
       <Modal isOpen={showMilkSaleModal} onClose={() => setShowMilkSaleModal(false)} title={`Log milk sale · ${displayedLot?.lotCode || ''}`}>
         <div className="space-y-4">
-          <p className="text-xs text-slate-500">Only the selected lot’s remaining milk can be sold. Available: <strong>{totals.remaining.toLocaleString()} L</strong>.</p>
+          <p className="text-xs text-slate-500">Only the selected lot’s remaining milk can be sold. Total available: <strong>{totals.remaining.toLocaleString()} L</strong>.</p>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+            <p><strong>Automatic sale source:</strong> exact multiples of 1,000 L are deducted from IBC stock; quantities below 400 L are deducted from auxiliary storage.</p>
+            <p className="mt-1">Available now: {displayedSaleAvailability.ibc.toLocaleString()} L in IBCs · {displayedSaleAvailability.auxiliary.toLocaleString()} L in auxiliary storage.</p>
+          </div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of milk (L)</label><input type="number" min="1" value={milkSale.quantity || ''} onChange={(e) => setMilkSale({ ...milkSale, quantity: Number(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          {milkSale.quantity > 0 && (
+            <p className={`text-xs font-medium ${displayedSaleSource ? 'text-emerald-700' : 'text-red-700'}`}>
+              {displayedSaleSource === 'ibc'
+                ? 'This sale will be deducted from IBC stock.'
+                : displayedSaleSource === 'auxiliary'
+                  ? 'This sale will be deducted from auxiliary storage.'
+                  : 'Invalid quantity: enter an exact 1,000 L multiple or a quantity below 400 L.'}
+            </p>
+          )}
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Sold to customer</label><input value={milkSale.customer} onChange={(e) => setMilkSale({ ...milkSale, customer: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Customer name" /></div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Date of sale</label><input type="date" value={milkSale.saleDate} onChange={(e) => setMilkSale({ ...milkSale, saleDate: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
           <div className="flex gap-2 pt-2"><button onClick={handleMilkSale} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium">Save milk sale</button><button onClick={() => setShowMilkSaleModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium">Cancel</button></div>

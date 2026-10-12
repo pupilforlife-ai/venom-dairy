@@ -3,7 +3,7 @@ import { Clock, Plus, Thermometer } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getAmassiBatchCode, getCreamBatchCode, milkProductionVessels } from '../data/mockData';
+import { getAmassiBatchCode, getCreamBatchCode } from '../data/mockData';
 
 type AmassiStage =
   | 'scheduled'
@@ -119,7 +119,6 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
     plannedInput: 500,
     milkTemperature: 4,
     amassiType: 'BM' as AmassiType,
-    sourceVessel: '',
     team: '',
   });
 
@@ -168,8 +167,8 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
   };
 
   const handleCreateRound = () => {
-    if (!newRound.shiftId || !newRound.sourceVessel || newRound.plannedInput <= 0) {
-      showToast('error', 'Select a shift, milk vessel, and valid milk quantity');
+    if (!newRound.shiftId || newRound.plannedInput <= 0) {
+      showToast('error', 'Select a shift and enter a valid milk quantity');
       return;
     }
     const shift = productionShifts.find(item => item.id === newRound.shiftId);
@@ -191,7 +190,6 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
       team: newRound.team ? newRound.team.split(',').map(member => member.trim()).filter(Boolean) : shift.team,
       plannedInput: newRound.plannedInput,
       actualInput: newRound.plannedInput,
-      sourceVessel: newRound.sourceVessel,
       startingTemperature: newRound.milkTemperature,
       outputWeight: 0,
       startTime: new Date().toISOString(),
@@ -201,7 +199,7 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
     });
     showToast('success', `Amassi round created: ${roundCode({ shiftNumber: shift.shiftNumber, roundNumber: newRound.roundNumber })}`);
     setShowNewRoundModal(false);
-    setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 500, milkTemperature: 4, amassiType: 'BM', sourceVessel: '', team: '' });
+    setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 500, milkTemperature: 4, amassiType: 'BM', team: '' });
   };
 
   const handleStageChange = (roundId: string, nextStage: AmassiStage) => {
@@ -402,7 +400,26 @@ export default function AmassiTab({ selectedMilkLotId, canForceStage }: { select
       </Modal>
 
       <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create Amassi Round">
-        <div className="space-y-4"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Shift</label><select value={newRound.shiftId} onChange={event => { const shiftId = event.target.value; const count = amassiRounds.filter(round => round.shiftId === shiftId).length; setNewRound({ ...newRound, shiftId, roundNumber: count + 1 }); }} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select shift</option>{amassiShifts.map(shift => <option key={shift.id} value={shift.id}>Shift {shift.shiftNumber} · {shift.milkLotCode}</option>)}</select></div><div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk quantity (L)</label><input type="number" min="0" value={newRound.plannedInput || ''} onChange={event => setNewRound({ ...newRound, plannedInput: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk temp (°C)</label><input type="number" step="0.1" value={newRound.milkTemperature || ''} onChange={event => setNewRound({ ...newRound, milkTemperature: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Type</label><select value={newRound.amassiType} onChange={event => setNewRound({ ...newRound, amassiType: event.target.value as AmassiType })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="BM">BM</option><option value="SKM">SKM</option></select></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk taken from</label><select value={newRound.sourceVessel} onChange={event => setNewRound({ ...newRound, sourceVessel: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select vessel</option>{milkProductionVessels.map(vessel => <option key={vessel.id} value={vessel.id}>{vessel.label} ({vessel.capacity?.toLocaleString()} L)</option>)}</select><p className="text-xs text-slate-500 mt-1">Transfer milk into a BMC before production.</p></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Team (optional)</label><input value={newRound.team} onChange={event => setNewRound({ ...newRound, team: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div><div className="flex gap-2"><button onClick={handleCreateRound} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white">Create Round</button><button onClick={() => setShowNewRoundModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700">Cancel</button></div></div>
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Shift</label>
+            <select value={newRound.shiftId} onChange={event => { const shiftId = event.target.value; const count = amassiRounds.filter(round => round.shiftId === shiftId).length; setNewRound({ ...newRound, shiftId, roundNumber: count + 1 }); }} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+              <option value="">Select shift</option>
+              {amassiShifts.map(shift => <option key={shift.id} value={shift.id}>Shift {shift.shiftNumber} · {shift.milkLotCode}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk quantity (L)</label><input type="number" min="0" value={newRound.plannedInput || ''} onChange={event => setNewRound({ ...newRound, plannedInput: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div>
+            <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk temp (°C)</label><input type="number" step="0.1" value={newRound.milkTemperature || ''} onChange={event => setNewRound({ ...newRound, milkTemperature: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div>
+          </div>
+          <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Type</label><select value={newRound.amassiType} onChange={event => setNewRound({ ...newRound, amassiType: event.target.value as AmassiType })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="BM">BM</option><option value="SKM">SKM</option></select></div>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+            <p className="text-xs font-semibold text-blue-900">Automatic vessel deduction</p>
+            <p className="mt-1 text-xs text-blue-800">When this round starts, its recorded milk quantity is deducted in order: Direct to production → BMC #2 → Silo → BMC #1 → BMC #3 → Auxiliary → IBCs.</p>
+          </div>
+          <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Team (optional)</label><input value={newRound.team} onChange={event => setNewRound({ ...newRound, team: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></div>
+          <div className="flex gap-2"><button onClick={handleCreateRound} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white">Create Round</button><button onClick={() => setShowNewRoundModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700">Cancel</button></div>
+        </div>
       </Modal>
 
       <Modal isOpen={showPackModal} onClose={() => setShowPackModal(false)} title="Record bottles before incubation">

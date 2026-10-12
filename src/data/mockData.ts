@@ -12,6 +12,7 @@ export interface MilkSale {
   saleDate: string;
   customer: string;
   quantity: number;
+  sourceVessel?: 'ibc' | 'auxiliary';
 }
 
 export interface MilkBalanceSnapshot {
@@ -411,28 +412,22 @@ export interface MilkStorageVessel {
   capacity: number | null;
 }
 
-// The order is the receiving fill order used for the estimated opening
-// allocation. Future rounds record the vessel they actually draw from.
+// Displayed in the automatic production-deduction order. Opening receipt
+// allocation is calculated separately so full 1,000 L IBC units and the
+// auxiliary remainder remain identifiable for milk-sale accounting.
 export const milkStorageVessels: MilkStorageVessel[] = [
+  { id: 'direct-production', label: 'Direct to production', capacity: 3000 },
+  { id: 'bmc-2', label: 'BMC #2 (Holding Tank)', capacity: 2500 },
   { id: 'silo', label: 'Silo', capacity: 10000 },
   { id: 'bmc-1', label: 'BMC #1', capacity: 3000 },
-  { id: 'bmc-2', label: 'BMC #2 (Holding Tank)', capacity: 2500 },
   { id: 'bmc-3', label: 'BMC #3', capacity: 3000 },
+  { id: 'auxiliary', label: 'Auxiliary storage (cans / buckets)', capacity: null },
   ...Array.from({ length: 10 }, (_, index) => ({
     id: `ibc-${index + 1}`,
     label: `IBC #${index + 1}`,
     capacity: 1000,
   })),
-  { id: 'direct-production', label: 'Direct to production (up to 3,000 L)', capacity: 3000 },
-  { id: 'auxiliary', label: 'Auxiliary storage (cans / buckets)', capacity: null },
 ];
-
-// Milk is transferred into a BMC before production. Keeping this list
-// separate from the full allocation list prevents rounds from accidentally
-// drawing directly from an IBC or the silo.
-export const milkProductionVessels = milkStorageVessels.filter((vessel) =>
-  vessel.id === 'bmc-1' || vessel.id === 'bmc-2' || vessel.id === 'bmc-3'
-);
 
 export interface ProductionShift {
   id: string;

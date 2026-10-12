@@ -3,7 +3,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { Plus, Clock, Package, Scissors, CheckCircle2, Thermometer, Beaker, ShieldAlert } from 'lucide-react';
-import { getHalloumiBatchCode, milkProductionVessels } from '../data/mockData';
+import { getHalloumiBatchCode } from '../data/mockData';
 
 // Halloumi-specific status flow
 const halloumiStatusFlow = [
@@ -188,7 +188,6 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
     shiftId: '',
     roundNumber: 1,
     plannedInput: 240,
-    sourceVessel: '',
     team: '',
   });
 
@@ -222,8 +221,8 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
   };
 
   const handleCreateRound = () => {
-    if (!newRound.shiftId || !newRound.sourceVessel || newRound.plannedInput <= 0) {
-      showToast('error', 'Please select a shift, milk vessel, and a positive milk quantity');
+    if (!newRound.shiftId || newRound.plannedInput <= 0) {
+      showToast('error', 'Please select a shift and enter a positive milk quantity');
       return;
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
@@ -245,7 +244,6 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
       plannedInput: newRound.plannedInput,
       actualInput: newRound.plannedInput,
-      sourceVessel: newRound.sourceVessel,
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
@@ -254,7 +252,7 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
     });
     showToast('success', `Halloumi round created: ${getHalloumiBatchCode(shift.milkLotCode)}/S${shift.shiftNumber}/R${newRound.roundNumber}`);
     setShowNewRoundModal(false);
-    setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 240, sourceVessel: '', team: '' });
+    setNewRound({ shiftId: '', roundNumber: 1, plannedInput: 240, team: '' });
   };
 
   const handleStatusChange = (roundId: string, newStatus: HalloumiStatus) => {
@@ -791,12 +789,10 @@ export default function HalloumiTab({ selectedMilkLotId, canForceStage }: { sele
             <input type="number" value={newRound.plannedInput || ''} onChange={(e) => setNewRound({ ...newRound, plannedInput: Math.max(1, parseInt(e.target.value) || 1) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="1" />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk taken from</label>
-            <select value={newRound.sourceVessel} onChange={(e) => setNewRound({ ...newRound, sourceVessel: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-              <option value="">Select vessel</option>
-              {milkProductionVessels.map((vessel) => <option key={vessel.id} value={vessel.id}>{vessel.label} ({vessel.capacity?.toLocaleString()} L)</option>)}
-            </select>
-            <p className="text-xs text-slate-500 mt-1">Transfer milk into BMC #1 or BMC #2 (Holding Tank) before production.</p>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <p className="text-xs font-semibold text-blue-900">Automatic vessel deduction</p>
+              <p className="mt-1 text-xs text-blue-800">When this round starts, its recorded milk quantity is deducted in order: Direct to production → BMC #2 → Silo → BMC #1 → BMC #3 → Auxiliary → IBCs.</p>
+            </div>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (optional)</label>

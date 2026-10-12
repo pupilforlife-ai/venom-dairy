@@ -23,7 +23,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { milkProductionVessels, statusFlow, statusLabels, statusColors, CipRecord } from '../data/mockData';
+import { statusFlow, statusLabels, statusColors, CipRecord } from '../data/mockData';
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import { useSupabaseState } from '../hooks/useSupabaseState';
@@ -204,7 +204,6 @@ export default function ProductionBoard() {
     roundNumber: 1,
     type: 'D' as const,
     plannedInput: 500,
-    sourceVessel: '',
     team: '',
   });
 
@@ -1217,15 +1216,14 @@ export default function ProductionBoard() {
       roundNumber: existingRoundsInShift + 1,
       type: 'D',
       plannedInput: 500,
-      sourceVessel: '',
       team: '',
     });
     setShowNewRoundModal(true);
   };
 
   const handleCreateRound = () => {
-    if (!newRound.shiftId || !newRound.sourceVessel || newRound.plannedInput <= 0) {
-      showToast('error', 'Please select a shift, milk vessel, and a positive milk quantity');
+    if (!newRound.shiftId || newRound.plannedInput <= 0) {
+      showToast('error', 'Please select a shift and enter a positive milk quantity');
       return;
     }
     const shift = productionShifts.find(s => s.id === newRound.shiftId);
@@ -1254,7 +1252,6 @@ export default function ProductionBoard() {
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : shift.team,
       plannedInput: newRound.plannedInput,
       actualInput: 0,
-      sourceVessel: newRound.sourceVessel,
       outputWeight: 0,
       startTime: new Date().toISOString(),
       locked: false,
@@ -2802,12 +2799,10 @@ export default function ProductionBoard() {
             <input type="number" value={newRound.plannedInput || ''} onChange={(e) => setNewRound({ ...newRound, plannedInput: Math.max(1, parseInt(e.target.value) || 1) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="1" />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk taken from</label>
-            <select value={newRound.sourceVessel} onChange={(e) => setNewRound({ ...newRound, sourceVessel: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-              <option value="">Select vessel</option>
-              {milkProductionVessels.map((vessel) => <option key={vessel.id} value={vessel.id}>{vessel.label} ({vessel.capacity?.toLocaleString()} L)</option>)}
-            </select>
-            <p className="text-xs text-slate-500 mt-1">Milk must be transferred into BMC #1 or BMC #2 (Holding Tank) before production. The editable Milk Qty is the actual quantity taken into this round.</p>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <p className="text-xs font-semibold text-blue-900">Automatic vessel deduction</p>
+              <p className="mt-1 text-xs text-blue-800">When this round starts, its recorded milk quantity is deducted in order: Direct to production → BMC #2 → Silo → BMC #1 → BMC #3 → Auxiliary → IBCs.</p>
+            </div>
           </div>
           <div className="flex gap-2 pt-2">
             <button onClick={handleCreateRound} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Create Round</button>

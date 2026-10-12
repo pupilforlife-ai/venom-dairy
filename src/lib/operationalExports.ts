@@ -20,6 +20,7 @@ import {
 } from '../data/skuConfig';
 import { getProductionPackingEntries } from './finishedStock';
 import { excelDate, ExcelSheet, exportDateStamp, exportExcelWorkbook } from './excelExport';
+import { getMilkLotVesselBalances, getMilkSaleVesselSource } from './milkVesselAllocation';
 
 interface CrumbingBatchExportRecord {
   id: string;
@@ -143,7 +144,7 @@ function roundLedgerSheet(rounds: ProductionRound[], title: string, metadata: Ex
       { key: 'plannedInput', header: 'Planned Input', width: 15, numberFormat: '0.00' },
       { key: 'accountableInput', header: 'Accountable Input', width: 17, numberFormat: '0.00' },
       { key: 'inputUnit', header: 'Input Unit', width: 11 },
-      { key: 'sourceVessel', header: 'Source Vessel', width: 18 },
+      { key: 'sourceVessel', header: 'Vessel Allocation', width: 22 },
       { key: 'outputKg', header: 'Output kg', width: 13, numberFormat: '0.00' },
       { key: 'creamKg', header: 'Cream kg', width: 13, numberFormat: '0.00' },
       { key: 'pan111Kg', header: 'PAN111 kg', width: 13, numberFormat: '0.00' },
@@ -173,7 +174,7 @@ function roundLedgerSheet(rounds: ProductionRound[], title: string, metadata: Ex
           plannedInput: round.plannedInput,
           accountableInput: input.quantity,
           inputUnit: input.unit,
-          sourceVessel: round.sourceVessel || '',
+          sourceVessel: round.sourceVessel || 'Automatic allocation',
           outputKg: round.outputWeight || 0,
           creamKg: round.creamRecovered || 0,
           pan111Kg,
@@ -521,6 +522,7 @@ function packedSkuSummary(lot: MilkLot, rounds: ProductionRound[]) {
 export async function exportMilkReceivingWorkbook(lot: MilkLot, rounds: ProductionRound[]) {
   const accounting = getMilkLotAccounting(lot, rounds);
   const production = getMilkLotProductionReconciliation(lot, rounds);
+  const vesselAllocation = getMilkLotVesselBalances(lot, rounds);
   const lotRounds = rounds.filter(round => round.milkLotId === lot.id || round.milkLotCode === lot.lotCode);
   const metadata: ExcelSheet['metadata'] = [...exportedAtMetadata(), ['Milk lot', lot.lotCode]];
   const receiptSheet: ExcelSheet = {
@@ -609,13 +611,45 @@ export async function exportMilkReceivingWorkbook(lot: MilkLot, rounds: Producti
     columns: [
       { key: 'date', header: 'Sale Date', width: 15 },
       { key: 'customer', header: 'Customer', width: 25 },
+      { key: 'source', header: 'Deducted From', width: 20 },
       { key: 'quantityL', header: 'Quantity L', width: 15, numberFormat: '0.00' },
     ],
-    rows: (lot.milkSales || []).map(sale => ({ date: excelDate(sale.saleDate), customer: sale.customer, quantityL: sale.quantity })),
+    rows: (lot.milkSales || []).map(sale => {
+      const source = sale.sourceVessel || getMilkSaleVesselSource(sale.quantity);
+      return {
+        date: excelDate(sale.saleDate),
+        customer: sale.customer,
+        source: source === 'ibc' ? 'IBC stock' : source === 'auxiliary' ? 'Auxiliary storage' : 'Legacy / unassigned',
+        quantityL: sale.quantity,
+      };
+    }),
+  };
+  const vesselSheet: ExcelSheet = {
+    name: 'Vessel Allocation',
+    title: `Milk Receiving — Automatic Vessel Allocation — Lot ${lot.lotCode}`,
+    metadata: [...metadata, ['Allocation shortfall L', vesselAllocation.ruleShortfallLitres]],
+    columns: [
+      { key: 'vessel', header: 'Vessel / Location', width: 30 },
+      { key: 'capacityL', header: 'Capacity L', width: 14, numberFormat: '0.00' },
+      { key: 'openingL', header: 'Opening L', width: 14, numberFormat: '0.00' },
+      { key: 'productionL', header: 'Production Draw L', width: 19, numberFormat: '0.00' },
+      { key: 'salesL', header: 'Sales Draw L', width: 16, numberFormat: '0.00' },
+      { key: 'otherL', header: 'Other Draw L', width: 15, numberFormat: '0.00' },
+      { key: 'remainingL', header: 'Remaining L', width: 15, numberFormat: '0.00' },
+    ],
+    rows: vesselAllocation.vessels.map(vessel => ({
+      vessel: vessel.label,
+      capacityL: vessel.capacity,
+      openingL: vessel.openingLitres,
+      productionL: vessel.productionDrawLitres,
+      salesL: vessel.salesDrawLitres,
+      otherL: vessel.otherDrawLitres,
+      remainingL: vessel.litres,
+    })),
   };
   await exportExcelWorkbook({
     filename: `vejoy-milk-receiving-${lot.lotCode}-${exportDateStamp()}.xlsx`,
-    sheets: [receiptSheet, reconciliationSheet, skuSheet, roundLedgerSheet(lotRounds, `Milk Receiving — Round Ledger — Lot ${lot.lotCode}`, metadata), salesSheet],
+    sheets: [receiptSheet, reconciliationSheet, vesselSheet, skuSheet, roundLedgerSheet(lotRounds, `Milk Receiving — Round Ledger — Lot ${lot.lotCode}`, metadata), salesSheet],
   });
 }
 
