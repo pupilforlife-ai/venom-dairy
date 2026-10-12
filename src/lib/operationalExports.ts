@@ -4,6 +4,7 @@ import {
   getMilkLotAccounting,
   getMilkLotProductionReconciliation,
   getRoundMilkInput,
+  isMilkProductionRound,
   MilkLot,
   ProductionRound,
   ProductionShift,
@@ -121,6 +122,16 @@ function sortedRounds(rounds: ProductionRound[]) {
 
 function sum(values: number[] | undefined) {
   return (values || []).reduce((total, value) => total + Math.max(0, value || 0), 0);
+}
+
+function withNoRecords(sheet: ExcelSheet, message: string): ExcelSheet {
+  if (sheet.rows.length > 0) return sheet;
+  const firstColumn = sheet.columns[0]?.key || 'status';
+  return {
+    ...sheet,
+    metadata: [...(sheet.metadata || []), ['Record status', message]],
+    rows: [{ [firstColumn]: message }],
+  };
 }
 
 function productionSummarySheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
@@ -459,9 +470,14 @@ function packWeight(pack: { sku: string; cases: number; loose?: number; looseWei
   return Math.max(0, pack.weightKg || pack.looseWeightKg || 0);
 }
 
-function roundLedgerSheet(rounds: ProductionRound[], title: string, metadata: ExcelSheet['metadata']): ExcelSheet {
+function roundLedgerSheet(
+  rounds: ProductionRound[],
+  title: string,
+  metadata: ExcelSheet['metadata'],
+  name = 'Round Ledger',
+): ExcelSheet {
   return {
-    name: 'Round Ledger',
+    name,
     title,
     metadata,
     columns: [
@@ -520,7 +536,12 @@ function roundLedgerSheet(rounds: ProductionRound[], title: string, metadata: Ex
   };
 }
 
-function packingSheet(rounds: ProductionRound[], title: string, metadata: ExcelSheet['metadata']): ExcelSheet {
+function packingSheet(
+  rounds: ProductionRound[],
+  title: string,
+  metadata: ExcelSheet['metadata'],
+  name = 'Packed SKUs',
+): ExcelSheet {
   const rows = rounds.flatMap(round => {
     const regular = (round.packedSkus || []).map((pack, index) => ({
       lot: round.milkLotCode,
@@ -557,7 +578,7 @@ function packingSheet(rounds: ProductionRound[], title: string, metadata: ExcelS
     return [...regular, ...amassi];
   });
   return {
-    name: 'Packed SKUs',
+    name,
     title,
     metadata,
     columns: [
@@ -580,7 +601,7 @@ function packingSheet(rounds: ProductionRound[], title: string, metadata: ExcelS
   };
 }
 
-function measurementSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']): ExcelSheet {
+function measurementSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata'], name = 'Weights'): ExcelSheet {
   const rows = rounds.flatMap(round => [
     ...(round.blockWeights || []).map((weight, index) => ({
       lot: round.milkLotCode,
@@ -617,7 +638,7 @@ function measurementSheet(rounds: ProductionRound[], metadata: ExcelSheet['metad
     })),
   ]);
   return {
-    name: 'Weights',
+    name,
     title: 'Production Board — Individual Weights',
     metadata,
     columns: [
@@ -635,18 +656,22 @@ function measurementSheet(rounds: ProductionRound[], metadata: ExcelSheet['metad
   };
 }
 
-function crumbingSheets(batches: CrumbingBatchExportRecord[]): ExcelSheet[] {
-  const metadata: ExcelSheet['metadata'] = [...exportedAtMetadata(), ['Scope', 'All crumbing batches']];
-  const overview: ExcelSheet = {
-    name: 'Crumbing Batches',
-    title: 'Production Board — Crumbing Batches',
+function crumbingBatchSheet(
+  name: string,
+  title: string,
+  batches: CrumbingBatchExportRecord[],
+  metadata: ExcelSheet['metadata'],
+  emptyMessage: string,
+): ExcelSheet {
+  const sheet: ExcelSheet = {
+    name,
+    title,
     metadata,
     columns: [
       { key: 'batch', header: 'Batch Code', width: 24 },
-      { key: 'type', header: 'Type', width: 10 },
-      { key: 'source', header: 'Source Batch', width: 25 },
+      { key: 'source', header: 'Source Batch / Ingredient Trace', width: 30 },
       { key: 'origin', header: 'Manual Origin', width: 22 },
-      { key: 'status', header: 'Status', width: 19 },
+      { key: 'status', header: 'Current Stage', width: 19 },
       { key: 'sourceKg', header: 'Source kg', width: 13, numberFormat: '0.00' },
       { key: 'crumbedKg', header: 'Crumbed kg', width: 14, numberFormat: '0.00' },
       { key: 'balanceKg', header: 'Balance kg', width: 14, numberFormat: '0.00' },
@@ -655,77 +680,109 @@ function crumbingSheets(batches: CrumbingBatchExportRecord[]): ExcelSheet[] {
       { key: 'traysFried', header: 'Trays Fried', width: 13, numberFormat: '0' },
       { key: 'traysRemaining', header: 'Trays Remaining', width: 17, numberFormat: '0' },
       { key: 'traysPacked', header: 'Trays Packed', width: 14, numberFormat: '0' },
-      { key: 'createdAt', header: 'Created At', width: 21 },
-      { key: 'notes', header: 'Notes', width: 30 },
-    ],
-    rows: batches.map(batch => ({
-      batch: batch.batchCode,
-      type: batch.type,
-      source: batch.sourceBatchCode,
-      origin: batch.origin || '',
-      status: batch.status,
-      sourceKg: batch.sourceWeightKg || 0,
-      crumbedKg: batch.weightCrumbedKg || 0,
-      balanceKg: batch.balanceWeightKg || 0,
-      wastageKg: batch.wastageKg || 0,
-      traysCrumbed: batch.traysCrumbed,
-      traysFried: batch.traysFried,
-      traysRemaining: batch.traysRemaining,
-      traysPacked: batch.traysPacked,
-      createdAt: excelDate(batch.createdAt),
-      notes: batch.notes || '',
-    })),
-  };
-  const ingredients: ExcelSheet = {
-    name: 'Crumbing Ingredients',
-    title: 'Production Board — Crumbing Ingredient Ledger',
-    metadata,
-    columns: [
-      { key: 'batch', header: 'Batch Code', width: 24 },
-      { key: 'type', header: 'Type', width: 10 },
       { key: 'predustKg', header: 'Predust kg', width: 14, numberFormat: '0.000' },
       { key: 'iyababKg', header: 'Iyabab kg', width: 14, numberFormat: '0.000' },
       { key: 'batterKg', header: 'Batter Mix kg', width: 16, numberFormat: '0.000' },
       { key: 'waterL', header: 'Batter Water L', width: 17, numberFormat: '0.000' },
       { key: 'adajioKg', header: 'Adajio kg', width: 14, numberFormat: '0.000' },
+      { key: 'packedSkus', header: 'Packed SKUs', width: 34 },
+      { key: 'packedCases', header: 'Packed Cases', width: 14, numberFormat: '0' },
+      { key: 'packedLoose', header: 'Loose Units', width: 13, numberFormat: '0' },
+      { key: 'packedWeightKg', header: 'Packed Weight kg', width: 18, numberFormat: '0.00' },
+      { key: 'jpBuckets', header: 'JP Buckets', width: 12, numberFormat: '0' },
+      { key: 'jpGood', header: 'JP Good Pieces', width: 16, numberFormat: '0' },
+      { key: 'jpPrepDamaged', header: 'JP Prep Damaged', width: 17, numberFormat: '0' },
+      { key: 'jpCrumbable', header: 'JP Crumbable Pieces', width: 20, numberFormat: '0' },
+      { key: 'pan111Kg', header: 'PAN111 kg', width: 13, numberFormat: '0.00' },
+      { key: 'creamKg', header: 'Cream kg', width: 12, numberFormat: '0.000' },
+      { key: 'pepperKg', header: 'Black Pepper kg', width: 17, numberFormat: '0.000' },
+      { key: 'saltKg', header: 'Salt kg', width: 12, numberFormat: '0.000' },
+      { key: 'creamCheeseAvailableKg', header: 'Cream Cheese Available kg', width: 24, numberFormat: '0.00' },
+      { key: 'fillingDamaged', header: 'Filling Damaged Pieces', width: 22, numberFormat: '0' },
+      { key: 'filledPieces', header: 'Filled Pieces', width: 14, numberFormat: '0' },
+      { key: 'traysFilled', header: 'Trays Filled', width: 13, numberFormat: '0' },
+      { key: 'crumbingDamaged', header: 'Crumbing Damaged Pieces', width: 24, numberFormat: '0' },
+      { key: 'finalCrumbedPieces', header: 'Final Crumbed Pieces', width: 21, numberFormat: '0' },
+      { key: 'createdAt', header: 'Created At', width: 21 },
+      { key: 'notes', header: 'Notes', width: 30 },
     ],
-    rows: batches.map(batch => ({
-      batch: batch.batchCode,
-      type: batch.type,
-      predustKg: batch.jpCrumbing?.predustKg ?? batch.recipe?.flavourPredustKg ?? 0,
-      iyababKg: batch.recipe?.flavourIyababKg ?? 0,
-      batterKg: batch.jpCrumbing?.batterMixKg ?? batch.recipe?.batterIyababaKg ?? 0,
-      waterL: batch.jpCrumbing?.batterWaterL ?? batch.recipe?.batterWaterL ?? 0,
-      adajioKg: batch.jpCrumbing?.adajioKg ?? batch.recipe?.breadingAdajioKg ?? 0,
-    })),
+    rows: batches.map(batch => {
+      const packs = batch.packedSkus || [];
+      return {
+        batch: batch.batchCode,
+        source: batch.sourceBatchCode,
+        origin: batch.origin || '',
+        status: batch.status,
+        sourceKg: batch.sourceWeightKg ?? '',
+        crumbedKg: batch.weightCrumbedKg ?? '',
+        balanceKg: batch.balanceWeightKg ?? '',
+        wastageKg: batch.wastageKg ?? '',
+        traysCrumbed: batch.traysCrumbed,
+        traysFried: batch.traysFried,
+        traysRemaining: batch.traysRemaining,
+        traysPacked: batch.traysPacked,
+        predustKg: batch.jpCrumbing?.predustKg ?? batch.recipe?.flavourPredustKg ?? 0,
+        iyababKg: batch.recipe?.flavourIyababKg ?? 0,
+        batterKg: batch.jpCrumbing?.batterMixKg ?? batch.recipe?.batterIyababaKg ?? 0,
+        waterL: batch.jpCrumbing?.batterWaterL ?? batch.recipe?.batterWaterL ?? 0,
+        adajioKg: batch.jpCrumbing?.adajioKg ?? batch.recipe?.breadingAdajioKg ?? 0,
+        packedSkus: packs.map(pack => `${normalizeFinishedGoodsSku(pack.sku)}: ${pack.cases || 0} cs${pack.loose ? ` + ${pack.loose} loose` : ''}`).join('; '),
+        packedCases: packs.reduce((total, pack) => total + Math.max(0, pack.cases || 0), 0),
+        packedLoose: packs.reduce((total, pack) => total + Math.max(0, pack.loose || 0), 0),
+        packedWeightKg: packs.reduce((total, pack) => total + packWeight(pack), 0),
+        jpBuckets: batch.jpPrepping?.buckets.length ?? '',
+        jpGood: batch.jpPrepping?.goodPieces ?? '',
+        jpPrepDamaged: batch.jpPrepping?.damagedPieces ?? '',
+        jpCrumbable: batch.jpPrepping?.crumbablePieces ?? '',
+        pan111Kg: batch.jpPrepping?.pan111InputKg ?? '',
+        creamKg: batch.jpPrepping?.creamKg ?? '',
+        pepperKg: batch.jpPrepping?.blackPepperKg ?? '',
+        saltKg: batch.jpPrepping?.saltKg ?? '',
+        creamCheeseAvailableKg: batch.jpPrepping?.totalCreamCheeseAvailableKg ?? '',
+        fillingDamaged: batch.jpFilling?.damagedPieces ?? '',
+        filledPieces: batch.jpFilling?.filledPieces ?? '',
+        traysFilled: batch.jpFilling?.traysFilled ?? '',
+        crumbingDamaged: batch.jpCrumbing?.damagedPieces ?? '',
+        finalCrumbedPieces: batch.jpCrumbing?.finalCrumbedPieces ?? '',
+        createdAt: excelDate(batch.createdAt),
+        notes: batch.notes || '',
+      };
+    }),
   };
-  const packed: ExcelSheet = {
-    name: 'Crumbing Packed SKUs',
-    title: 'Production Board — Crumbing Packed SKUs',
-    metadata,
+  return withNoRecords(sheet, emptyMessage);
+}
+
+function crumbingSheets(
+  batches: CrumbingBatchExportRecord[],
+  lot: MilkLot,
+  lotRounds: ProductionRound[],
+): ExcelSheet[] {
+  const roundIds = new Set(lotRounds.map(round => round.id));
+  const matchesLotCode = (value: string) => value.includes(lot.lotCode);
+  const sppBatches = batches.filter(batch => batch.type === 'SPP' && (
+    roundIds.has(batch.sourceBatchId) || matchesLotCode(batch.sourceBatchCode || '')
+  ));
+  // JP is a standalone product register. PAN111 is ingredient traceability,
+  // not ownership by a milk lot, so every JP batch remains visible here.
+  const jpBatches = batches.filter(batch => batch.type === 'JP');
+  const hcpBatches = batches.filter(batch => batch.type === 'HCP' && (
+    batch.sourceBatchId === lot.id || matchesLotCode(batch.sourceBatchCode || '')
+  ));
+  const lotMetadata: ExcelSheet['metadata'] = [
+    ...exportedAtMetadata(),
+    ['Milk lot', lot.lotCode],
+  ];
+  const jpMetadata: ExcelSheet['metadata'] = [
+    ...exportedAtMetadata(),
+    ['Scope', 'Standalone JP production register; not filtered by milk lot'],
+    ['PAN111 source', 'Shown only as ingredient traceability where recorded'],
+  ];
+  const jpBuckets: ExcelSheet = withNoRecords({
+    name: 'JP Bucket Detail',
+    title: 'Production Board — Standalone JP Jalapeño Bucket Inspection',
+    metadata: jpMetadata,
     columns: [
-      { key: 'batch', header: 'Batch Code', width: 24 },
-      { key: 'type', header: 'Type', width: 10 },
-      { key: 'sku', header: 'SKU', width: 16 },
-      { key: 'cases', header: 'Cases', width: 11, numberFormat: '0' },
-      { key: 'loose', header: 'Loose', width: 11, numberFormat: '0' },
-      { key: 'weightKg', header: 'Calculated Weight kg', width: 20, numberFormat: '0.00' },
-    ],
-    rows: batches.flatMap(batch => (batch.packedSkus || []).map(pack => ({
-      batch: batch.batchCode,
-      type: batch.type,
-      sku: normalizeFinishedGoodsSku(pack.sku),
-      cases: pack.cases || 0,
-      loose: pack.loose || 0,
-      weightKg: packWeight(pack),
-    }))),
-  };
-  const jpBuckets: ExcelSheet = {
-    name: 'JP Buckets',
-    title: 'Production Board — JP Jalapeño Bucket Inspection',
-    metadata,
-    columns: [
-      { key: 'batch', header: 'Batch Code', width: 24 },
+      { key: 'batch', header: 'JP Batch Code', width: 24 },
       { key: 'bucket', header: 'Bucket', width: 10, numberFormat: '0' },
       { key: 'nominalKg', header: 'Nominal kg', width: 13, numberFormat: '0.00' },
       { key: 'rawKg', header: 'Raw kg', width: 12, numberFormat: '0.00' },
@@ -734,7 +791,7 @@ function crumbingSheets(batches: CrumbingBatchExportRecord[]): ExcelSheet[] {
       { key: 'damaged', header: 'Damaged Pieces', width: 17, numberFormat: '0' },
       { key: 'total', header: 'Total Pieces', width: 14, numberFormat: '0' },
     ],
-    rows: batches.flatMap(batch => (batch.jpPrepping?.buckets || []).map((bucket, index) => ({
+    rows: jpBatches.flatMap(batch => (batch.jpPrepping?.buckets || []).map((bucket, index) => ({
       batch: batch.batchCode,
       bucket: index + 1,
       nominalKg: bucket.nominalWeightKg,
@@ -744,8 +801,14 @@ function crumbingSheets(batches: CrumbingBatchExportRecord[]): ExcelSheet[] {
       damaged: bucket.damagedPieces,
       total: bucket.totalPieces,
     }))),
-  };
-  return [overview, ingredients, packed, jpBuckets];
+  }, 'No JP bucket inspection records have been recorded');
+
+  return [
+    crumbingBatchSheet('SPP Crumbing', `Production Board — SPP Crumbing — Lot ${lot.lotCode}`, sppBatches, lotMetadata, `No SPP crumbing batches recorded for milk lot ${lot.lotCode}`),
+    crumbingBatchSheet('JP Crumbing Standalone', 'Production Board — Standalone JP Production Register', jpBatches, jpMetadata, 'No standalone JP production batches have been recorded'),
+    jpBuckets,
+    crumbingBatchSheet('HCP Crumbing', `Production Board — HCP Crumbing — Lot ${lot.lotCode}`, hcpBatches, lotMetadata, `No HCP crumbing batches recorded for milk lot ${lot.lotCode}`),
+  ];
 }
 
 export function buildProductionBoardWorkbook(input: {
@@ -757,6 +820,7 @@ export function buildProductionBoardWorkbook(input: {
 }): ExcelWorkbookExport {
   const { lot } = input;
   const lotRounds = input.rounds.filter(round => round.milkLotId === lot.id || round.milkLotCode === lot.lotCode);
+  const paneerRounds = lotRounds.filter(round => round.type === 'D' || round.type === 'C/S');
   const lotShifts = input.shifts.filter(shift => shift.milkLotId === lot.id || shift.milkLotCode === lot.lotCode);
   const lotCip = input.cipRecords.filter(record => record.milkLotId === lot.id || record.milkLotCode === lot.lotCode);
   const metadata: ExcelSheet['metadata'] = [
@@ -823,19 +887,19 @@ export function buildProductionBoardWorkbook(input: {
   return {
     filename: `vejoy-production-board-${lot.lotCode}-${exportDateStamp()}.xlsx`,
     sheets: [
-      productionSummarySheet(lotRounds, metadata),
-      roundLedgerSheet(lotRounds, `Production Board — Round Ledger — Lot ${lot.lotCode}`, metadata),
-      cuttingSheet(lotRounds, metadata),
-      packingSheet(lotRounds, `Production Board — Packed SKUs — Lot ${lot.lotCode}`, metadata),
-      measurementSheet(lotRounds, metadata),
-      creamSheet(lotRounds, metadata),
-      butterSheet(lotRounds, metadata),
-      gheeSheet(lotRounds, metadata),
-      halloumiSheet(lotRounds, metadata),
-      amassiSheet(lotRounds, metadata),
-      ...crumbingSheets(input.crumbingBatches || []),
-      shiftSheet,
-      cipSheet,
+      withNoRecords(productionSummarySheet(lotRounds, metadata), `No production rounds recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(roundLedgerSheet(paneerRounds, `Production Board — Paneer Rounds — Lot ${lot.lotCode}`, metadata, 'Paneer Rounds'), `No paneer rounds recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(cuttingSheet(paneerRounds, metadata), `No paneer cutting records recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(packingSheet(paneerRounds, `Production Board — Paneer Packing — Lot ${lot.lotCode}`, metadata, 'Paneer Packing'), `No paneer packing recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(measurementSheet(paneerRounds, metadata, 'Paneer Weights'), `No paneer block weights recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(creamSheet(lotRounds, metadata), `No cream recovery recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(butterSheet(lotRounds, metadata), `No butter production recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(gheeSheet(lotRounds, metadata), `No ghee production recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(halloumiSheet(lotRounds, metadata), `No Halloumi production recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(amassiSheet(lotRounds, metadata), `No Amassi production recorded for milk lot ${lot.lotCode}`),
+      ...crumbingSheets(input.crumbingBatches || [], lot, lotRounds),
+      withNoRecords(shiftSheet, `No shifts recorded for milk lot ${lot.lotCode}`),
+      withNoRecords(cipSheet, `No CIP records recorded for milk lot ${lot.lotCode}`),
     ],
   };
 }
@@ -862,12 +926,209 @@ function packedSkuSummary(lot: MilkLot, rounds: ProductionRound[]) {
   return [...summary.values()];
 }
 
-export async function exportMilkReceivingWorkbook(lot: MilkLot, rounds: ProductionRound[]) {
+function roundPan111Weight(round: ProductionRound) {
+  if (round.pan111ApprovalStatus === 'approved') {
+    return Math.max(0, round.pan111RequestedWeight || 0);
+  }
+  return (round.packedSkus || [])
+    .filter(pack => normalizeFinishedGoodsSku(pack.sku) === 'PAN111')
+    .reduce((total, pack) => total + Math.max(0, pack.weightKg || 0), 0);
+}
+
+function roundPackingAudit(round: ProductionRound) {
+  const packs = (round.packedSkus || []).filter(pack => normalizeFinishedGoodsSku(pack.sku) !== 'PAN111');
+  const verifiedPacks = (round.verifiedPackedSkus || []).filter(pack => normalizeFinishedGoodsSku(pack.sku) !== 'PAN111');
+  const describe = (entries: typeof packs) => entries
+    .map(pack => {
+      const sku = normalizeFinishedGoodsSku(pack.sku);
+      const quantities = [
+        `${Math.max(0, pack.cases || 0)} cs`,
+        pack.loose ? `${Math.max(0, pack.loose)} loose` : '',
+      ].filter(Boolean).join(' + ');
+      return `${sku}: ${quantities}`;
+    })
+    .join('; ');
+
+  return {
+    description: describe(packs),
+    cases: packs.reduce((total, pack) => total + Math.max(0, pack.cases || 0), 0),
+    loose: packs.reduce((total, pack) => total + Math.max(0, pack.loose || 0), 0),
+    weightKg: packs.reduce((total, pack) => total + packWeight(pack), 0),
+    verifiedDescription: describe(verifiedPacks),
+    verifiedWeightKg: verifiedPacks.reduce((total, pack) => total + packWeight(pack), 0),
+    hasVerification: round.verifiedPackedSkus !== undefined,
+  };
+}
+
+function milkLotAuditSheet(
+  lot: MilkLot,
+  lotRounds: ProductionRound[],
+  metadata: ExcelSheet['metadata'],
+): ExcelSheet {
+  return {
+    name: 'Milk Lot Audit',
+    title: `Milk Receiving — Complete Lot Audit — Lot ${lot.lotCode}`,
+    metadata,
+    columns: [
+      { key: 'shift', header: 'Shift', width: 9, numberFormat: '0' },
+      { key: 'round', header: 'Round', width: 9, numberFormat: '0' },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'type', header: 'Product / Process', width: 18 },
+      { key: 'status', header: 'Current Stage', width: 18 },
+      { key: 'milkInputL', header: 'Milk Input L', width: 15, numberFormat: '0.00' },
+      { key: 'outputKg', header: 'Recorded Output kg', width: 19, numberFormat: '0.00' },
+      { key: 'yieldKg100L', header: 'Yield kg / 100 L', width: 18, numberFormat: '0.00' },
+      { key: 'yieldLKg', header: 'Yield L / kg', width: 15, numberFormat: '0.00' },
+      { key: 'creamKg', header: 'Cream Recovered kg', width: 19, numberFormat: '0.00' },
+      { key: 'blocks', header: 'Blocks', width: 10, numberFormat: '0' },
+      { key: 'blockWeightKg', header: 'Block Weight Total kg', width: 21, numberFormat: '0.00' },
+      { key: 'packedSkus', header: 'SKUs Packed on Board', width: 38 },
+      { key: 'packedCases', header: 'Packed Cases', width: 14, numberFormat: '0' },
+      { key: 'packedLoose', header: 'Loose Units', width: 13, numberFormat: '0' },
+      { key: 'packedWeightKg', header: 'Recorded Packed Weight kg', width: 24, numberFormat: '0.00' },
+      { key: 'verifiedWeightKg', header: 'Verified Packed Weight kg', width: 23, numberFormat: '0.00' },
+      { key: 'pan111Kg', header: 'PAN111 kg', width: 13, numberFormat: '0.00' },
+      { key: 'sppKg', header: 'Sent to SPP kg', width: 16, numberFormat: '0.00' },
+      { key: 'remainingKg', header: 'Remaining kg', width: 15, numberFormat: '0.00' },
+      { key: 'started', header: 'Started At', width: 21 },
+      { key: 'completed', header: 'Completed At', width: 21 },
+      { key: 'team', header: 'Team', width: 24 },
+    ],
+    rows: sortedRounds(lotRounds).map(round => {
+      const milkInput = isMilkProductionRound(round) ? getRoundMilkInput(round) : 0;
+      const outputKg = Math.max(0, round.outputWeight || round.butterOutput || 0);
+      const packing = roundPackingAudit(round);
+      const hasBlocks = (round.blockWeights || []).length > 0;
+      return {
+        shift: round.shiftNumber,
+        round: round.roundNumber,
+        batch: productionBatchCode(round),
+        type: round.type,
+        status: round.status,
+        milkInputL: isMilkProductionRound(round) ? milkInput : '',
+        outputKg,
+        yieldKg100L: milkInput > 0 && outputKg > 0 ? (outputKg / milkInput) * 100 : '',
+        yieldLKg: milkInput > 0 && outputKg > 0 ? milkInput / outputKg : '',
+        creamKg: round.creamRecovered || 0,
+        blocks: round.numberOfBlocks ?? round.blockWeights?.length ?? 0,
+        blockWeightKg: hasBlocks ? sum(round.blockWeights) : '',
+        packedSkus: packing.description,
+        packedCases: packing.cases,
+        packedLoose: packing.loose,
+        packedWeightKg: packing.weightKg,
+        verifiedWeightKg: packing.hasVerification ? packing.verifiedWeightKg : '',
+        pan111Kg: roundPan111Weight(round),
+        sppKg: round.sppRecordedWeight || 0,
+        remainingKg: round.remainingBalance ?? '',
+        started: excelDate(round.startTime),
+        completed: excelDate(round.completedAt),
+        team: (round.team || []).join(', '),
+      };
+    }),
+  };
+}
+
+function weightReconciliationSheet(
+  lot: MilkLot,
+  lotRounds: ProductionRound[],
+  metadata: ExcelSheet['metadata'],
+): ExcelSheet {
+  const paneerRounds = sortedRounds(lotRounds.filter(round => round.type === 'D' || round.type === 'C/S'));
+  return {
+    name: 'Weight Reconciliation',
+    title: `Milk Receiving — Paneer Weight Reconciliation — Lot ${lot.lotCode}`,
+    metadata: [
+      ...(metadata || []),
+      ['Accounted output formula', 'Packed weight (verified when available) + PAN111 + SPP + remaining balance'],
+      ['Variance formula', 'Final block weight total minus accounted output'],
+    ],
+    columns: [
+      { key: 'shift', header: 'Shift', width: 9, numberFormat: '0' },
+      { key: 'round', header: 'Round', width: 9, numberFormat: '0' },
+      { key: 'batch', header: 'Batch Code', width: 25 },
+      { key: 'type', header: 'Type', width: 10 },
+      { key: 'milkInputL', header: 'Milk Input L', width: 15, numberFormat: '0.00' },
+      { key: 'recordedOutputKg', header: 'Recorded Output kg', width: 19, numberFormat: '0.00' },
+      { key: 'blocks', header: 'Final Blocks', width: 13, numberFormat: '0' },
+      { key: 'blockWeightKg', header: 'Final Block Weight kg', width: 21, numberFormat: '0.00' },
+      { key: 'outputBlockVarianceKg', header: 'Blocks - Output kg', width: 19, numberFormat: '0.00' },
+      { key: 'recordedPackedKg', header: 'Recorded Packed kg', width: 19, numberFormat: '0.00' },
+      { key: 'verifiedPackedKg', header: 'Verified Packed kg', width: 19, numberFormat: '0.00' },
+      { key: 'packingBasis', header: 'Packing Basis Used', width: 20 },
+      { key: 'pan111Kg', header: 'PAN111 kg', width: 13, numberFormat: '0.00' },
+      { key: 'sppKg', header: 'SPP kg', width: 12, numberFormat: '0.00' },
+      { key: 'remainingKg', header: 'Remaining kg', width: 15, numberFormat: '0.00' },
+      { key: 'accountedOutputKg', header: 'Accounted Output kg', width: 20, numberFormat: '0.00' },
+      { key: 'varianceKg', header: 'Unreconciled Variance kg', width: 22, numberFormat: '0.00' },
+      { key: 'packedSkus', header: 'Recorded SKU Detail', width: 38 },
+      { key: 'verifiedSkus', header: 'Verified SKU Detail', width: 38 },
+    ],
+    rows: paneerRounds.map(round => {
+      const packing = roundPackingAudit(round);
+      const hasBlocks = (round.blockWeights || []).length > 0;
+      const blockWeightKg = sum(round.blockWeights);
+      const packingWeight = packing.hasVerification ? packing.verifiedWeightKg : packing.weightKg;
+      const pan111Kg = roundPan111Weight(round);
+      const sppKg = Math.max(0, round.sppRecordedWeight || 0);
+      const remainingKg = Math.max(0, round.remainingBalance || 0);
+      const accountedOutputKg = packingWeight + pan111Kg + sppKg + remainingKg;
+      return {
+        shift: round.shiftNumber,
+        round: round.roundNumber,
+        batch: productionBatchCode(round),
+        type: round.type,
+        milkInputL: getRoundMilkInput(round),
+        recordedOutputKg: round.outputWeight || 0,
+        blocks: round.numberOfBlocks ?? round.blockWeights?.length ?? 0,
+        blockWeightKg: hasBlocks ? blockWeightKg : '',
+        outputBlockVarianceKg: hasBlocks ? blockWeightKg - Math.max(0, round.outputWeight || 0) : '',
+        recordedPackedKg: packing.weightKg,
+        verifiedPackedKg: packing.hasVerification ? packing.verifiedWeightKg : '',
+        packingBasis: packing.hasVerification ? 'Owner-verified' : 'Recorded on board',
+        pan111Kg,
+        sppKg,
+        remainingKg: round.remainingBalance ?? '',
+        accountedOutputKg,
+        varianceKg: hasBlocks ? blockWeightKg - accountedOutputKg : '',
+        packedSkus: packing.description,
+        verifiedSkus: packing.verifiedDescription,
+      };
+    }),
+  };
+}
+
+export function buildMilkReceivingWorkbook(lot: MilkLot, rounds: ProductionRound[]): ExcelWorkbookExport {
   const accounting = getMilkLotAccounting(lot, rounds);
   const production = getMilkLotProductionReconciliation(lot, rounds);
   const vesselAllocation = getMilkLotVesselBalances(lot, rounds);
   const lotRounds = rounds.filter(round => round.milkLotId === lot.id || round.milkLotCode === lot.lotCode);
-  const metadata: ExcelSheet['metadata'] = [...exportedAtMetadata(), ['Milk lot', lot.lotCode]];
+  const skuTotals = packedSkuSummary(lot, rounds);
+  const activeRounds = lotRounds.filter(round => !['scheduled', 'cancelled'].includes(round.status));
+  const metadata: ExcelSheet['metadata'] = [
+    ...exportedAtMetadata(),
+    ['Milk lot', lot.lotCode],
+    ['Supplier', lot.supplier],
+    ['Milk received L', lot.litresReceived],
+    ['Used in production L', accounting.consumed],
+    ['Milk sold L', accounting.sold],
+    ['Rejected milk L', lot.litresRejected],
+    ['Spilled milk L', lot.litresSpilled],
+    ['Milk remaining L', accounting.remaining],
+    ['Milk overdraw L', accounting.overdraw],
+    ['Rounds started / recorded', activeRounds.length],
+    ['Completed output rounds', production.completedRounds],
+    ['D paneer rounds', production.dRounds],
+    ['C/S paneer rounds', production.csRounds],
+    ['Paneer recorded kg', production.paneerRecorded],
+    ['Paneer input L', production.paneerInputLitres],
+    ['Paneer yield kg / 100 L', production.paneerYieldPer100L],
+    ['Paneer yield L / kg', production.yieldLPerKg],
+    ['Cream recovered kg', production.cream],
+    ['PAN111 recovered kg', production.pan111],
+    ['Paneer sent to SPP kg', production.paneerForSpp],
+    ['Packed cases on board', skuTotals.reduce((total, sku) => total + sku.cases, 0)],
+    ['Calculated packed weight kg', skuTotals.reduce((total, sku) => total + sku.weightKg, 0)],
+  ];
   const receiptSheet: ExcelSheet = {
     name: 'Receipt Summary',
     title: `Milk Receiving — Lot ${lot.lotCode}`,
@@ -945,7 +1206,7 @@ export async function exportMilkReceivingWorkbook(lot: MilkLot, rounds: Producti
       { key: 'looseWeightKg', header: 'Loose Weight kg', width: 17, numberFormat: '0.00' },
       { key: 'weightKg', header: 'Calculated Weight kg', width: 20, numberFormat: '0.00' },
     ],
-    rows: packedSkuSummary(lot, rounds),
+    rows: skuTotals,
   };
   const salesSheet: ExcelSheet = {
     name: 'Milk Sales',
@@ -990,10 +1251,26 @@ export async function exportMilkReceivingWorkbook(lot: MilkLot, rounds: Producti
       remainingL: vessel.litres,
     })),
   };
-  await exportExcelWorkbook({
+  return {
     filename: `vejoy-milk-receiving-${lot.lotCode}-${exportDateStamp()}.xlsx`,
-    sheets: [receiptSheet, reconciliationSheet, vesselSheet, skuSheet, roundLedgerSheet(lotRounds, `Milk Receiving — Round Ledger — Lot ${lot.lotCode}`, metadata), salesSheet],
-  });
+    sheets: [
+      milkLotAuditSheet(lot, lotRounds, metadata),
+      weightReconciliationSheet(lot, lotRounds, metadata),
+      skuSheet,
+      receiptSheet,
+      reconciliationSheet,
+      vesselSheet,
+      roundLedgerSheet(lotRounds, `Milk Receiving — Round Ledger — Lot ${lot.lotCode}`, metadata),
+      creamSheet(lotRounds, metadata),
+      packingSheet(lotRounds, `Milk Receiving — Packing Entries — Lot ${lot.lotCode}`, metadata),
+      measurementSheet(lotRounds, metadata),
+      salesSheet,
+    ],
+  };
+}
+
+export async function exportMilkReceivingWorkbook(lot: MilkLot, rounds: ProductionRound[]) {
+  await exportExcelWorkbook(buildMilkReceivingWorkbook(lot, rounds));
 }
 
 export async function exportReconciliationWorkbook(input: {

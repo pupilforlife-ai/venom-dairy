@@ -16,12 +16,14 @@ import Distribution from './pages/Distribution';
 import Reconciliation from './pages/Reconciliation';
 import Settings from './pages/Settings';
 import Instructions from './pages/Instructions';
+import AppUpdateBanner from './components/AppUpdateBanner';
 
 export default function App() {
   return (
     <AuthGate>
       <AppProvider>
         <ToastProvider>
+          <AppUpdateBanner />
           <BrowserRouter>
             <Layout>
               <Routes>

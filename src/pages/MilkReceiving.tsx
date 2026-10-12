@@ -13,6 +13,8 @@ import { getMilkLotVesselBalances, getMilkSaleSourceAvailability, getMilkSaleVes
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
   const { showToast } = useToast();
+  const isExportOwner = typeof window !== 'undefined'
+    && window.localStorage.getItem('vejoy_user_role')?.toLowerCase() === 'owner';
   const newestLot = [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
     const bDate = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
@@ -170,6 +172,10 @@ export default function MilkReceiving() {
     : { ibc: 0, auxiliary: 0 };
 
   const handleExport = async () => {
+    if (!isExportOwner) {
+      showToast('error', 'Only the owner can export operational records');
+      return;
+    }
     if (!displayedLot || isExporting) return;
     setIsExporting(true);
     try {
@@ -378,15 +384,17 @@ export default function MilkReceiving() {
           <p className="text-sm text-slate-500 mt-1">Record each receipt as a traceable source lot.</p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
-          <button
-            type="button"
-            onClick={handleExport}
-            disabled={!displayedLot || isExporting}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 transition-colors shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Download className="w-4 h-4" />
-            {isExporting ? 'Exporting…' : 'Export Excel'}
-          </button>
+          {isExportOwner && (
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={!displayedLot || isExporting}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 transition-colors shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              {isExporting ? 'Exporting…' : 'Export Excel'}
+            </button>
+          )}
           <button
             onClick={() => setShowReceiveCreamModal(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors shadow-sm"

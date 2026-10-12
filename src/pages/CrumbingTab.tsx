@@ -506,9 +506,10 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
       return sourceRound?.milkLotId === selectedMilkLotId;
     }
     if (batch.type === 'JP') {
-      const source = intermediateLots.find(item => item.id === batch.sourceBatchId);
-      const selectedLotCode = milkLots.find(lot => lot.id === selectedMilkLotId)?.lotCode;
-      return source?.sourceMilkLotCode === selectedLotCode || selectedLotCode === undefined;
+      // JP is a standalone production stream. A PAN111 source is ingredient
+      // traceability only and must not make the JP batch disappear when the
+      // operator changes the selected milk lot.
+      return true;
     }
     if (batch.type === 'HCP') {
       const source = milkLots.find(lot => lot.id === batch.sourceBatchId);

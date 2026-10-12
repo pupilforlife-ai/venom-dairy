@@ -146,6 +146,7 @@ export default function Reconciliation() {
 
   const normalizedAuditRole = auditIdentity.role.toLowerCase();
   const canReviewMilkBalance = normalizedAuditRole === 'owner' || normalizedAuditRole === 'admin';
+  const isExportOwner = normalizedAuditRole === 'owner';
   const isKbOwner = auditIdentity.username.toLowerCase() === 'kb' && normalizedAuditRole === 'owner';
   const auditToleranceKg = 1;
   const paneerAuditRounds = useMemo(
@@ -194,6 +195,10 @@ export default function Reconciliation() {
   };
 
   const handleExport = async () => {
+    if (!isExportOwner) {
+      showToast('error', 'Only the owner can export operational records');
+      return;
+    }
     if (!selectedLot || isExporting) return;
     setIsExporting(true);
     try {
@@ -384,14 +389,16 @@ export default function Reconciliation() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExport}
-            disabled={!selectedLot || isExporting}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Download className="h-4 w-4" /> {isExporting ? 'Exporting…' : 'Export Excel'}
-          </button>
+          {isExportOwner && (
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={!selectedLot || isExporting}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" /> {isExporting ? 'Exporting…' : 'Export Excel'}
+            </button>
+          )}
           <select value={lotCode} onChange={(event) => setSelectedLotCode(event.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
             {milkLots.map(lot => (
               <option key={lot.id} value={lot.lotCode}>{lot.lotCode}</option>

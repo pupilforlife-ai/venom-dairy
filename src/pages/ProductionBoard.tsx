@@ -1305,14 +1305,24 @@ export default function ProductionBoard() {
   const openBlockWeights = (roundId: string) => {
     const round = productionRounds.find(item => item.id === roundId);
     if (!round) return;
+    const recordedWeights = round.blockWeights || [];
+    const recordedCount = Math.max(round.numberOfBlocks || 0, recordedWeights.length);
     setBlockWeightsRoundId(roundId);
-    setBlockWeightsDraft([...(round.blockWeights || [])]);
+    setBlockWeightsDraft(Array.from({ length: recordedCount }, (_, index) => recordedWeights[index] || 0));
   };
 
   const saveBlockWeights = () => {
     if (!blockWeightsRoundId || !canForceStage) return;
     const round = productionRounds.find(item => item.id === blockWeightsRoundId);
-    if (!round || blockWeightsDraft.some(weight => weight < 0)) return;
+    if (!round) return;
+    if (blockWeightsDraft.length === 0) {
+      showToast('error', 'Enter the correct number of blocks');
+      return;
+    }
+    if (blockWeightsDraft.some(weight => !Number.isFinite(weight) || weight <= 0)) {
+      showToast('error', 'Enter a positive weight for every corrected block');
+      return;
+    }
     const totalWeight = blockWeightsDraft.reduce((sum, weight) => sum + weight, 0);
     const sppBalance = round.sppRecordedWeight !== undefined ? Math.max(0, totalWeight - round.sppRecordedWeight) : undefined;
     updateProductionRound(blockWeightsRoundId, {
@@ -1322,7 +1332,7 @@ export default function ProductionBoard() {
       ...(sppBalance !== undefined ? { balancePaneerWeight: sppBalance, remainingBalance: sppBalance } : {}),
     });
     setBlockWeightsRoundId(null);
-    showToast('success', 'Block weights corrected');
+    showToast('success', `Corrected to ${blockWeightsDraft.length} blocks (${totalWeight.toFixed(2)} kg)`);
   };
 
   const openCreamModal = (roundId: string) => {
@@ -1448,6 +1458,10 @@ export default function ProductionBoard() {
     : [];
 
   const handleExport = async () => {
+    if (!isOwner) {
+      showToast('error', 'Only the owner can export operational records');
+      return;
+    }
     if (!activeMilkLot || isExporting) return;
     setIsExporting(true);
     try {
@@ -1481,14 +1495,16 @@ export default function ProductionBoard() {
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={handleExport}
-            disabled={!activeMilkLot || isExporting}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Download className="w-4 h-4" /> {isExporting ? 'Exporting…' : 'Export Excel'}
-          </button>
+          {isOwner && (
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={!activeMilkLot || isExporting}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" /> {isExporting ? 'Exporting…' : 'Export Excel'}
+            </button>
+          )}
           <select
             value={selectedMilkLotId}
             onChange={(event) => setFilters(current => ({ ...current, milkLot: event.target.value, shift: 'all' }))}
@@ -1991,7 +2007,7 @@ export default function ProductionBoard() {
                                     <div className="text-sm font-semibold text-slate-800">{roundDisplayCode(round)} block weights</div>
                                     <div className="text-xs text-slate-500">Review the recorded weight of every block. Owner/admin corrections remain available.</div>
                                   </div>
-                                  {canForceStage && <button onClick={() => openBlockWeights(round.id)} className="px-2.5 py-1.5 rounded border border-indigo-200 text-indigo-700 text-xs font-medium hover:bg-indigo-50">Correct weights</button>}
+                                  {canForceStage && <button onClick={() => openBlockWeights(round.id)} className="px-2.5 py-1.5 rounded border border-indigo-200 text-indigo-700 text-xs font-medium hover:bg-indigo-50">Correct count & weights</button>}
                                 </div>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                                   {round.blockWeights!.map((weight, index) => (
@@ -2162,15 +2178,33 @@ export default function ProductionBoard() {
       </Modal>
 
       {/* Block weight review modal */}
-      <Modal isOpen={Boolean(blockWeightsRoundId)} onClose={() => setBlockWeightsRoundId(null)} title="Recorded block weights">
+      <Modal isOpen={Boolean(blockWeightsRoundId)} onClose={() => setBlockWeightsRoundId(null)} title="Correct block count and weights">
         {blockWeightsRoundId && (() => {
           const round = productionRounds.find(item => item.id === blockWeightsRoundId);
           const total = blockWeightsDraft.reduce((sum, weight) => sum + weight, 0);
           return <div className="space-y-4">
             {round && <p className="text-sm text-slate-600">{roundDisplayCode(round)} · Milk lot {round.milkLotCode}</p>}
             {round?.storedBlockWeights?.length && round?.status !== 'clingwrapped' && <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 text-xs text-pink-900">Stored before final cutting: {round.storedBlockWeights.length} large blocks · {round.storedOutputWeight?.toFixed(2)} kg · by {round.storedCutBy || '—'}</div>}
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Correct number of blocks</span>
+              <input
+                type="number"
+                min="1"
+                max="500"
+                step="1"
+                value={blockWeightsDraft.length || ''}
+                onChange={(e) => {
+                  if (!canForceStage) return;
+                  const requestedCount = Math.min(500, Math.max(0, parseInt(e.target.value, 10) || 0));
+                  setBlockWeightsDraft(current => Array.from({ length: requestedCount }, (_, index) => current[index] || 0));
+                }}
+                disabled={!canForceStage}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50"
+              />
+              <span className="mt-1 block text-xs text-slate-500">Reducing the count removes weights from the end. Increasing it adds new weight fields that must be completed.</span>
+            </label>
             <div className="space-y-2">{blockWeightsDraft.map((weight, index) => <label key={index} className="flex items-center gap-3 text-sm"><span className="w-20">Block {index + 1}</span><input type="number" min="0" step="0.01" value={weight || ''} onChange={(e) => { if (!canForceStage) return; const next = [...blockWeightsDraft]; next[index] = parseFloat(e.target.value) || 0; setBlockWeightsDraft(next); }} disabled={!canForceStage} className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50" /><span>kg</span></label>)}</div>
-            <div className="bg-slate-50 rounded-lg p-3 text-sm font-medium">Total recorded: {total.toFixed(2)} kg{round?.sppRecordedWeight !== undefined && <div className="text-pink-600 mt-1">SPP: {round.sppRecordedWeight.toFixed(2)} kg · Balance: {Math.max(0, total - round.sppRecordedWeight).toFixed(2)} kg</div>}</div>
+            <div className="bg-slate-50 rounded-lg p-3 text-sm font-medium">Corrected record: {blockWeightsDraft.length} blocks · {total.toFixed(2)} kg{round?.sppRecordedWeight !== undefined && <div className="text-pink-600 mt-1">SPP: {round.sppRecordedWeight.toFixed(2)} kg · Balance: {Math.max(0, total - round.sppRecordedWeight).toFixed(2)} kg</div>}</div>
             {canForceStage ? <div className="flex gap-2"><button onClick={saveBlockWeights} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium">Save correction</button><button onClick={() => setBlockWeightsRoundId(null)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm">Cancel</button></div> : <button onClick={() => setBlockWeightsRoundId(null)} className="w-full px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm">Close</button>}
           </div>;
         })()}

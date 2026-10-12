@@ -26,9 +26,8 @@ function safeSheetName(name: string) {
   return name.replace(invalidSheetNameCharacters, '-').slice(0, 31) || 'Sheet';
 }
 
-export async function exportExcelWorkbook(specification: ExcelWorkbookExport) {
-  const { default: writeXlsxFile } = await import('write-excel-file/browser');
-  const sheets = specification.sheets.map((sheetDefinition) => {
+export function buildExcelFileSheets(specification: ExcelWorkbookExport) {
+  return specification.sheets.map((sheetDefinition) => {
     const lastColumn = Math.max(1, sheetDefinition.columns.length);
     const titleRow = [
       {
@@ -67,7 +66,11 @@ export async function exportExcelWorkbook(specification: ExcelWorkbookExport) {
       return {
         value,
         type: value instanceof Date ? Date : typeof value === 'number' ? Number : typeof value === 'boolean' ? Boolean : String,
-        format: value instanceof Date ? (column.numberFormat || 'dd mmm yyyy hh:mm') : column.numberFormat,
+        format: value instanceof Date
+          ? (column.numberFormat || 'dd mmm yyyy hh:mm')
+          : typeof value === 'number'
+            ? column.numberFormat
+            : undefined,
         wrap: true,
         alignVertical: 'top' as const,
         backgroundColor: rowIndex % 2 === 1 ? '#F8FAFC' : undefined,
@@ -82,6 +85,11 @@ export async function exportExcelWorkbook(specification: ExcelWorkbookExport) {
       showGridLines: false,
     };
   });
+}
+
+export async function exportExcelWorkbook(specification: ExcelWorkbookExport) {
+  const { default: writeXlsxFile } = await import('write-excel-file/browser');
+  const sheets = buildExcelFileSheets(specification);
   const filename = specification.filename.endsWith('.xlsx') ? specification.filename : `${specification.filename}.xlsx`;
   await writeXlsxFile(sheets).toFile(filename);
 }
