@@ -61,7 +61,7 @@ type ButterPoolView = {
 const directButterStatuses = ['churned', 'packed_as_pubb'];
 const blendedButterStatuses = ['pubbb_pool', 'psbbb_pool', 'bb05_pool'];
 
-export default function ButterTab() {
+export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: string }) {
   const { productionRounds, milkLots, creamLots, updateProductionRound, addProductionRound, updateMilkLot, updateCreamLot } = useApp();
   const { showToast } = useToast();
 
@@ -107,8 +107,9 @@ export default function ButterTab() {
     unit: 'balls' as 'balls' | 'bricks',
   });
 
-  // Filter butter rounds
-  const butterRounds = productionRounds.filter(r => r.type === 'Butter');
+  // Filter butter rounds to the selected milk lot so all cream-derived butter
+  // stays tied to the active milk lineage.
+  const butterRounds = productionRounds.filter(r => r.type === 'Butter' && r.milkLotId === selectedMilkLotId);
   const churningRounds = butterRounds.filter(round => !round.blendedPoolId);
   const visibleChurningRounds = churningRounds.filter(round => round.creamSource === creamSourceTab);
   const getRoundDate = (round: typeof butterRounds[number]) => round.roundDate || round.startTime.slice(0, 10);
@@ -121,8 +122,10 @@ export default function ButterTab() {
   }, {} as Record<string, typeof butterRounds>);
 
   // Get available cream pools (internal cream from milk lots)
-  const internalCreamPools = milkLots.filter(lot => 
-    lot.creamPool && lot.creamPool.availableBalance > 0
+  const internalCreamPools = milkLots.filter(lot =>
+    lot.id === selectedMilkLotId &&
+    lot.creamPool &&
+    lot.creamPool.availableBalance > 0
   );
 
   const externalCreamLots = [
@@ -749,12 +752,11 @@ export default function ButterTab() {
       {/* Production Board: individual churning rounds belong only to Cream → Butter. */}
       {activeSection === 'cream' && <div className="space-y-4">
         {Object.entries(groupedByDate).map(([roundDate, rounds]) => {
-          const dateTotal = rounds.reduce((sum, round) => sum + (round.butterOutput || 0), 0);
-          const lotTotals = rounds.reduce((acc, round) => {
-            const key = round.milkLotCode || round.milkLotId;
+          const lotTotals = Object.entries(rounds.reduce((acc, round) => {
+            const key = round.milkLotCode || round.milkLotId || 'unknown';
             acc[key] = (acc[key] || 0) + (round.butterOutput || 0);
             return acc;
-          }, {} as Record<string, number>);
+          }, {} as Record<string, number>));
 
           return (
             <div key={roundDate} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -772,6 +774,15 @@ export default function ButterTab() {
                   </div>
                   <span className="text-xs text-slate-500">{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>
                 </div>
+                {lotTotals.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {lotTotals.map(([lotCode, total]) => (
+                      <span key={lotCode} className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-medium text-indigo-800">
+                        {lotCode}: <strong>{total.toFixed(2)} kg</strong>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Rounds Table */}
@@ -785,55 +796,44 @@ export default function ButterTab() {
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Input</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Butter</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Buttermilk</th>
-                      <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Total butter</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Balance</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {rounds.map((round) => {
-                      const totalForMilkLot = round.milkLotCode ? (lotTotals[round.milkLotCode] ?? 0) : (round.butterOutput || 0);
-                      return (
-                        <tr key={round.id} className="hover:bg-slate-50/50">
-                          <td className="px-4 py-3">
-                            <div className="font-mono text-xs font-bold text-slate-900">
-                              {round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                              round.creamSource === 'internal' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
-                            }`}>
-                              {round.creamSource === 'internal' ? 'Internal' : 'External'}
-                            </span>
-                            <div className="mt-1 text-[10px] text-slate-500">{round.milkLotCode || round.milkLotId}</div>
-                            <div className="mt-1 text-[10px] text-slate-500">{round.sourceBatchCode || round.creamLotId || 'Source lot not recorded'}</div>
-                            {(round.blendingInternalButterQuantity || round.blendingExternalButterQuantity) && <div className="mt-1 text-[10px] text-purple-700">Blend butter: {[round.blendingInternalButterQuantity ? `${round.blendingInternalButterQuantity.toFixed(2)} kg internal` : '', round.blendingExternalButterQuantity ? `${round.blendingExternalButterQuantity.toFixed(2)} kg external` : ''].filter(Boolean).join(' + ')}</div>}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white ${butterStatusColors[round.status as ButterStatus]}`}>
-                              {butterStatusLabels[round.status as ButterStatus]}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.actualInput} kg</td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.butterOutput || '—'} kg</td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.buttermilkOutput || '—'} kg</td>
-                          <td className="px-4 py-3 text-slate-700 text-xs font-semibold">{totalForMilkLot.toFixed(2)} kg</td>
-                          <td className="px-4 py-3 text-slate-600 text-xs">{round.remainingBalance || '—'} kg</td>
-                          <td className="px-4 py-3">
-                            <div className="flex gap-1 flex-wrap">
-                              {getActionButtons(round)}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    <tr className="bg-indigo-50/80 font-semibold text-indigo-900">
-                      <td colSpan={6} className="px-4 py-3 text-right text-xs uppercase tracking-wide">Daily total</td>
-                      <td className="px-4 py-3 text-xs font-bold">{dateTotal.toFixed(2)} kg</td>
-                      <td className="px-4 py-3 text-xs">—</td>
-                      <td className="px-4 py-3 text-xs">—</td>
-                    </tr>
+                    {rounds.map((round) => (
+                      <tr key={round.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-3">
+                          <div className="font-mono text-xs font-bold text-slate-900">
+                            {round.batchCode || getButterBatchCode(round.milkLotCode)}/R{round.roundNumber}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                            round.creamSource === 'internal' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                          }`}>
+                            {round.creamSource === 'internal' ? 'Internal' : 'External'}
+                          </span>
+                          <div className="mt-1 text-[10px] text-slate-500">{round.milkLotCode || round.milkLotId}</div>
+                          <div className="mt-1 text-[10px] text-slate-500">{round.sourceBatchCode || round.creamLotId || 'Source lot not recorded'}</div>
+                          {(round.blendingInternalButterQuantity || round.blendingExternalButterQuantity) && <div className="mt-1 text-[10px] text-purple-700">Blend butter: {[round.blendingInternalButterQuantity ? `${round.blendingInternalButterQuantity.toFixed(2)} kg internal` : '', round.blendingExternalButterQuantity ? `${round.blendingExternalButterQuantity.toFixed(2)} kg external` : ''].filter(Boolean).join(' + ')}</div>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white ${butterStatusColors[round.status as ButterStatus]}`}>
+                            {butterStatusLabels[round.status as ButterStatus]}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{round.actualInput} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{round.butterOutput || '—'} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{round.buttermilkOutput || '—'} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{round.remainingBalance || '—'} kg</td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-1 flex-wrap">
+                            {getActionButtons(round)}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

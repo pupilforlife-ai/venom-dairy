@@ -169,9 +169,10 @@ export interface CrumbingBatch {
 interface CrumbingTabProps {
   crumbingBatches: CrumbingBatch[];
   setCrumbingBatches: (value: CrumbingBatch[] | ((current: CrumbingBatch[]) => CrumbingBatch[])) => void;
+  selectedMilkLotId: string;
 }
 
-export default function CrumbingTab({ crumbingBatches, setCrumbingBatches }: CrumbingTabProps) {
+export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selectedMilkLotId }: CrumbingTabProps) {
   const { productionRounds, milkLots, intermediateLots, updateMilkLot, updateIntermediateLot } = useApp();
   const { showToast } = useToast();
 
@@ -498,11 +499,34 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches }: Cru
     updateCrumbingBatch(selectedBatch, buildRecipeDraftUpdates(batch, nextForm));
   };
 
+  const isBatchForSelectedMilkLot = (batch: CrumbingBatch) => {
+    if (!selectedMilkLotId) return true;
+    if (batch.type === 'SPP') {
+      const sourceRound = productionRounds.find(round => round.id === batch.sourceBatchId);
+      return sourceRound?.milkLotId === selectedMilkLotId;
+    }
+    if (batch.type === 'JP') {
+      const source = intermediateLots.find(item => item.id === batch.sourceBatchId);
+      const selectedLotCode = milkLots.find(lot => lot.id === selectedMilkLotId)?.lotCode;
+      return source?.sourceMilkLotCode === selectedLotCode || selectedLotCode === undefined;
+    }
+    if (batch.type === 'HCP') {
+      const source = milkLots.find(lot => lot.id === batch.sourceBatchId);
+      return source?.id === selectedMilkLotId;
+    }
+    return true;
+  };
+
+  const sppBatches = crumbingBatches.filter(batch => batch.type === 'SPP' && isBatchForSelectedMilkLot(batch));
+  const jpBatches = crumbingBatches.filter(batch => batch.type === 'JP' && isBatchForSelectedMilkLot(batch));
+  const hcpBatches = crumbingBatches.filter(batch => batch.type === 'HCP' && isBatchForSelectedMilkLot(batch));
+
   // Get available sources
   const getAvailableSources = (type: CrumbingType) => {
     if (type === 'SPP') {
-      // Paneer rounds cut as SPP pieces
-      return productionRounds.filter(r => 
+      // Paneer rounds cut as SPP pieces stay tied to the active milk lot.
+      return productionRounds.filter(r =>
+        r.milkLotId === selectedMilkLotId &&
         (r.type === 'C/S' || r.type === 'D') &&
         r.cuttingType === 'SPP pieces' &&
         r.status === 'cut' &&
@@ -1413,11 +1437,6 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches }: Cru
 
     return buttons;
   };
-
-  // Filter batches by type
-  const sppBatches = crumbingBatches.filter(b => b.type === 'SPP');
-  const jpBatches = crumbingBatches.filter(b => b.type === 'JP');
-  const hcpBatches = crumbingBatches.filter(b => b.type === 'HCP');
 
   const renderSppRecipeDetails = (batch: CrumbingBatch) => {
     const sourceWeightKg = batch.sourceWeightKg || recipeForm.sourceWeightKg;

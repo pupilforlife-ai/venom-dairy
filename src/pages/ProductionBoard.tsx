@@ -2035,7 +2035,7 @@ export default function ProductionBoard() {
 
       {/* Butter Tab Content */}
       {activeTab === 'butter' && (
-        <ButterTab />
+        <ButterTab selectedMilkLotId={selectedMilkLotId} />
       )}
 
       {/* Ghee Tab Content */}
@@ -2045,7 +2045,7 @@ export default function ProductionBoard() {
 
       {/* Crumbing Tab Content */}
       {activeTab === 'crumbing' && (
-        <CrumbingTab crumbingBatches={crumbingBatches} setCrumbingBatches={setCrumbingBatches} />
+        <CrumbingTab crumbingBatches={crumbingBatches} setCrumbingBatches={setCrumbingBatches} selectedMilkLotId={selectedMilkLotId} />
       )}
 
       {/* Modals - only show for paneer tab */}
