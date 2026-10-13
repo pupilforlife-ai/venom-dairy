@@ -2233,7 +2233,7 @@ export default function ProductionBoard() {
 
       {/* Ghee Tab Content */}
       {activeTab === 'ghee' && (
-        <GheeTab />
+        <GheeTab selectedMilkLotId={selectedMilkLotId} />
       )}
 
       {/* Crumbing Tab Content */}

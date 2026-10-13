@@ -41,7 +41,11 @@ const gheeStatusColors: Record<GheeStatus, string> = {
   discarded: 'bg-gray-600',
 };
 
-export default function GheeTab() {
+interface GheeTabProps {
+  selectedMilkLotId?: string;
+}
+
+export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   const { productionRounds, milkLots, updateProductionRound, updateMilkLot, addProductionRound } = useApp();
   const { showToast } = useToast();
 
@@ -70,8 +74,21 @@ export default function GheeTab() {
     responsible: '',
   });
 
-  // Filter ghee rounds
-  const gheeRounds = productionRounds.filter(r => r.type === 'Ghee');
+  const newestMilkLot = [...milkLots].sort((a, b) => {
+    const aTime = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
+    const bTime = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
+    return bTime - aTime;
+  })[0];
+  const scopedMilkLotId = selectedMilkLotId || newestMilkLot?.id || '';
+  const scopedMilkLot = milkLots.find(lot => lot.id === scopedMilkLotId);
+
+  // Ghee production is a separate board, but its rounds still belong to one
+  // milk lot. Never show historical rounds from another lot on the selected
+  // lot's board.
+  const gheeRounds = productionRounds.filter(r =>
+    r.type === 'Ghee'
+    && (!scopedMilkLotId || r.milkLotId === scopedMilkLotId || r.milkLotCode === scopedMilkLot?.lotCode),
+  );
   const getRoundDate = (round: typeof gheeRounds[number]) => round.roundDate || round.startTime.slice(0, 10);
   const formatRoundDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString();
   const groupedByDate = gheeRounds.reduce((acc, round) => {
@@ -80,6 +97,11 @@ export default function GheeTab() {
     acc[date].push(round);
     return acc;
   }, {} as Record<string, typeof gheeRounds>);
+
+  const openNewRound = () => {
+    setNewRound(current => ({ ...current, milkLotId: scopedMilkLotId || current.milkLotId }));
+    setShowNewRoundModal(true);
+  };
 
   // Get available butter from specific milk lots
   const getAvailableButter = (milkLotId: string) => {
@@ -470,7 +492,7 @@ export default function GheeTab() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowNewRoundModal(true)}
+            onClick={openNewRound}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700"
           >
             <Plus className="w-4 h-4" /> New Round
@@ -478,11 +500,11 @@ export default function GheeTab() {
         </div>
       </div>
 
-      {milkLots.some(lot => lot.gheePool) && (
+      {scopedMilkLot && scopedMilkLot.gheePool && (
         <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-4">
-          <h4 className="text-sm font-semibold text-amber-900 mb-3">🫙 Common Ghee Pools</h4>
+          <h4 className="text-sm font-semibold text-amber-900 mb-3">🫙 Common Ghee Pool · Milk lot {scopedMilkLot.lotCode}</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {milkLots.filter(lot => lot.gheePool).map(lot => {
+            {[scopedMilkLot].map(lot => {
               const pool = lot.gheePool!;
               return (
                 <div key={lot.id} className="bg-white rounded-lg p-3 border border-amber-100">
@@ -582,7 +604,7 @@ export default function GheeTab() {
               </div>
               ) : (
                 <div className="p-6 text-center text-slate-400 text-sm">
-                  No rounds on this date yet. <button onClick={() => setShowNewRoundModal(true)} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
+                No rounds on this date yet. <button onClick={openNewRound} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
                 </div>
               )}
             </div>
@@ -591,14 +613,14 @@ export default function GheeTab() {
 
         {gheeRounds.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <p className="text-slate-500">No ghee rounds yet. Create a date-based round to begin.</p>
+            <p className="text-slate-500">No ghee rounds are recorded for milk lot {scopedMilkLot?.lotCode || 'the selected lot'} yet. Create a round to begin.</p>
           </div>
         )}
       </div>
 
       {/* Modals */}
       {/* New Round Modal */}
-      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Ghee Round">
+      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title={`Create New Ghee Round${scopedMilkLot ? ` · Milk lot ${scopedMilkLot.lotCode}` : ''}`}>
         <div className="space-y-4">
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Production date</label>
