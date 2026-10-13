@@ -2116,8 +2116,8 @@ export default function ProductionBoard() {
                           <td colSpan={11} className="px-2 py-2">
                             <div className="grid min-w-[154rem] items-center" style={{ gridTemplateColumns: '9rem 10rem 7rem 14rem 16rem 8rem 16rem 12rem 15rem 18rem 29rem' }}>
                               <span className="px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pipeline</span>
-                              <div className="col-span-4 px-2"><StatusPipeline currentStatus={round.status} /></div>
-                              <span className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span>
+                              <div className="col-span-3 px-2"><StatusPipeline currentStatus={round.status} /></div>
+                              <div className="px-2"><span className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${statusColors[round.status]} text-white`}>{statusLabels[round.status]}</span></div>
                             </div>
                           </td>
                         </tr>
