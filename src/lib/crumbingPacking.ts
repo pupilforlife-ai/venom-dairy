@@ -21,6 +21,28 @@ interface CombinedPackingDistributionSource {
   combinedPackingAllocations?: Array<{ primaryBatchId: string }>;
 }
 
+interface CombinedPackingEligibilitySource {
+  id: string;
+  batchCode: string;
+  createdAt: string;
+  type: string;
+  status: string;
+  traysRemaining: number;
+  traysFried: number;
+  traysPacked: number;
+}
+
+export function getCombinedPackingEligibleBatches<T extends CombinedPackingEligibilitySource>(batches: T[], type: string) {
+  return batches
+    .filter(batch =>
+      batch.type === type &&
+      !['clubbed', 'handed_over'].includes(batch.status) &&
+      batch.traysRemaining <= 0 &&
+      batch.traysFried - batch.traysPacked > 0
+    )
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.batchCode.localeCompare(right.batchCode));
+}
+
 export function hasDistributionPackingRecord(batch: CombinedPackingDistributionSource) {
   const isAllocationOnlySecondary = batch.combinedPackingAllocations?.some(
     allocation => allocation.primaryBatchId !== batch.id

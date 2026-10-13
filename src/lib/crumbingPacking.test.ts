@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocateTraysFifo, hasDistributionPackingRecord } from './crumbingPacking';
+import { allocateTraysFifo, getCombinedPackingEligibleBatches, hasDistributionPackingRecord } from './crumbingPacking';
 
 describe('combined SPP packing FIFO allocation', () => {
   it('uses the oldest batches first and leaves stock on the latest batch', () => {
@@ -40,5 +40,23 @@ describe('combined SPP packing distribution output', () => {
       packedSkus: [],
       combinedPackingAllocations: [{ primaryBatchId: 'r1' }],
     })).toBe(false);
+  });
+});
+
+describe('combined packing eligibility across crumbing products', () => {
+  const batches = [
+    { id: 'spp', batchCode: 'SPP-1', createdAt: '2026-10-12T01:00:00Z', type: 'SPP', status: 'frying', traysRemaining: 0, traysFried: 3, traysPacked: 0 },
+    { id: 'jp-old', batchCode: 'JP-1', createdAt: '2026-10-12T02:00:00Z', type: 'JP', status: 'frying', traysRemaining: 0, traysFried: 4, traysPacked: 1 },
+    { id: 'jp-new', batchCode: 'JP-2', createdAt: '2026-10-12T03:00:00Z', type: 'JP', status: 'frying', traysRemaining: 0, traysFried: 7, traysPacked: 0 },
+    { id: 'hcp', batchCode: 'HCP-1', createdAt: '2026-10-12T04:00:00Z', type: 'HCP', status: 'frying', traysRemaining: 0, traysFried: 2, traysPacked: 0 },
+    { id: 'hcp-open', batchCode: 'HCP-2', createdAt: '2026-10-12T05:00:00Z', type: 'HCP', status: 'frying', traysRemaining: 1, traysFried: 2, traysPacked: 0 },
+  ];
+
+  it('returns only fully fried JP batches, oldest first', () => {
+    expect(getCombinedPackingEligibleBatches(batches, 'JP').map(batch => batch.id)).toEqual(['jp-old', 'jp-new']);
+  });
+
+  it('applies the same eligibility rule to HCP', () => {
+    expect(getCombinedPackingEligibleBatches(batches, 'HCP').map(batch => batch.id)).toEqual(['hcp']);
   });
 });
