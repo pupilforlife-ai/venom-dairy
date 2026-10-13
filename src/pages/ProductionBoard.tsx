@@ -23,7 +23,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { statusFlow, statusLabels, statusColors, CipRecord } from '../data/mockData';
+import { statusFlow, statusLabels, statusColors, CipRecord, PackedSku, ProductionRound } from '../data/mockData';
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import { useSupabaseState } from '../hooks/useSupabaseState';
@@ -45,6 +45,29 @@ function roundToTwo(value: number) {
 function roundDisplayCode(round: { type: string; shiftNumber: number; roundNumber: number }) {
   const prefix = round.type === 'Halloumi' ? 'HAL' : 'PAN';
   return `${prefix} S${round.shiftNumber}/R${round.roundNumber}`;
+}
+
+function packingDetailsForAudit(pack: PackedSku) {
+  if (pack.weightKg !== undefined) return `${pack.sku} · ${pack.weightKg.toFixed(2)} kg`;
+  if (pack.looseWeightKg !== undefined) return `${pack.sku} · ${pack.cases} cases + ${pack.looseWeightKg.toFixed(2)} kg loose`;
+  return `${pack.sku} · ${pack.cases} cases + ${pack.loose || 0} loose`;
+}
+
+/**
+ * Older records did not copy the actor onto packedSkus, but their append-only
+ * round history still contains the packing event. Use an exact details match
+ * as a safe fallback, including an occurrence count for repeated SKU entries.
+ */
+function getPackingAuditEvent(round: Pick<ProductionRound, 'packedSkus' | 'historyEvents'>, packIndex: number) {
+  const pack = round.packedSkus?.[packIndex];
+  if (!pack) return undefined;
+  const details = packingDetailsForAudit(pack);
+  const packingEvents = (round.historyEvents || []).filter(event =>
+    (event.type === 'packing_recorded' || event.type === 'packing_corrected')
+    && event.details.startsWith(details),
+  );
+  const occurrence = (round.packedSkus || []).slice(0, packIndex).filter(item => packingDetailsForAudit(item) === details).length;
+  return packingEvents[occurrence];
 }
 
 function StatusPipeline({ currentStatus }: { currentStatus: string }) {
@@ -2101,8 +2124,10 @@ export default function ProductionBoard() {
                             {round.packedSkus && round.packedSkus.length > 0 ? (
                               <div className="space-y-1">
                                 {round.packedSkus.map((p, i) => {
-                                  const recordedBy = p.recordedBy || 'Recorder not captured';
-                                  const recordedAt = p.recordedAt ? new Date(p.recordedAt).toLocaleString('en-GB') : 'timestamp not captured';
+                                  const historyEvent = getPackingAuditEvent(round, i);
+                                  const recordedBy = p.recordedBy || historyEvent?.recordedBy || 'Recorder not captured';
+                                  const recordedAtValue = p.recordedAt || historyEvent?.occurredAt;
+                                  const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB') : 'timestamp not captured';
                                   const auditLabel = `${p.sku} · ${recordedBy} · ${recordedAt}`;
                                   return <button type="button" key={i} onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}<span className="sr-only"> ({auditLabel})</span></button>;
                                 })}
@@ -2611,7 +2636,10 @@ export default function ProductionBoard() {
           const round = productionRounds.find(item => item.id === packingAuditSelection.roundId);
           const pack = round?.packedSkus?.[packingAuditSelection.packIndex];
           if (!round || !pack) return <p className="text-sm text-slate-500">Packing entry not found.</p>;
-          const recordedAt = pack.recordedAt ? new Date(pack.recordedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : undefined;
+          const historyEvent = getPackingAuditEvent(round, packingAuditSelection.packIndex);
+          const recordedBy = pack.recordedBy || historyEvent?.recordedBy;
+          const recordedAtValue = pack.recordedAt || historyEvent?.occurredAt;
+          const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : undefined;
           return <div className="space-y-3 text-sm">
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="font-semibold text-slate-900">{pack.sku}</p>
@@ -2619,10 +2647,10 @@ export default function ProductionBoard() {
               <p className="mt-1 text-xs text-slate-500">{roundDisplayCode(round)} · Milk lot {round.milkLotCode}</p>
             </div>
             <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-indigo-900">
-              <p><strong>Recorded by:</strong> {pack.recordedBy || 'Not captured for this legacy entry'}</p>
+              <p><strong>Recorded by:</strong> {recordedBy || 'Not captured for this legacy entry'}</p>
               <p className="mt-1"><strong>Recorded at:</strong> {recordedAt || 'Not captured for this legacy entry'}</p>
             </div>
-            {!pack.recordedBy && <p className="text-xs text-amber-700">This packing was saved before per-entry recorder tracking was added. New and corrected packing entries will always show the signed-in username and timestamp.</p>}
+            {!recordedBy && <p className="text-xs text-amber-700">This packing was saved before per-entry recorder tracking was added. New and corrected packing entries will always show the signed-in username and timestamp.</p>}
           </div>;
         })()}
       </Modal>
