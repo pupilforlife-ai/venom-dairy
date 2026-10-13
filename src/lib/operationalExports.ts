@@ -23,6 +23,7 @@ import {
 import { getProductionPackingEntries } from './finishedStock';
 import { excelDate, ExcelCellValue, ExcelSheet, ExcelWorkbookExport, exportDateStamp, exportExcelWorkbook } from './excelExport';
 import { getMilkLotVesselBalances, getMilkSaleVesselSource } from './milkVesselAllocation';
+import { comparePaneerBlockToPackedWeight } from './paneerWeightReconciliation';
 
 interface CrumbingBatchExportRecord {
   id: string;
@@ -1457,6 +1458,7 @@ function weightReconciliationSheet(
   metadata: ExcelSheet['metadata'],
 ): ExcelSheet {
   const paneerRounds = sortedRounds(lotRounds.filter(round => round.type === 'D' || round.type === 'C/S'));
+  const reportAvailable = Boolean(lot.productionClosed);
   return {
     name: 'Weight Reconciliation',
     title: `Milk Receiving — Paneer Weight Reconciliation — Lot ${lot.lotCode}`,
@@ -1464,6 +1466,7 @@ function weightReconciliationSheet(
       ...(metadata || []),
       ['Accounted output formula', 'Packed weight (verified when available) + PAN111 + SPP + remaining balance'],
       ['Variance formula', 'Final block weight total minus accounted output'],
+      ['Block vs packed report', reportAvailable ? '(Final block weight - PAN111 weight) - recorded packed weight' : 'Available after the milk lot is closed'],
     ],
     columns: [
       { key: 'shift', header: 'Shift', width: 9, numberFormat: '0' },
@@ -1474,6 +1477,9 @@ function weightReconciliationSheet(
       { key: 'recordedOutputKg', header: 'Recorded Output kg', width: 19, numberFormat: '0.00' },
       { key: 'blocks', header: 'Final Blocks', width: 13, numberFormat: '0' },
       { key: 'blockWeightKg', header: 'Final Block Weight kg', width: 21, numberFormat: '0.00' },
+      { key: 'packableAfterPan111Kg', header: 'Block Weight - PAN111 kg', width: 23, numberFormat: '0.00' },
+      { key: 'blockVsPackedDifferenceKg', header: 'Block - PAN111 - Packed kg', width: 25, numberFormat: '0.00' },
+      { key: 'blockVsPackedCheck', header: 'Block vs Packed Check', width: 29 },
       { key: 'outputBlockVarianceKg', header: 'Blocks - Output kg', width: 19, numberFormat: '0.00' },
       { key: 'recordedPackedKg', header: 'Recorded Packed kg', width: 19, numberFormat: '0.00' },
       { key: 'verifiedPackedKg', header: 'Verified Packed kg', width: 19, numberFormat: '0.00' },
@@ -1492,6 +1498,9 @@ function weightReconciliationSheet(
       const blockWeightKg = sum(round.blockWeights);
       const packingWeight = packing.hasVerification ? packing.verifiedWeightKg : packing.weightKg;
       const pan111Kg = roundPan111Weight(round);
+      const blockVsPacked = reportAvailable && hasBlocks
+        ? comparePaneerBlockToPackedWeight(blockWeightKg, pan111Kg, packing.weightKg)
+        : undefined;
       const sppKg = Math.max(0, round.sppRecordedWeight || 0);
       const remainingKg = Math.max(0, round.remainingBalance || 0);
       const accountedOutputKg = packingWeight + pan111Kg + sppKg + remainingKg;
@@ -1504,6 +1513,17 @@ function weightReconciliationSheet(
         recordedOutputKg: round.outputWeight || 0,
         blocks: round.numberOfBlocks ?? round.blockWeights?.length ?? 0,
         blockWeightKg: hasBlocks ? blockWeightKg : '',
+        packableAfterPan111Kg: blockVsPacked?.packableWeightKg ?? '',
+        blockVsPackedDifferenceKg: blockVsPacked?.differenceKg ?? '',
+        blockVsPackedCheck: !reportAvailable
+          ? 'Report available after milk is closed'
+          : !hasBlocks
+            ? 'No block weight recorded'
+          : Math.abs(blockVsPacked!.differenceKg) <= 0.01
+            ? 'Balanced'
+            : blockVsPacked!.differenceKg > 0
+              ? 'Weight not packed / investigate'
+              : 'Packed above available / investigate',
         outputBlockVarianceKg: hasBlocks ? blockWeightKg - Math.max(0, round.outputWeight || 0) : '',
         recordedPackedKg: packing.weightKg,
         verifiedPackedKg: packing.hasVerification ? packing.verifiedWeightKg : '',
@@ -1815,6 +1835,7 @@ export async function exportReconciliationWorkbook(input: {
     sheets: [
       balanceSheet,
       outputsSheet,
+      ...(lot.productionClosed ? [weightReconciliationSheet(lot, lotRounds, metadata)] : []),
       roundLedgerSheet(completedRounds, `Milk Reconciliation — Completed Rounds — Lot ${lot.lotCode}`, metadata),
       packingSheet(lotRounds, `Milk Reconciliation — Packed SKUs — Lot ${lot.lotCode}`, metadata),
       wasteSheet,

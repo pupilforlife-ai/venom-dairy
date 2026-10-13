@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import { getGheeRoundInput, getMilkLotAccounting, getMilkLotProductionReconciliation, getRoundMilkInput, isMilkProductionRound } from '../data/mockData';
 import { getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import { exportReconciliationWorkbook } from '../lib/operationalExports';
+import { comparePaneerBlockToPackedWeight } from '../lib/paneerWeightReconciliation';
 
 interface MilkBalanceReviewForm {
   litresReceived: number;
@@ -52,6 +53,7 @@ export default function Reconciliation() {
   })[0];
   const selectedLot = milkLots.find(lot => lot.lotCode === selectedLotCode) ?? latestMilkLot;
   const lotCode = selectedLot?.lotCode ?? '';
+  const isMilkClosed = Boolean(selectedLot?.productionClosed);
   const previousLot = selectedLot
     ? [...milkLots]
       .filter(lot => lot.id !== selectedLot.id && lot.receiptDate < selectedLot.receiptDate)
@@ -157,6 +159,14 @@ export default function Reconciliation() {
     getPaneerPackWeight(paneerSkuByCode[pack.sku], pack.cases || 0, pack.loose || 0, pack.looseWeightKg || 0, pack.weightKg || 0);
   const getBlockTotal = (round: typeof productionRounds[number]) => (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
   const getStaffPackedWeight = (round: typeof productionRounds[number]) => (round.packedSkus || []).reduce((sum, pack) => sum + getPackWeight(pack), 0);
+  const getRecordedPan111Weight = (round: typeof productionRounds[number]) => {
+    const packedPan111 = (round.packedSkus || [])
+      .filter(pack => pack.sku === 'PAN111')
+      .reduce((sum, pack) => sum + Math.max(0, pack.weightKg || 0), 0);
+    return round.pan111ApprovalStatus === 'approved'
+      ? Math.max(0, round.pan111RequestedWeight || 0, packedPan111)
+      : packedPan111;
+  };
   const getVerifiedSkuWeight = (round: typeof productionRounds[number]) => (round.verifiedPackedSkus || []).filter(pack => pack.sku !== 'PAN111').reduce((sum, pack) => sum + getPackWeight(pack), 0);
   const getApprovedPan111Weight = (round: typeof productionRounds[number]) => round.pan111ApprovalStatus === 'approved'
     ? round.pan111RequestedWeight || round.packedSkus?.find(pack => pack.sku === 'PAN111')?.weightKg || 0
@@ -185,6 +195,30 @@ export default function Reconciliation() {
     staffPacked: summary.staffPacked + row.staffPacked,
     verifiedOutput: summary.verifiedOutput + row.verifiedOutput,
   }), { milkUsed: 0, staffOutput: 0, blockWeight: 0, staffPacked: 0, verifiedOutput: 0 });
+  const blockVsPackedRows = useMemo(() => paneerAuditRounds
+    .map(round => {
+      const blockWeight = getBlockTotal(round);
+      const pan111 = getRecordedPan111Weight(round);
+      const packed = (round.packedSkus || [])
+        .filter(pack => pack.sku !== 'PAN111')
+        .reduce((sum, pack) => sum + getPackWeight(pack), 0);
+      return {
+        round,
+        comparison: comparePaneerBlockToPackedWeight(blockWeight, pan111, packed),
+        hasBlockRecord: Boolean(round.blockWeights?.length),
+        hasPackingRecord: Boolean(round.packedSkus?.some(pack => pack.sku !== 'PAN111')),
+      };
+    })
+    .filter(({ hasBlockRecord, hasPackingRecord, comparison }) => hasBlockRecord || hasPackingRecord || comparison.pan111Kg > 0),
+    [paneerAuditRounds],
+  );
+  const blockVsPackedSummary = blockVsPackedRows.reduce((summary, row) => ({
+    blockWeightKg: summary.blockWeightKg + row.comparison.blockWeightKg,
+    pan111Kg: summary.pan111Kg + row.comparison.pan111Kg,
+    packableWeightKg: summary.packableWeightKg + row.comparison.packableWeightKg,
+    packedWeightKg: summary.packedWeightKg + row.comparison.packedWeightKg,
+    differenceKg: summary.differenceKg + row.comparison.differenceKg,
+  }), { blockWeightKg: 0, pan111Kg: 0, packableWeightKg: 0, packedWeightKg: 0, differenceKg: 0 });
   const verifyRoundSkus = (round: typeof productionRounds[number]) => {
     if (!isKbOwner || !round.packedSkus?.length) return;
     updateProductionRound(round.id, {
@@ -670,6 +704,97 @@ export default function Reconciliation() {
           </table>
         </div>
       </div>
+
+      {/* Direct cutting-to-packing weight check */}
+      {isMilkClosed ? (
+        <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200">
+            <h3 className="text-sm font-semibold text-slate-900">Block Weight vs Packed Weight</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Difference = (final block weight − PAN111 weight) − recorded packed weight. This is generated only after the milk lot is closed and does not change production or stock.
+            </p>
+          </div>
+          <div className="p-4 space-y-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-emerald-700">Block weight</p>
+              <p className="mt-1 text-lg font-bold text-emerald-900">{blockVsPackedSummary.blockWeightKg.toFixed(2)} kg</p>
+            </div>
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-indigo-700">PAN111</p>
+              <p className="mt-1 text-lg font-bold text-indigo-900">{blockVsPackedSummary.pan111Kg.toFixed(2)} kg</p>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-blue-700">Packable after PAN111</p>
+              <p className="mt-1 text-lg font-bold text-blue-900">{blockVsPackedSummary.packableWeightKg.toFixed(2)} kg</p>
+            </div>
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-purple-700">Packed</p>
+              <p className="mt-1 text-lg font-bold text-purple-900">{blockVsPackedSummary.packedWeightKg.toFixed(2)} kg</p>
+            </div>
+            <div className={`rounded-lg border p-3 ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+              <p className={`text-[11px] uppercase tracking-wide ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'text-emerald-700' : 'text-amber-700'}`}>Difference</p>
+              <p className={`mt-1 text-lg font-bold ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'text-emerald-900' : 'text-amber-900'}`}>
+                {blockVsPackedSummary.differenceKg >= 0 ? '+' : ''}{blockVsPackedSummary.differenceKg.toFixed(2)} kg
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  <th className="px-3 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Round</th>
+                  <th className="px-3 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Block weight kg</th>
+                  <th className="px-3 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">PAN111 kg</th>
+                  <th className="px-3 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Packable after PAN111 kg</th>
+                  <th className="px-3 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Packed kg</th>
+                  <th className="px-3 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Difference kg</th>
+                  <th className="px-3 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Check</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {blockVsPackedRows.map(({ round, comparison, hasBlockRecord, hasPackingRecord }) => {
+                  const balanced = hasBlockRecord && hasPackingRecord && Math.abs(comparison.differenceKg) <= 0.01;
+                  const missingRecord = !hasBlockRecord || !hasPackingRecord;
+                  return (
+                    <tr key={round.id} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-3">
+                        <div className="font-mono text-xs font-bold text-slate-900">{round.milkLotCode} · S{round.shiftNumber}/R{round.roundNumber}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{round.type} · {round.batchCode || 'No batch code'}</div>
+                      </td>
+                      <td className="px-3 py-3 text-slate-700">{hasBlockRecord ? comparison.blockWeightKg.toFixed(2) : '—'}</td>
+                      <td className="px-3 py-3 text-slate-700">{comparison.pan111Kg.toFixed(2)}</td>
+                      <td className="px-3 py-3 font-medium text-blue-700">{hasBlockRecord ? comparison.packableWeightKg.toFixed(2) : '—'}</td>
+                      <td className="px-3 py-3 text-slate-700">{hasPackingRecord ? comparison.packedWeightKg.toFixed(2) : '—'}</td>
+                      <td className={`px-3 py-3 font-semibold ${balanced ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {hasBlockRecord && hasPackingRecord ? `${comparison.differenceKg >= 0 ? '+' : ''}${comparison.differenceKg.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${balanced ? 'bg-emerald-100 text-emerald-700' : missingRecord ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-700'}`}>
+                          {balanced ? 'Balanced' : missingRecord ? 'Record incomplete' : comparison.differenceKg > 0 ? 'Weight not packed / investigate' : 'Packed above available / investigate'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {blockVsPackedRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">No paneer block or packing records are available for this milk lot yet.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-slate-500">Positive differences need investigation for remaining paneer, spoilage, unrecorded packing, or a measurement error. Negative differences indicate that the packing record is greater than the available block weight after PAN111.</p>
+          </div>
+        </section>
+      ) : (
+        <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+          <h3 className="text-sm font-semibold text-slate-800">Block Weight vs Packed Weight</h3>
+          <p className="mt-1 text-xs text-slate-600">This diagnostic report is generated after the milk lot is closed. Close lot {lotCode || 'this lot'} to produce the final block-versus-packed comparison.</p>
+        </section>
+      )}
 
       {isKbOwner && (
         <section className="bg-white rounded-xl border border-indigo-200 overflow-hidden">

@@ -323,6 +323,15 @@ describe('Milk Receiving Excel export', () => {
       packingBasis: 'Owner-verified',
       accountedOutputKg: 70,
       varianceKg: 0,
+      packableAfterPan111Kg: '',
+      blockVsPackedDifferenceKg: '',
+      blockVsPackedCheck: 'Report available after milk is closed',
+    });
+    const closedWorkbook = buildMilkReceivingWorkbook({ ...lot, productionClosed: true }, rounds);
+    expect(closedWorkbook.sheets.find(candidate => candidate.name === 'Weight Reconciliation')?.rows[0]).toMatchObject({
+      packableAfterPan111Kg: 60,
+      blockVsPackedDifferenceKg: 29,
+      blockVsPackedCheck: 'Weight not packed / investigate',
     });
     expect(sheet('SKU Packed on Board').rows[0]).toMatchObject({ sku: 'MPAN100', cases: 2, weightKg: 31 });
     expect(workbook.sheets.map(candidate => candidate.name)).toEqual(expect.arrayContaining([
