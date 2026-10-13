@@ -15,6 +15,8 @@ export default function MilkReceiving() {
   const { showToast } = useToast();
   const isExportOwner = typeof window !== 'undefined'
     && window.localStorage.getItem('vejoy_user_role')?.toLowerCase() === 'owner';
+  const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
+  const canEditLotCode = currentRole === 'owner' || currentRole === 'admin';
   const newestLot = [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
     const bDate = new Date(`${b.receiptDate}T${b.receiptTime || '00:00'}`).getTime();
@@ -34,6 +36,7 @@ export default function MilkReceiving() {
   const [weeklyCipSupervisorConfirmed, setWeeklyCipSupervisorConfirmed] = useState(false);
   const [weeklyCipCompletedSteps, setWeeklyCipCompletedSteps] = useState<string[]>([]);
   const [isExporting, setIsExporting] = useState(false);
+  const [editLotChangeReason, setEditLotChangeReason] = useState('');
 
   const orderedLots = useMemo(() => [...milkLots].sort((a, b) => {
     const aDate = new Date(`${a.receiptDate}T${a.receiptTime || '00:00'}`).getTime();
@@ -59,6 +62,7 @@ export default function MilkReceiving() {
     lotCode: '',
     supplier: 'Green Valley Dairy',
     litresReceived: 25000,
+    receiptStatus: 'received' as 'planned' | 'received',
     receiptDate: new Date().toISOString().split('T')[0],
     receiptTime: new Date().toTimeString().slice(0, 5),
     invoiceNo: '',
@@ -85,16 +89,24 @@ export default function MilkReceiving() {
       showToast('error', 'Please enter a lot code');
       return;
     }
+    if (newLot.receiptStatus === 'received' && newLot.litresReceived <= 0) {
+      showToast('error', 'Enter the received milk volume, or choose Planned / receipt pending');
+      return;
+    }
+    const isPlanned = newLot.receiptStatus === 'planned';
+    const createdAt = new Date().toISOString();
     addMilkLot({
       lotCode: newLot.lotCode,
       receiptDate: newLot.receiptDate,
       receiptTime: newLot.receiptTime,
+      receiptStatus: newLot.receiptStatus,
+      receivedAt: isPlanned ? undefined : createdAt,
       supplier: newLot.supplier,
       invoiceNo: newLot.invoiceNo || undefined,
       deliveryNoteNo: newLot.deliveryNoteNo || undefined,
-      litresReceived: newLot.litresReceived,
+      litresReceived: isPlanned ? 0 : newLot.litresReceived,
       litresConsumed: 0,
-      litresRemaining: newLot.litresReceived,
+      litresRemaining: isPlanned ? 0 : newLot.litresReceived,
       litresRejected: 0,
       litresSpilled: 0,
       litresSold: 0,
@@ -117,6 +129,7 @@ export default function MilkReceiving() {
     setShowNewLotModal(false);
     setNewLot({ 
       lotCode: '', supplier: 'Green Valley Dairy', litresReceived: 25000, 
+      receiptStatus: 'received',
       receiptDate: new Date().toISOString().split('T')[0],
       receiptTime: new Date().toTimeString().slice(0, 5),
       invoiceNo: '', deliveryNoteNo: '',
@@ -195,23 +208,38 @@ export default function MilkReceiving() {
       lotCode: lot.lotCode,
       supplier: lot.supplier,
       litresReceived: lot.litresReceived,
+      receiptStatus: lot.receiptStatus || 'received',
       receiptDate: lot.receiptDate,
       receiptTime: lot.receiptTime || '',
       invoiceNo: lot.invoiceNo || '',
       deliveryNoteNo: lot.deliveryNoteNo || '',
     });
+    setEditLotChangeReason('');
     setShowEditLotModal(true);
   };
 
   const handleUpdateLot = () => {
     const lot = milkLots.find((item) => item.id === editingLotId);
-    if (!lot || !editLot.lotCode.trim() || editLot.litresReceived <= 0) {
-      showToast('error', 'Enter a lot code and a valid received quantity');
+    if (!lot || !editLot.lotCode.trim()) {
+      showToast('error', 'Enter a lot code');
+      return;
+    }
+    const lotCodeChanged = editLot.lotCode.trim() !== lot.lotCode;
+    if (lotCodeChanged && !canEditLotCode) {
+      showToast('error', 'Only an owner or admin can change the milk lot code');
+      return;
+    }
+    if (lotCodeChanged && editLotChangeReason.trim().length < 5) {
+      showToast('error', 'Enter a reason of at least 5 characters for the lot-code correction');
+      return;
+    }
+    if (editLot.receiptStatus === 'received' && editLot.litresReceived <= 0) {
+      showToast('error', 'Enter the received milk volume before marking this lot received');
       return;
     }
     const accounting = getMilkLotAccounting(lot, productionRounds);
     const alreadyAccountedFor = accounting.consumed + accounting.sold + lot.litresRejected + lot.litresSpilled;
-    if (editLot.litresReceived < alreadyAccountedFor) {
+    if (editLot.receiptStatus === 'received' && editLot.litresReceived < alreadyAccountedFor) {
       showToast('error', `Received quantity cannot be below ${alreadyAccountedFor.toLocaleString()} L already accounted for`);
       return;
     }
@@ -219,12 +247,23 @@ export default function MilkReceiving() {
     updateMilkLot(lot.id, {
       lotCode: editLot.lotCode.trim(),
       supplier: editLot.supplier.trim(),
-      litresReceived: editLot.litresReceived,
-      litresRemaining: Math.max(0, accounting.remaining + delta),
+      litresReceived: editLot.receiptStatus === 'planned' ? 0 : editLot.litresReceived,
+      litresRemaining: editLot.receiptStatus === 'planned' ? 0 : Math.max(0, accounting.rawRemaining + delta),
+      receiptStatus: editLot.receiptStatus,
+      receivedAt: editLot.receiptStatus === 'received' ? lot.receivedAt || new Date().toISOString() : undefined,
       receiptDate: editLot.receiptDate,
       receiptTime: editLot.receiptTime || undefined,
       invoiceNo: editLot.invoiceNo.trim() || undefined,
       deliveryNoteNo: editLot.deliveryNoteNo.trim() || undefined,
+      lotCodeHistory: lotCodeChanged
+        ? [...(lot.lotCodeHistory || []), {
+          previousLotCode: lot.lotCode,
+          newLotCode: editLot.lotCode.trim(),
+          changedAt: new Date().toISOString(),
+          changedBy: typeof window === 'undefined' ? 'owner/admin' : window.localStorage.getItem('vejoy_user_username') || currentRole,
+          reason: editLotChangeReason.trim(),
+        }]
+        : lot.lotCodeHistory,
     });
     showToast('success', `Milk lot ${editLot.lotCode.trim()} updated`);
     setShowEditLotModal(false);
@@ -481,7 +520,10 @@ export default function MilkReceiving() {
                 const isExpanded = expandedLots.has(lot.id);
                 const lotAccounting = getMilkLotAccounting(lot, productionRounds);
                 const lotReconciliation = getMilkLotProductionReconciliation(lot, productionRounds);
-                const vesselAllocation = getMilkLotVesselBalances(lot, productionRounds);
+                const receiptPending = lot.receiptStatus === 'planned';
+                const vesselAllocation = receiptPending
+                  ? { vessels: [], ruleShortfallLitres: 0 }
+                  : getMilkLotVesselBalances(lot, productionRounds);
                 const milkLeft = lotAccounting.remaining;
                 
                 return (
@@ -503,7 +545,7 @@ export default function MilkReceiving() {
                               )}
                             </div>
                             <div className="text-xs text-slate-500 mt-1">
-                              {formatDate(lot.receiptDate, lot.receiptTime)} - Milk
+                              {lot.receiptStatus === 'planned' ? 'Planned for' : 'Received'} {formatDate(lot.receiptDate, lot.receiptTime)} - Milk
                             </div>
                           </div>
                         </div>
@@ -515,7 +557,7 @@ export default function MilkReceiving() {
                         )}
                       </td>
                       <td className="px-4 py-4 text-right">
-                        <span className="font-semibold text-slate-900">{lot.litresReceived.toLocaleString()} L</span>
+                        <span className="font-semibold text-slate-900">{lot.receiptStatus === 'planned' ? 'Pending receipt' : `${lot.litresReceived.toLocaleString()} L`}</span>
                       </td>
                       <td className="px-4 py-4 text-right">
                         <span className="text-slate-700">{lotAccounting.consumed.toLocaleString()} L</span>
@@ -535,7 +577,7 @@ export default function MilkReceiving() {
                           lot.status === 'completed' ? 'bg-slate-100 text-slate-700 border border-slate-200' :
                           'bg-red-100 text-red-800 border border-red-200'
                         }`}>
-                          {lot.productionClosed ? 'Closed' : lot.status === 'active' ? 'Accepted' : lot.status === 'completed' ? 'Completed' : 'Rejected'}
+                          {lot.productionClosed ? 'Closed' : lot.receiptStatus === 'planned' ? 'Planned · receipt pending' : lot.status === 'active' ? 'Accepted' : lot.status === 'completed' ? 'Completed' : 'Rejected'}
                         </span>
                       </td>
                       <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
@@ -546,10 +588,10 @@ export default function MilkReceiving() {
                           <button onClick={() => openEditLot(lot)} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
                             Edit
                           </button>
-                          <button onClick={() => openMilkSale(lot)} disabled={lot.productionClosed} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                          <button onClick={() => openMilkSale(lot)} disabled={lot.productionClosed || lot.receiptStatus === 'planned'} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             + Milk sale
                           </button>
-                          <button onClick={() => openCloseLot(lot)} disabled={Boolean(lot.productionClosed)} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                          <button onClick={() => openCloseLot(lot)} disabled={Boolean(lot.productionClosed) || lot.receiptStatus === 'planned'} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             Close
                           </button>
                         </div>
@@ -693,7 +735,7 @@ export default function MilkReceiving() {
                               <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
                                 <div className="flex items-center justify-between mb-3">
                                   <h3 className="text-sm font-bold text-slate-900">Lot consumption progress</h3>
-                                  <span className="text-xs text-slate-500">{lot.litresReceived > 0 ? ((lotAccounting.consumed / lot.litresReceived) * 100).toFixed(0) : 0}% utilized</span>
+                                  <span className="text-xs text-slate-500">{receiptPending ? 'Pending receipt volume' : `${lot.litresReceived > 0 ? ((lotAccounting.consumed / lot.litresReceived) * 100).toFixed(0) : 0}% utilized`}</span>
                                 </div>
                                 <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
                                   <div className="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full" style={{ width: `${lot.litresReceived > 0 ? Math.min(100, (lotAccounting.consumed / lot.litresReceived) * 100) : 0}%` }} />
@@ -701,16 +743,16 @@ export default function MilkReceiving() {
                                 <div className="grid grid-cols-2 gap-3 mt-4 text-xs">
                                   <div><span className="text-slate-500">Rejected</span><div className="font-bold text-red-600">{lot.litresRejected.toLocaleString()} L</div></div>
                                   <div><span className="text-slate-500">Spilled</span><div className="font-bold text-amber-600">{lot.litresSpilled.toLocaleString()} L</div></div>
-                                  <div><span className="text-slate-500">Received</span><div className="font-bold text-slate-900">{lot.litresReceived.toLocaleString()} L</div></div>
-                                  <div><span className="text-slate-500">Unallocated</span><div className="font-bold text-emerald-600">{lotAccounting.remaining.toLocaleString()} L</div></div>
+                                  <div><span className="text-slate-500">Received</span><div className="font-bold text-slate-900">{receiptPending ? 'Pending' : `${lot.litresReceived.toLocaleString()} L`}</div></div>
+                                  <div><span className="text-slate-500">Unallocated</span><div className="font-bold text-emerald-600">{receiptPending ? 'Pending' : `${lotAccounting.remaining.toLocaleString()} L`}</div></div>
                                 </div>
-                                {lotAccounting.overdraw > 0.01 && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Overdraw detected: {lotAccounting.overdraw.toFixed(2)} L. Review round input and waste records before closing this lot.</div>}
+                                {!receiptPending && lotAccounting.overdraw > 0.01 && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Overdraw detected: {lotAccounting.overdraw.toFixed(2)} L. Review round input and waste records before closing this lot.</div>}
                               </div>
                               <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
                                 <h3 className="text-sm font-bold text-slate-900 mb-1">Vessel / location allocation</h3>
                                 <p className="text-xs text-slate-500 mb-3">Production is deducted automatically in this order: Direct to production → BMC #2 → Silo → BMC #1 → BMC #3 → Auxiliary → IBCs. Sales use IBCs for exact 1,000 L multiples and Auxiliary for quantities below 400 L.</p>
                                 <div className="space-y-2">
-                                  {vesselAllocation.vessels.length > 0 ? vesselAllocation.vessels.map((allocation) => {
+                                  {receiptPending ? <p className="text-xs text-blue-700">Vessel allocation will be calculated after the actual received volume is entered.</p> : vesselAllocation.vessels.length > 0 ? vesselAllocation.vessels.map((allocation) => {
                                     const fillPercent = allocation.capacity ? Math.min(100, (allocation.litres / allocation.capacity) * 100) : 100;
                                     return (
                                       <div key={allocation.id} className="rounded-lg border border-slate-100 px-2 py-2">
@@ -814,8 +856,11 @@ export default function MilkReceiving() {
       </div>
 
       {/* New Milk Lot Modal */}
-      <Modal isOpen={showNewLotModal} onClose={() => setShowNewLotModal(false)} title="Receive Source Lot">
+      <Modal isOpen={showNewLotModal} onClose={() => setShowNewLotModal(false)} title="Create Milk Lot">
         <div className="space-y-4">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+            Create a planned lot before offloading so production can start immediately. Add the actual volume, invoice and delivery note later from Edit.
+          </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Lot Code (date-based, e.g. 230626)</label>
             <input
@@ -845,6 +890,17 @@ export default function MilkReceiving() {
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               />
             </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt status</label>
+            <select
+              value={newLot.receiptStatus}
+              onChange={(e) => setNewLot({ ...newLot, receiptStatus: e.target.value as 'planned' | 'received', litresReceived: e.target.value === 'planned' ? 0 : (newLot.litresReceived || 25000) })}
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+            >
+              <option value="planned">Planned · receipt pending</option>
+              <option value="received">Received · volume recorded now</option>
+            </select>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Supplier</label>
@@ -878,18 +934,20 @@ export default function MilkReceiving() {
             </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Litres Received</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">{newLot.receiptStatus === 'planned' ? 'Expected litres (optional)' : 'Litres Received'}</label>
             <input
               type="number"
-              value={newLot.litresReceived}
+              value={newLot.receiptStatus === 'planned' ? '' : newLot.litresReceived}
               onChange={(e) => setNewLot({ ...newLot, litresReceived: parseInt(e.target.value) })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              disabled={newLot.receiptStatus === 'planned'}
+              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50"
               min="0"
+              placeholder={newLot.receiptStatus === 'planned' ? 'Add after receipt' : 'e.g. 25000'}
             />
           </div>
           <div className="flex gap-2 pt-2">
             <button onClick={handleCreateLot} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors">
-              Create Milk Lot
+              {newLot.receiptStatus === 'planned' ? 'Create Planned Lot' : 'Record Received Lot'}
             </button>
             <button onClick={() => setShowNewLotModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors">
               Cancel
@@ -900,17 +958,30 @@ export default function MilkReceiving() {
 
       <Modal isOpen={showEditLotModal} onClose={() => setShowEditLotModal(false)} title="Edit original milk receipt">
         <div className="space-y-4">
-          <p className="text-xs text-slate-500">This edits the original receipt fields. Recorded production, sales, rejected, and spilled quantities are preserved.</p>
+          <p className="text-xs text-slate-500">Add receipt details after offloading. Recorded production, sales, rejected, and spilled quantities are preserved.</p>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Lot Code</label>
-            <input value={editLot.lotCode} onChange={(e) => setEditLot({ ...editLot, lotCode: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Lot Code {canEditLotCode ? '(owner/admin editable)' : '(owner/admin only)'}</label>
+            <input value={editLot.lotCode} disabled={!canEditLotCode} onChange={(e) => setEditLot({ ...editLot, lotCode: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50" />
           </div>
+          {canEditLotCode && editLot.lotCode !== milkLots.find((lot) => lot.id === editingLotId)?.lotCode && (
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Reason for lot-code correction</label>
+              <input value={editLotChangeReason} onChange={(e) => setEditLotChangeReason(e.target.value)} className="mt-1 w-full px-3 py-2 border border-amber-200 rounded-lg text-sm" placeholder="e.g. Supplier rejected the original tanker lot" />
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt Date</label><input type="date" value={editLot.receiptDate} onChange={(e) => setEditLot({ ...editLot, receiptDate: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
             <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt Time</label><input type="time" value={editLot.receiptTime} onChange={(e) => setEditLot({ ...editLot, receiptTime: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
           </div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Supplier</label><input value={editLot.supplier} onChange={(e) => setEditLot({ ...editLot, supplier: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
-          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Litres Received</label><input type="number" min="1" value={editLot.litresReceived} onChange={(e) => setEditLot({ ...editLot, litresReceived: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt status</label>
+            <select value={editLot.receiptStatus} onChange={(e) => setEditLot({ ...editLot, receiptStatus: e.target.value as 'planned' | 'received' })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+              <option value="planned">Planned · receipt pending</option>
+              <option value="received">Received · volume recorded</option>
+            </select>
+          </div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Litres Received</label><input type="number" min="0" disabled={editLot.receiptStatus === 'planned'} value={editLot.receiptStatus === 'planned' ? '' : editLot.litresReceived} onChange={(e) => setEditLot({ ...editLot, litresReceived: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm disabled:bg-slate-50" placeholder={editLot.receiptStatus === 'planned' ? 'Add after receipt' : 'e.g. 25000'} /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Invoice No</label><input value={editLot.invoiceNo} onChange={(e) => setEditLot({ ...editLot, invoiceNo: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
             <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Delivery Note No</label><input value={editLot.deliveryNoteNo} onChange={(e) => setEditLot({ ...editLot, deliveryNoteNo: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>

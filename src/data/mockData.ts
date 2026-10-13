@@ -246,6 +246,16 @@ export interface MilkLot {
   lotCode: string; // e.g. "160626" (date-based)
   receiptDate: string;
   receiptTime?: string;
+  /** Planned lots can be created before the tanker is received/offloaded. */
+  receiptStatus?: 'planned' | 'received';
+  receivedAt?: string;
+  lotCodeHistory?: Array<{
+    previousLotCode: string;
+    newLotCode: string;
+    changedAt: string;
+    changedBy: string;
+    reason: string;
+  }>;
   supplier: string;
   invoiceNo?: string;
   deliveryNoteNo?: string;

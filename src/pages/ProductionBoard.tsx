@@ -1740,7 +1740,7 @@ export default function ProductionBoard() {
           <div>
             <p className="text-sm font-semibold text-emerald-900">Fresh production board for lot {activeMilkLot.lotCode}</p>
             <p className="text-sm text-emerald-700 mt-1">
-              {activeMilkLot.litresReceived.toLocaleString()} L received. No shifts or rounds have been created for this lot yet.
+                  {activeMilkLot.receiptStatus === 'planned' ? 'Receipt volume pending' : `${activeMilkLot.litresReceived.toLocaleString()} L received`}. No shifts or rounds have been created for this lot yet.
             </p>
           </div>
           <button onClick={() => setShowNewShiftModal(true)} className="shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
