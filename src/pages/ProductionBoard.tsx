@@ -736,7 +736,8 @@ export default function ProductionBoard() {
       return;
     }
     const totalWeightPacked = getPaneerPackWeight(definition, packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg);
-    if (totalWeightPacked <= 0) {
+    const isZeroOwnerCorrection = editingPackIndex !== null && isOwner && totalWeightPacked === 0;
+    if (totalWeightPacked <= 0 && !isZeroOwnerCorrection) {
       showToast('error', definition.packMode === 'weight_only' ? 'Enter a PAN111 weight' : 'Enter cases, loose packets, or loose weight');
       return;
     }
@@ -861,6 +862,23 @@ export default function ProductionBoard() {
     setShowPackModal(false);
     setPackForm(emptyPackForm);
     setEditingPackIndex(null);
+  };
+
+  const openPackingCorrection = (round: ProductionRound, packIndex: number) => {
+    if (!isOwner) return;
+    const pack = round.packedSkus?.[packIndex];
+    if (!pack) return;
+    setSelectedRound(round.id);
+    setEditingPackIndex(packIndex);
+    setPackForm({
+      sku: pack.sku,
+      cases: pack.cases || 0,
+      loose: pack.loose || 0,
+      looseWeightKg: pack.looseWeightKg || 0,
+      weightKg: pack.weightKg || 0,
+      reason: pack.reason || '',
+    });
+    setShowPackModal(true);
   };
 
   const handleApprovePan111 = (roundId: string) => {
@@ -2143,14 +2161,16 @@ export default function ProductionBoard() {
                                   const recordedAtValue = p.recordedAt || historyEvent?.occurredAt;
                                   const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB') : 'timestamp not captured';
                                   const auditLabel = `${p.sku} · ${recordedBy} · ${recordedAt}`;
-                                  return <button type="button" key={i} onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}<span className="sr-only"> ({auditLabel})</span></button>;
+                                  return <div key={i} className="flex flex-wrap items-center gap-1">
+                                    <button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}<span className="sr-only"> ({auditLabel})</span></button>
+                                    {isOwner && <button type="button" onClick={() => openPackingCorrection(round, i)} className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
+                                  </div>;
                                 })}
                               </div>
                             ) : <span className="text-slate-400">—</span>}
                             {round.pan111ApprovalStatus === 'pending' && <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
                             {round.remainingBalance !== undefined && <div className={`mt-1 inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold ${round.remainingBalance > 0 ? 'border-amber-200 bg-amber-50 text-amber-600' : round.remainingBalance < 0 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>Balance {round.remainingBalance.toFixed(2)} kg</div>}
                             {['cut', 'chiller_storage', 'frozen', 'packed'].includes(round.status) && !round.locked && round.pan111ApprovalStatus !== 'pending' && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm(emptyPackForm); setShowPackModal(true); }} className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"><Package className="h-3 w-3" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
-                            {isOwner && round.packedSkus && round.packedSkus.length > 0 && <button onClick={() => { const index = round.packedSkus!.length - 1; const pack = round.packedSkus![index]; setSelectedRound(round.id); setEditingPackIndex(index); setPackForm({ sku: pack.sku, cases: pack.cases, loose: pack.loose, looseWeightKg: pack.looseWeightKg || 0, weightKg: pack.weightKg || 0, reason: pack.reason || '' }); setShowPackModal(true); }} className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             {!round.locked && (
@@ -2420,14 +2440,19 @@ export default function ProductionBoard() {
         <div className="space-y-4">
           {selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
-            const balance = round?.remainingBalance ?? round?.outputWeight ?? 0;
+            const editedPack = editingPackIndex !== null ? round?.packedSkus?.[editingPackIndex] : undefined;
+            const editedPackWeight = editedPack
+              ? getPaneerPackWeight(paneerSkuByCode[editedPack.sku], editedPack.cases || 0, editedPack.loose || 0, editedPack.looseWeightKg || 0, editedPack.weightKg || 0)
+              : 0;
+            const balance = (round?.remainingBalance ?? round?.outputWeight ?? 0) + editedPackWeight;
             const existingPacking = round?.packedSkus || [];
             return (
               <>
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                   <p className="text-xs text-amber-800">
-                    <strong>Available Balance:</strong> {balance.toFixed(2)} kg
+                    <strong>{editingPackIndex !== null ? 'Available after correcting this entry:' : 'Available Balance:'}</strong> {balance.toFixed(2)} kg
                   </p>
+                  {editingPackIndex !== null && <p className="mt-1 text-[11px] text-amber-700">Owner correction: set cases and loose quantity to zero to void this packing entry. The original entry remains in the audit history.</p>}
                 </div>
                 {existingPacking.length > 0 && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -2467,7 +2492,11 @@ export default function ProductionBoard() {
           {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode === 'weight_only' && <div className="space-y-3"><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">PAN111 weight (kg)</span><input type="number" value={packForm.weightKg || ''} onChange={(e) => setPackForm({ ...packForm, weightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" /></label><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Reason (required for approval)</span><textarea value={packForm.reason} onChange={(e) => setPackForm({ ...packForm, reason: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={2} placeholder="Explain why this paneer is being recorded as PAN111" /></label></div>}
           {packForm.sku && selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
-            const balance = round?.remainingBalance ?? round?.outputWeight ?? 0;
+            const editedPack = editingPackIndex !== null ? round?.packedSkus?.[editingPackIndex] : undefined;
+            const editedPackWeight = editedPack
+              ? getPaneerPackWeight(paneerSkuByCode[editedPack.sku], editedPack.cases || 0, editedPack.loose || 0, editedPack.looseWeightKg || 0, editedPack.weightKg || 0)
+              : 0;
+            const balance = (round?.remainingBalance ?? round?.outputWeight ?? 0) + editedPackWeight;
             const totalWeightPacked = getPaneerPackWeight(paneerSkuByCode[packForm.sku], packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg);
             const newBalance = balance - totalWeightPacked;
             
