@@ -13,6 +13,7 @@ import {
 import { Modal } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { useSupabaseState } from '../hooks/useSupabaseState';
+import { hasDistributionPackingRecord } from '../lib/crumbingPacking';
 import { CreamLot, DistributionHandover, DistributionHandoverSource, MilkLot, ProductionRound } from '../data/mockData';
 import {
   FinishedGoodsBatchCodeMode,
@@ -53,7 +54,8 @@ interface DistributionCrumbingBatch {
   type: 'SPP' | 'JP' | 'HCP';
   status: string;
   traysPacked: number;
-  packedSkus?: Array<{ sku: string; cases: number; loose: number }>;
+  packedSkus?: Array<{ sku: string; cases: number; loose: number; sourceBatchCodes?: string[]; packingRunId?: string }>;
+  combinedPackingAllocations?: Array<{ primaryBatchId: string }>;
 }
 
 interface HandoverForm {
@@ -251,12 +253,16 @@ export default function Distribution() {
       });
 
     const crumbingCandidates: DistributionCandidate[] = crumbingBatches
-      .filter(batch => batch.status === 'packed' && batch.traysPacked > 0)
+      .filter(batch => {
+        if (batch.status !== 'packed' || batch.traysPacked <= 0) return false;
+        return hasDistributionPackingRecord(batch);
+      })
       .map(batch => {
         const cases = (batch.packedSkus || []).reduce((sum, packed) => sum + packed.cases, 0);
         const loose = (batch.packedSkus || []).reduce((sum, packed) => sum + packed.loose, 0);
         const packedSkus = [...new Set((batch.packedSkus || []).map(packed => packed.sku).filter(Boolean))];
         const sku = packedSkus.length === 1 ? packedSkus[0] : undefined;
+        const sourceBatchCodes = [...new Set((batch.packedSkus || []).flatMap(packed => packed.sourceBatchCodes || [batch.batchCode]))];
         const quantity = cases * 12 + loose || batch.traysPacked;
         const productName = batch.type === 'SPP'
           ? 'Spicy Paneer Poppers'
@@ -274,8 +280,9 @@ export default function Distribution() {
           cases,
           looseQuantity: loose,
           storageLocation: 'Coldroom',
-          detail: `${batch.type} finished batch · ${cases} cases · ${loose} loose`,
+          detail: `${batch.type} finished batch · ${cases} cases · ${loose} loose${sourceBatchCodes.length > 1 ? ` · packed from ${sourceBatchCodes.length} batches` : ''}`,
           sku,
+          sourceBatchCodes,
           finishedGoodsBatchCodeMode: 'manual',
         };
       });

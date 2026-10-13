@@ -4,6 +4,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { crumbingSkuDefinitions, crumbingSkuByCode, getCrumbingPackWeight } from '../data/skuConfig';
+import { allocateTraysFifo, type FifoTrayAllocation } from '../lib/crumbingPacking';
 
 type CrumbingStatus = 
   | 'scheduled'
@@ -161,6 +162,30 @@ export interface CrumbingBatch {
     cases: number;
     loose: number;
     weightKg?: number;
+    packingRunId?: string;
+    traysPacked?: number;
+    sourceBatchCodes?: string[];
+    packedAt?: string;
+    packedBy?: string;
+  }>;
+  combinedPackingAllocations?: Array<FifoTrayAllocation & {
+    packingRunId: string;
+    packedAt: string;
+    packedBy: string;
+    primaryBatchId: string;
+  }>;
+  combinedPackingRuns?: Array<{
+    id: string;
+    sourceBatchIds: string[];
+    sourceBatchCodes: string[];
+    allocations: FifoTrayAllocation[];
+    traysPacked: number;
+    sku: string;
+    cases: number;
+    loose: number;
+    weightKg: number;
+    packedAt: string;
+    packedBy: string;
   }>;
   notes?: string;
   createdAt: string;
@@ -180,8 +205,10 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
   const [showTrayModal, setShowTrayModal] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
   const [showClubSppModal, setShowClubSppModal] = useState(false);
+  const [showCombinedPackModal, setShowCombinedPackModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
   const [clubSppBatchIds, setClubSppBatchIds] = useState<string[]>([]);
+  const [combinedPackBatchIds, setCombinedPackBatchIds] = useState<string[]>([]);
   const [activeType, setActiveType] = useState<CrumbingType>('SPP');
 
   // Forms
@@ -207,6 +234,13 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     sku: '',
     cases: 0,
     loose: 0,
+  });
+  const [combinedPackForm, setCombinedPackForm] = useState({
+    traysPacked: 0,
+    sku: '',
+    cases: 0,
+    loose: 0,
+    packedBy: '',
   });
 
   const emptyJpPrepForm = () => ({
@@ -796,6 +830,122 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     setClubSppBatchIds([]);
     setShowClubSppModal(false);
     showToast('success', `Clubbed ${selected.length} SPP batches · ${traysCrumbed} trays ready for combined packing`);
+  };
+
+  const getCombinedPackingEligibleSppBatches = () => crumbingBatches
+    .filter(batch =>
+      batch.type === 'SPP' &&
+      !['clubbed', 'handed_over'].includes(batch.status) &&
+      batch.traysRemaining <= 0 &&
+      batch.traysFried - batch.traysPacked > 0
+    )
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.batchCode.localeCompare(right.batchCode));
+
+  const getCombinedPackingPreview = () => {
+    const selected = getCombinedPackingEligibleSppBatches().filter(batch => combinedPackBatchIds.includes(batch.id));
+    return allocateTraysFifo(selected.map(batch => ({
+      id: batch.id,
+      batchCode: batch.batchCode,
+      createdAt: batch.createdAt,
+      availableTrays: batch.traysFried - batch.traysPacked,
+      traysPackedBefore: batch.traysPacked,
+    })), Number(combinedPackForm.traysPacked) || 0);
+  };
+
+  const handleCombinedSppPacking = () => {
+    const selected = getCombinedPackingEligibleSppBatches().filter(batch => combinedPackBatchIds.includes(batch.id));
+    if (selected.length < 2) {
+      showToast('error', 'Select at least two SPP batches with fried trays available');
+      return;
+    }
+    if (!Number.isInteger(combinedPackForm.traysPacked) || combinedPackForm.traysPacked <= 0 || !combinedPackForm.sku) {
+      showToast('error', 'Select a SKU and enter a valid whole number of trays');
+      return;
+    }
+    if (!Number.isInteger(combinedPackForm.cases) || !Number.isInteger(combinedPackForm.loose) || combinedPackForm.cases < 0 || combinedPackForm.loose < 0 || combinedPackForm.cases + combinedPackForm.loose <= 0) {
+      showToast('error', 'Enter the cases and/or loose packets packed');
+      return;
+    }
+    if (!combinedPackForm.packedBy.trim()) {
+      showToast('error', 'Enter the packing staff name');
+      return;
+    }
+    const definition = crumbingSkuByCode[combinedPackForm.sku];
+    if (!definition || definition.crumbingType !== 'SPP') {
+      showToast('error', 'Select a valid SPP SKU');
+      return;
+    }
+
+    const { allocations, unallocatedTrays } = getCombinedPackingPreview();
+    if (unallocatedTrays > 0) {
+      const available = combinedPackForm.traysPacked - unallocatedTrays;
+      showToast('error', `Only ${available} selected fried trays are available to pack`);
+      return;
+    }
+    if (allocations.length < 2) {
+      showToast('error', 'This quantity uses only one batch. Use the normal Pack button or enter enough trays to reach the next batch.');
+      return;
+    }
+
+    const packedAt = new Date().toISOString();
+    const packingRunId = `spp-pack-${Date.now()}`;
+    const primaryBatchId = allocations[0].batchId;
+    const sourceBatchIds = allocations.map(allocation => allocation.batchId);
+    const sourceBatchCodes = allocations.map(allocation => allocation.batchCode);
+    const weightKg = getCrumbingPackWeight(definition, combinedPackForm.cases, combinedPackForm.loose);
+    const allocationByBatch = new Map(allocations.map(allocation => [allocation.batchId, allocation]));
+    const combinedRun = {
+      id: packingRunId,
+      sourceBatchIds,
+      sourceBatchCodes,
+      allocations,
+      traysPacked: combinedPackForm.traysPacked,
+      sku: combinedPackForm.sku,
+      cases: combinedPackForm.cases,
+      loose: combinedPackForm.loose,
+      weightKg,
+      packedAt,
+      packedBy: combinedPackForm.packedBy.trim(),
+    };
+
+    setCrumbingBatches(current => current.map(batch => {
+      const allocation = allocationByBatch.get(batch.id);
+      if (!allocation) return batch;
+      const nextTraysPacked = batch.traysPacked + allocation.traysAllocated;
+      const nextStatus: CrumbingStatus = batch.traysRemaining <= 0 && nextTraysPacked >= batch.traysFried ? 'packed' : 'frying';
+      const allocationRecord = {
+        ...allocation,
+        packingRunId,
+        packedAt,
+        packedBy: combinedPackForm.packedBy.trim(),
+        primaryBatchId,
+      };
+      return {
+        ...batch,
+        status: nextStatus,
+        traysPacked: nextTraysPacked,
+        combinedPackingAllocations: [...(batch.combinedPackingAllocations || []), allocationRecord],
+        ...(batch.id === primaryBatchId ? {
+          packedSkus: [...(batch.packedSkus || []), {
+            sku: combinedPackForm.sku,
+            cases: combinedPackForm.cases,
+            loose: combinedPackForm.loose,
+            weightKg,
+            packingRunId,
+            traysPacked: combinedPackForm.traysPacked,
+            sourceBatchCodes,
+            packedAt,
+            packedBy: combinedPackForm.packedBy.trim(),
+          }],
+          combinedPackingRuns: [...(batch.combinedPackingRuns || []), combinedRun],
+        } : {}),
+      };
+    }));
+
+    setShowCombinedPackModal(false);
+    setCombinedPackBatchIds([]);
+    setCombinedPackForm({ traysPacked: 0, sku: '', cases: 0, loose: 0, packedBy: '' });
+    showToast('success', `Packed ${combinedRun.traysPacked} trays from ${allocations.length} SPP batches using FIFO`);
   };
 
   const handleCompleteProduction = () => {
@@ -1765,14 +1915,29 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               {type === 'SPP' && (
-                <button
-                  type="button"
-                  disabled={getClubEligibleSppBatches().length < 2}
-                  onClick={() => { setClubSppBatchIds([]); setShowClubSppModal(true); }}
-                  className="rounded-lg border border-pink-300 bg-white px-3 py-2 text-sm font-medium text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Club completed batches
-                </button>
+                <>
+                  <button
+                    type="button"
+                    disabled={getCombinedPackingEligibleSppBatches().length < 2}
+                    onClick={() => {
+                      const username = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_username') || '';
+                      setCombinedPackBatchIds([]);
+                      setCombinedPackForm({ traysPacked: 0, sku: '', cases: 0, loose: 0, packedBy: username });
+                      setShowCombinedPackModal(true);
+                    }}
+                    className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Pack batches together
+                  </button>
+                  <button
+                    type="button"
+                    disabled={getClubEligibleSppBatches().length < 2}
+                    onClick={() => { setClubSppBatchIds([]); setShowClubSppModal(true); }}
+                    className="rounded-lg border border-pink-300 bg-white px-3 py-2 text-sm font-medium text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Club completed batches
+                  </button>
+                </>
               )}
               <button
                 onClick={() => {
@@ -1877,10 +2042,18 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
                       {batch.packedSkus && batch.packedSkus.length > 0 ? (
                         <div className="text-xs">
                           {batch.packedSkus.map((p, i) => (
-                            <div key={i}>{p.sku}: {p.cases} cases + {p.loose} loose{p.weightKg !== undefined ? ` (${p.weightKg.toFixed(2)} kg)` : ''}</div>
+                            <div key={i}>
+                              {p.sku}: {p.cases} cases + {p.loose} loose{p.weightKg !== undefined ? ` (${p.weightKg.toFixed(2)} kg)` : ''}
+                              {p.sourceBatchCodes && p.sourceBatchCodes.length > 1 && <div className="text-[11px] font-medium text-emerald-700">Combined packing · {p.sourceBatchCodes.length} batches</div>}
+                            </div>
                           ))}
                         </div>
                       ) : '—'}
+                      {batch.combinedPackingAllocations?.map(allocation => (
+                        <div key={`${allocation.packingRunId}-${allocation.batchId}`} className="mt-1 text-[11px] text-slate-500">
+                          {allocation.traysAllocated} tray{allocation.traysAllocated === 1 ? '' : 's'} allocated FIFO · {new Date(allocation.packedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      ))}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 flex-wrap">
@@ -1990,6 +2163,79 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
       {activeType === 'SPP' && renderBatchSection('SPP - Spicy Paneer Poppers', sppBatches, 'SPP')}
       {activeType === 'JP' && renderBatchSection('JP - Jalapeño Poppers', jpBatches, 'JP')}
       {activeType === 'HCP' && renderBatchSection('HCP - Halloumi Cheese Poppers', hcpBatches, 'HCP')}
+
+      <Modal isOpen={showCombinedPackModal} onClose={() => setShowCombinedPackModal(false)} title="Pack SPP batches together">
+        <div className="space-y-4">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+            The crumbing reports remain separate. Packed trays are allocated to the oldest selected batch first, so any balance remains against the latest batches.
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-600">Select source batches</p>
+            {getCombinedPackingEligibleSppBatches().map(batch => {
+              const checked = combinedPackBatchIds.includes(batch.id);
+              const available = batch.traysFried - batch.traysPacked;
+              return (
+                <label key={batch.id} className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={event => setCombinedPackBatchIds(current => event.target.checked ? [...current, batch.id] : current.filter(id => id !== batch.id))}
+                    className="mt-1"
+                  />
+                  <span className="min-w-0 flex-1 text-sm text-slate-700">
+                    <span className="font-semibold text-slate-900">{batch.batchCode}</span>
+                    <span className="block text-xs text-slate-500">{available} fried tray{available === 1 ? '' : 's'} available · created {new Date(batch.createdAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Final SKU</label>
+            <select value={combinedPackForm.sku} onChange={event => setCombinedPackForm(current => ({ ...current, sku: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+              <option value="">Select SKU...</option>
+              {crumbingSkuDefinitions.filter(definition => definition.crumbingType === 'SPP').map(definition => <option key={definition.sku} value={definition.sku}>{definition.sku} - {definition.productName} (250g, 12/case)</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Trays packed</label>
+              <input type="number" min="1" step="1" value={combinedPackForm.traysPacked || ''} onChange={event => setCombinedPackForm(current => ({ ...current, traysPacked: Number(event.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Cases</label>
+              <input type="number" min="0" step="1" value={combinedPackForm.cases || ''} onChange={event => setCombinedPackForm(current => ({ ...current, cases: Number(event.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Loose packets</label>
+              <input type="number" min="0" step="1" value={combinedPackForm.loose || ''} onChange={event => setCombinedPackForm(current => ({ ...current, loose: Number(event.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Packed by</label>
+            <input type="text" value={combinedPackForm.packedBy} onChange={event => setCombinedPackForm(current => ({ ...current, packedBy: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Packing staff" />
+          </div>
+
+          {combinedPackBatchIds.length >= 2 && combinedPackForm.traysPacked > 0 && (() => {
+            const preview = getCombinedPackingPreview();
+            return (
+              <div className={`rounded-lg border p-3 text-sm ${preview.unallocatedTrays > 0 ? 'border-red-200 bg-red-50 text-red-900' : 'border-blue-200 bg-blue-50 text-blue-900'}`}>
+                <p className="font-semibold">FIFO allocation preview</p>
+                <div className="mt-2 space-y-1">
+                  {preview.allocations.map(allocation => <div key={allocation.batchId}>{allocation.batchCode}: <strong>{allocation.traysAllocated} tray{allocation.traysAllocated === 1 ? '' : 's'}</strong> packed · {allocation.availableTraysAfter} left</div>)}
+                  {preview.unallocatedTrays > 0 && <div className="font-semibold">{preview.unallocatedTrays} requested tray{preview.unallocatedTrays === 1 ? '' : 's'} unavailable</div>}
+                </div>
+              </div>
+            );
+          })()}
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={handleCombinedSppPacking} disabled={combinedPackBatchIds.length < 2} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Record combined packing</button>
+            <button type="button" onClick={() => setShowCombinedPackModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal isOpen={showClubSppModal} onClose={() => setShowClubSppModal(false)} title="Club SPP batches">
         <div className="space-y-4">
