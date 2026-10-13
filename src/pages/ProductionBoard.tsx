@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from 'react';
+import { Fragment, useMemo, useState, useEffect } from 'react';
 import {
   Filter,
   Plus,
@@ -26,6 +26,7 @@ import { Modal } from '../components/Modal';
 import { statusFlow, statusLabels, statusColors, CipRecord, PackedSku, ProductionRound } from '../data/mockData';
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
+import { reconcileFinishedStock } from '../lib/finishedStock';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { exportProductionBoardWorkbook } from '../lib/operationalExports';
 import { buildProductionRoundHistory, formatRoundHistoryTime } from '../lib/productionRoundHistory';
@@ -128,6 +129,10 @@ export default function ProductionBoard() {
   const currentActor = typeof window === 'undefined'
     ? 'System'
     : window.localStorage.getItem('vejoy_user_username') || currentRole || 'User';
+  const reconciledFinishedStock = useMemo(
+    () => reconcileFinishedStock(productionRounds, finishedStock),
+    [productionRounds, finishedStock],
+  );
   const canForceStage = currentRole === 'admin' || currentRole === 'owner';
   const canRequestTypeChange = ['staff', 'admin', 'owner'].includes(currentRole);
   const canEditCream = canForceStage;
@@ -1600,7 +1605,15 @@ export default function ProductionBoard() {
     const canReport = !round.locked && !['cancelled', 'handed_over', 'spoiled', 'spoilage_pending'].includes(round.status);
     const reportButton = canReport ? <button onClick={() => openSpoilageModal(round.id)} className="flex w-fit items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"><AlertTriangle className="h-3 w-3" /> Report Spoilage</button> : null;
     if (round.status !== 'packed') return reportButton;
-    return <div className="flex flex-wrap items-center gap-1">{reportButton}<span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">Ready in Distribution</span></div>;
+    const linkedStock = reconciledFinishedStock.filter(stock => stock.sourceRoundId === round.id);
+    const hasAwaitingStock = linkedStock.some(stock => stock.status === 'awaiting_handover');
+    const hasHandedOverStock = linkedStock.length > 0 && linkedStock.every(stock => stock.status === 'handed_over');
+    const distributionLabel = hasAwaitingStock
+      ? <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">Fully packed · Awaiting distribution</span>
+      : hasHandedOverStock
+        ? <span className="rounded border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">Handed to distribution</span>
+        : <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Fully packed · Stock link needs review</span>;
+    return <div className="flex flex-wrap items-center gap-1">{reportButton}{distributionLabel}</div>;
   };
 
   const selectedPackRound = selectedRound ? productionRounds.find(r => r.id === selectedRound) : undefined;
