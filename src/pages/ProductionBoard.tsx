@@ -29,6 +29,7 @@ import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../d
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { exportProductionBoardWorkbook } from '../lib/operationalExports';
 import { buildProductionRoundHistory, formatRoundHistoryTime } from '../lib/productionRoundHistory';
+import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
 import HalloumiTab from './HalloumiTab';
 import AmassiTab from './AmassiTab';
 import ButterTab from './ButterTab';
@@ -2200,23 +2201,16 @@ export default function ProductionBoard() {
           const round = productionRounds.find(item => item.id === typeChangeRoundId);
           if (!round) return <p className="text-sm text-slate-500">Round not found.</p>;
           const pendingRequest = round.typeChangeRequest?.status === 'pending' ? round.typeChangeRequest : undefined;
-          const hasDownstreamEvidence = Boolean(
-            round.outputWeight > 0 ||
-            round.blockWeights?.length ||
-            round.packedSkus?.length ||
-            round.creamRecovered !== undefined ||
-            round.sppRecordedWeight !== undefined ||
-            round.cuttingType ||
-            round.remainingBalance !== undefined ||
-            intermediateLots.some(lot => lot.sourceBatchId === round.id)
-          );
+          const typeChangeConflict = getProductionRoundTypeChangeConflict(round, intermediateLots, finishedStock);
           return <div className="space-y-4">
             <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
               <p className="font-semibold">{roundDisplayCode(round)} · Milk lot {round.milkLotCode}</p>
               <p className="mt-1 text-xs">The current type remains <strong>{round.type}</strong> while the request is reviewed. Production can continue normally.</p>
             </div>
             {pendingRequest && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><strong>Pending request:</strong> {pendingRequest.from} → {pendingRequest.to} · requested by {pendingRequest.requestedBy} · {new Date(pendingRequest.requestedAt).toLocaleString('en-GB')}</div>}
-            {hasDownstreamEvidence && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">This round already has cutting, output, packing, cream, or downstream stock data. Admin/owner approval is blocked to protect ingredient and stock genealogy; the request can be rejected while production continues.</div>}
+            {typeChangeConflict
+              ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">Approval is blocked because {typeChangeConflict}. Reject the request or correct the conflicting stock record first.</div>
+              : <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">Recorded cutting details, block weights and output will be retained. No cream or downstream stock conflict was found.</div>}
             <div>
               <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Requested type</label>
               <select value={typeChangeTarget} onChange={(event) => setTypeChangeTarget(event.target.value as 'D' | 'C/S')} disabled={Boolean(pendingRequest)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50">
@@ -2228,13 +2222,13 @@ export default function ProductionBoard() {
               <label className="text-xs font-medium uppercase tracking-wide text-slate-600">Request reason</label>
               <textarea value={typeChangeReason} onChange={(event) => setTypeChangeReason(event.target.value)} disabled={Boolean(pendingRequest)} rows={3} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50" placeholder="e.g. Round was entered as C/S by mistake before production started" />
             </div>
-            {pendingRequest && canForceStage && <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Admin/owner review note {hasDownstreamEvidence ? '(required to reject)' : '(optional for approval)'}</label><textarea value={typeChangeReviewReason} onChange={(event) => setTypeChangeReviewReason(event.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Record the approval or rejection note" /></div>}
+            {pendingRequest && canForceStage && <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Admin/owner review note {typeChangeConflict ? '(required to reject)' : '(optional for approval)'}</label><textarea value={typeChangeReviewReason} onChange={(event) => setTypeChangeReviewReason(event.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Record the approval or rejection note" /></div>}
             <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
               <input type="checkbox" checked={typeChangeConfirmed} onChange={(event) => setTypeChangeConfirmed(event.target.checked)} className="mt-0.5" />
               <span>{pendingRequest && canForceStage ? 'I confirm I reviewed the request and the ingredient/stock implications.' : 'I confirm this is a data-entry correction request; production must continue using the current type until approval.'}</span>
             </label>
             <div className="flex gap-2 pt-2">
-              {pendingRequest && canForceStage ? <><button type="button" onClick={() => void handleApproveTypeChange()} disabled={hasDownstreamEvidence || !typeChangeConfirmed} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Approve request</button><button type="button" onClick={() => void handleRejectTypeChange()} disabled={typeChangeReviewReason.trim().length < 5} className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300">Reject</button></> : <button type="button" onClick={() => void handleTypeChangeRequest()} disabled={Boolean(pendingRequest) || !typeChangeConfirmed || typeChangeReason.trim().length < 5} className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">Submit for approval</button>}
+              {pendingRequest && canForceStage ? <><button type="button" onClick={() => void handleApproveTypeChange()} disabled={Boolean(typeChangeConflict) || !typeChangeConfirmed} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Approve request</button><button type="button" onClick={() => void handleRejectTypeChange()} disabled={typeChangeReviewReason.trim().length < 5} className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300">Reject</button></> : <button type="button" onClick={() => void handleTypeChangeRequest()} disabled={Boolean(pendingRequest) || !typeChangeConfirmed || typeChangeReason.trim().length < 5} className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">Submit for approval</button>}
               <button type="button" onClick={() => { setShowTypeChangeModal(false); setTypeChangeRoundId(null); }} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button>
             </div>
           </div>;

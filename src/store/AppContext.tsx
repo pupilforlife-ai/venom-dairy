@@ -1,6 +1,7 @@
 import { createContext, useContext, ReactNode } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { supabase } from '../lib/supabase';
+import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
 import { 
   milkLots as initialMilkLots, 
   productionRounds as initialRounds,
@@ -328,17 +329,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const hasRoundTypeDownstreamEvidence = (round: ProductionRound) => Boolean(
-    round.outputWeight > 0 ||
-    round.blockWeights?.length ||
-    round.packedSkus?.length ||
-    round.creamRecovered !== undefined ||
-    round.sppRecordedWeight !== undefined ||
-    round.cuttingType ||
-    round.remainingBalance !== undefined ||
-    intermediateLots.some(lot => lot.sourceBatchId === round.id)
-  );
-
   const requestProductionRoundTypeChange = async (id: string, newType: 'D' | 'C/S', reason: string) => {
     const round = productionRounds.find(item => item.id === id);
     if (!round || (round.type !== 'D' && round.type !== 'C/S')) {
@@ -394,8 +384,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!round || !request || request.status !== 'pending') {
       throw new Error('There is no pending type-change request for this round');
     }
-    if (decision === 'approve' && hasRoundTypeDownstreamEvidence(round)) {
-      throw new Error('Approval is blocked because cutting, output, cream, packing, or downstream stock is already recorded');
+    const conflict = getProductionRoundTypeChangeConflict(round, intermediateLots, finishedStock);
+    if (decision === 'approve' && conflict) {
+      throw new Error(`Approval is blocked because ${conflict}`);
     }
 
     if (supabase) {
