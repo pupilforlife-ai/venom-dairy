@@ -239,6 +239,10 @@ export default function MilkReceiving() {
     }
     const accounting = getMilkLotAccounting(lot, productionRounds);
     const alreadyAccountedFor = accounting.consumed + accounting.sold + lot.litresRejected + lot.litresSpilled;
+    if (editLot.receiptStatus === 'planned' && lot.receiptStatus !== 'planned' && alreadyAccountedFor > 0) {
+      showToast('error', 'A received lot with recorded activity cannot be moved back to Planned');
+      return;
+    }
     if (editLot.receiptStatus === 'received' && editLot.litresReceived < alreadyAccountedFor) {
       showToast('error', `Received quantity cannot be below ${alreadyAccountedFor.toLocaleString()} L already accounted for`);
       return;
