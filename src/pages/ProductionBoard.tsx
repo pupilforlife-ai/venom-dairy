@@ -146,6 +146,7 @@ export default function ProductionBoard() {
   const [expandedBlockRoundIds, setExpandedBlockRoundIds] = useState<Set<string>>(new Set());
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyRoundId, setHistoryRoundId] = useState<string | null>(null);
+  const [packingAuditSelection, setPackingAuditSelection] = useState<{ roundId: string; packIndex: number } | null>(null);
   const [blockWeightsRoundId, setBlockWeightsRoundId] = useState<string | null>(null);
   const [blockWeightsDraft, setBlockWeightsDraft] = useState<number[]>([]);
   
@@ -748,6 +749,7 @@ export default function ProductionBoard() {
     const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
     const previousPackingRunId = previousPack?.packingRunId;
     const packingRunId = previousPackingRunId || `pb-${round.id}-${Date.now()}`;
+    const packingRecordedAt = new Date().toISOString();
 
     // Add to packed SKUs array. The packing run ID links this round entry to
     // the corresponding finished-stock row, so corrections do not duplicate
@@ -757,6 +759,8 @@ export default function ProductionBoard() {
       cases: definition.packMode === 'weight_only' ? 0 : packForm.cases,
       loose: definition.packMode === 'weight_only' ? 0 : packForm.loose,
       packingRunId,
+      recordedBy: currentActor,
+      recordedAt: packingRecordedAt,
       ...(definition.packMode === 'weight_loose' ? { looseWeightKg: packForm.looseWeightKg } : {}),
       ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightPacked, reason: packForm.reason.trim() } : {}),
     };
@@ -778,7 +782,7 @@ export default function ProductionBoard() {
         : 0,
       storageLocation: 'Dairy Container (Finished Stock)',
       status: 'awaiting_handover' as const,
-      createdAt: new Date().toISOString(),
+      createdAt: packingRecordedAt,
       sourceBatchCodes: [sourceBatchCode],
       ...(definition.packMode === 'weight_only'
         ? { weightKg: totalWeightPacked }
@@ -812,6 +816,7 @@ export default function ProductionBoard() {
     }, {
       type: editingPackIndex !== null ? 'packing_corrected' : 'packing_recorded',
       stage: editingPackIndex !== null ? 'Packing Corrected' : 'Packing Recorded',
+      occurredAt: packingRecordedAt,
       details: `${packingDetails} · Balance ${newBalance.toFixed(2)} kg`,
       recordedBy: currentActor,
       source: editingPackIndex !== null ? 'correction' : 'workflow',
@@ -2095,7 +2100,12 @@ export default function ProductionBoard() {
                           <td className="px-2 py-1.5 text-sm">
                             {round.packedSkus && round.packedSkus.length > 0 ? (
                               <div className="space-y-1">
-                                {round.packedSkus.map((p, i) => <div key={i} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}</div>)}
+                                {round.packedSkus.map((p, i) => {
+                                  const recordedBy = p.recordedBy || 'Recorder not captured';
+                                  const recordedAt = p.recordedAt ? new Date(p.recordedAt).toLocaleString('en-GB') : 'timestamp not captured';
+                                  const auditLabel = `${p.sku} · ${recordedBy} · ${recordedAt}`;
+                                  return <button type="button" key={i} onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}<span className="sr-only"> ({auditLabel})</span></button>;
+                                })}
                               </div>
                             ) : <span className="text-slate-400">—</span>}
                             {round.pan111ApprovalStatus === 'pending' && <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
@@ -2596,6 +2606,27 @@ export default function ProductionBoard() {
       </Modal>
 
       {/* Round History Modal */}
+      <Modal isOpen={Boolean(packingAuditSelection)} onClose={() => setPackingAuditSelection(null)} title="Packing audit details">
+        {packingAuditSelection && (() => {
+          const round = productionRounds.find(item => item.id === packingAuditSelection.roundId);
+          const pack = round?.packedSkus?.[packingAuditSelection.packIndex];
+          if (!round || !pack) return <p className="text-sm text-slate-500">Packing entry not found.</p>;
+          const recordedAt = pack.recordedAt ? new Date(pack.recordedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : undefined;
+          return <div className="space-y-3 text-sm">
+            <div className="rounded-lg bg-slate-50 p-3">
+              <p className="font-semibold text-slate-900">{pack.sku}</p>
+              <p className="mt-1 text-slate-600">{pack.weightKg !== undefined ? `${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.cases} cases + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.cases} cases + ${pack.loose || 0} loose`}</p>
+              <p className="mt-1 text-xs text-slate-500">{roundDisplayCode(round)} · Milk lot {round.milkLotCode}</p>
+            </div>
+            <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-indigo-900">
+              <p><strong>Recorded by:</strong> {pack.recordedBy || 'Not captured for this legacy entry'}</p>
+              <p className="mt-1"><strong>Recorded at:</strong> {recordedAt || 'Not captured for this legacy entry'}</p>
+            </div>
+            {!pack.recordedBy && <p className="text-xs text-amber-700">This packing was saved before per-entry recorder tracking was added. New and corrected packing entries will always show the signed-in username and timestamp.</p>}
+          </div>;
+        })()}
+      </Modal>
+
       <Modal isOpen={showHistoryModal} onClose={() => { setShowHistoryModal(false); setHistoryRoundId(null); }} title="Round History">
         {historyRoundId && (() => {
           const round = productionRounds.find(r => r.id === historyRoundId);

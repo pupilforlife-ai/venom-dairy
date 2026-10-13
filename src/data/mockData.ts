@@ -71,6 +71,9 @@ export interface PackedSku {
   loose?: number;
   // Links a production-board packing entry to its finished-stock record.
   packingRunId?: string;
+  /** The user and moment that recorded this individual packing entry. */
+  recordedBy?: string;
+  recordedAt?: string;
   looseWeightKg?: number;
   weightKg?: number;
   reason?: string;

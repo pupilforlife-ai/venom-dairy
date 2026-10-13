@@ -494,11 +494,14 @@ export default function Distribution() {
         }
         const sourceBatchCode = extraRound.batchCode || extraRound.sourceBatchCode || `${extraRound.milkLotCode}/S${extraRound.shiftNumber}/R${extraRound.roundNumber}/${extraRound.type}`;
         const packingRunId = `pb-${extraRound.id}-distribution-${Date.now()}`;
+        const packingRecordedAt = new Date().toISOString();
         const extraEntry = {
           sku: selectedCandidate.sku!,
           cases: selectedFinishedDefinition.packMode === 'units' ? selectedFinishedExtraCases : 0,
           loose: selectedFinishedDefinition.packMode === 'units' ? selectedFinishedExtraLoose : 0,
           packingRunId,
+          recordedBy: currentUsername || currentRole || 'User',
+          recordedAt: packingRecordedAt,
           reason: 'Physical distribution count adjustment',
           ...(selectedFinishedDefinition.packMode === 'weight_only'
             ? { weightKg: selectedFinishedExtraWeight }
@@ -517,7 +520,7 @@ export default function Distribution() {
             : 0,
           storageLocation: form.destination,
           status: 'handed_over',
-          createdAt: new Date().toISOString(),
+          createdAt: packingRecordedAt,
           sourceBatchCodes: [sourceBatchCode],
           finishedGoodsBatchCode,
           finishedGoodsBatchCodeReviewedBy: reviewedBy,
@@ -538,6 +541,7 @@ export default function Distribution() {
         }, {
           type: 'packing_recorded',
           stage: 'Physical Count Packing Adjustment',
+          occurredAt: packingRecordedAt,
           details: `${extraEntry.sku} · ${extraEntry.cases} cases + ${extraEntry.loose} loose · Balance ${newBalance.toFixed(2)} kg`,
           recordedBy: currentUsername || currentRole || 'User',
           source: 'correction',

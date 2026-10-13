@@ -83,6 +83,7 @@ export default function Packing() {
       return;
     }
 
+    const packingRecordedAt = new Date().toISOString();
     const packingRunId = `pk-${Date.now()}`;
 
     // Create finished stock. The same packingRunId is stored on the source
@@ -97,7 +98,7 @@ export default function Packing() {
       totalPackets,
       storageLocation: 'Dairy Container (Finished Stock)',
       status: 'awaiting_handover',
-      createdAt: new Date().toISOString(),
+      createdAt: packingRecordedAt,
       sourceBatchCodes: [lot.sourceBatchCode],
       ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightKg } : definition.packMode === 'weight_loose' ? { looseWeightKg: packForm.looseWeightKg } : {}),
     });
@@ -119,6 +120,8 @@ export default function Packing() {
         cases: packForm.cases,
         loose: packForm.loosePackets,
         packingRunId,
+        recordedBy: currentActor,
+        recordedAt: packingRecordedAt,
         ...(definition.packMode === 'weight_only'
           ? { weightKg: totalWeightKg }
           : definition.packMode === 'weight_loose'
@@ -133,6 +136,7 @@ export default function Packing() {
       }, {
         type: 'packing_recorded',
         stage: 'Packing Recorded',
+        occurredAt: packingRecordedAt,
         details: `${packedEntry.sku} · ${packedEntry.cases} cases + ${packedEntry.loose} loose · Balance ${newQuantity.toFixed(2)} kg`,
         recordedBy: currentActor,
         source: 'workflow',
