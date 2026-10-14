@@ -1075,6 +1075,24 @@ export default function ProductionBoard() {
     setNewShift({ milkLotId: selectedMilkLotId, shiftNumber: 1, team: '', startedAt: new Date().toISOString().slice(0, 16), teamNotes: '' });
   };
 
+  const openNewShiftModal = () => {
+    const milkLotId = selectedMilkLotId || activeMilkLot?.id || milkLots[0]?.id || '';
+    const existingShiftNumbers = productionShifts
+      .filter(shift => shift.milkLotId === milkLotId)
+      .map(shift => shift.shiftNumber)
+      .filter(number => Number.isFinite(number));
+    const nextShiftNumber = existingShiftNumbers.length > 0
+      ? Math.max(...existingShiftNumbers) + 1
+      : 1;
+    setNewShift(current => ({
+      ...current,
+      milkLotId,
+      shiftNumber: nextShiftNumber,
+      startedAt: new Date().toISOString().slice(0, 16),
+    }));
+    setShowNewShiftModal(true);
+  };
+
   const handleEndShift = (shiftId: string) => {
     const shift = productionShifts.find(item => item.id === shiftId);
     if (!shift || shift.status !== 'active') return;
@@ -1370,7 +1388,7 @@ export default function ProductionBoard() {
     const latestShift = getLatestActiveShift();
     if (!latestShift) {
       showToast('error', 'No active shift. Create a shift first.');
-      setShowNewShiftModal(true);
+      openNewShiftModal();
       return;
     }
     const existingRoundsInShift = productionRounds.filter(r => r.shiftId === latestShift.id).length;
@@ -1714,7 +1732,7 @@ export default function ProductionBoard() {
             </button>
           )}
           {activeTab === 'paneer' && (
-            <button onClick={() => setShowNewShiftModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+            <button onClick={openNewShiftModal} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
               <Plus className="w-4 h-4" /> New Shift
             </button>
           )}
@@ -1803,7 +1821,7 @@ export default function ProductionBoard() {
                   {activeMilkLot.receiptStatus === 'planned' ? 'Receipt volume pending' : `${activeMilkLot.litresReceived.toLocaleString()} L received`}. No shifts or rounds have been created for this lot yet.
             </p>
           </div>
-          <button onClick={() => setShowNewShiftModal(true)} className="shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+          <button onClick={openNewShiftModal} className="shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
             <Plus className="w-4 h-4" /> Create first shift
           </button>
         </div>
