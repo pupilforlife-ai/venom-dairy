@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ModalProps {
@@ -11,13 +11,45 @@ interface ModalProps {
 }
 
 export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => { document.body.style.overflow = ''; };
+  useLayoutEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+
+    const body = document.body;
+    const root = document.documentElement;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const previousBodyStyles = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+    const previousRootOverflow = root.style.overflow;
+
+    // Android browsers can resolve a fixed child against the document after
+    // `overflow: hidden` is applied to a scrolled body. Freeze the body at its
+    // current coordinates so the portal remains tied to the visible viewport
+    // and restore the exact board position when the dialog closes.
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = `-${scrollX}px`;
+    body.style.right = '0';
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+    root.style.overflow = 'hidden';
+
+    return () => {
+      body.style.position = previousBodyStyles.position;
+      body.style.top = previousBodyStyles.top;
+      body.style.left = previousBodyStyles.left;
+      body.style.right = previousBodyStyles.right;
+      body.style.width = previousBodyStyles.width;
+      body.style.overflow = previousBodyStyles.overflow;
+      root.style.overflow = previousRootOverflow;
+      window.scrollTo(scrollX, scrollY);
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
