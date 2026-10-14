@@ -44,6 +44,7 @@ const navItems = [
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { milkLots, productionShifts } = useApp();
   const isLocalDemo = import.meta.env.VITE_LOCAL_DEMO_MODE === 'true';
+  const isIsolatedPreview = import.meta.env.VITE_PREVIEW_MODE === 'true';
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [role, setRole] = useState('');
@@ -184,7 +185,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {isLocalDemo && <div className="bg-amber-400 px-4 py-2 text-center text-xs font-bold tracking-wide text-amber-950">LOCAL DEMO — TEST DATA ONLY — NOT PRODUCTION</div>}
+        {isIsolatedPreview ? (
+          <div className="bg-fuchsia-700 px-3 py-2 text-center text-xs font-bold tracking-wide text-white">
+            MOBILE PREVIEW — TEST DATA ONLY — LIVE PRODUCTION IS UNCHANGED
+          </div>
+        ) : isLocalDemo ? (
+          <div className="bg-amber-400 px-4 py-2 text-center text-xs font-bold tracking-wide text-amber-950">LOCAL DEMO — TEST DATA ONLY — NOT PRODUCTION</div>
+        ) : null}
         {/* Top bar */}
         <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 lg:px-6 py-3 flex items-center gap-4">
           <button

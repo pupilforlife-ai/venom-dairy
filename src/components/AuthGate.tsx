@@ -4,12 +4,19 @@ import Login from '../pages/Login';
 import { supabase, supabaseEnabled } from '../lib/supabase';
 
 export default function AuthGate({ children }: { children: ReactNode }) {
-  const localDemoMode = import.meta.env.VITE_LOCAL_DEMO_MODE === 'true';
+  const isolatedPreviewMode = import.meta.env.VITE_PREVIEW_MODE === 'true';
+  const localDemoMode = import.meta.env.VITE_LOCAL_DEMO_MODE === 'true' || isolatedPreviewMode;
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authMessage, setAuthMessage] = useState('');
 
-  if (localDemoMode) return <>{children}</>;
+  if (localDemoMode) {
+    if (isolatedPreviewMode && typeof window !== 'undefined') {
+      if (!window.localStorage.getItem('vejoy_user_role')) window.localStorage.setItem('vejoy_user_role', 'staff');
+      if (!window.localStorage.getItem('vejoy_user_username')) window.localStorage.setItem('vejoy_user_username', 'Preview Staff');
+    }
+    return <>{children}</>;
+  }
 
   useEffect(() => {
     const client = supabase;
