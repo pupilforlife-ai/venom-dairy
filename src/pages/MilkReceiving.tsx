@@ -10,6 +10,7 @@ import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCip
 import { exportMilkReceivingWorkbook } from '../lib/operationalExports';
 import { getMilkLotVesselBalances, getMilkSaleSourceAvailability, getMilkSaleVesselSource } from '../lib/milkVesselAllocation';
 import { createExternalCreamLotCode } from '../lib/creamLotCode';
+import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
@@ -77,13 +78,14 @@ export default function MilkReceiving() {
     saleDate: new Date().toISOString().split('T')[0],
   });
   const [creamReceipt, setCreamReceipt] = useState({
-    quantity: 0,
+    quantity: '',
     receivedFrom: '',
     receivingTemp: 0,
     receivingPh: 0,
     storageLocation: 'container' as 'container' | 'chiller' | 'coldroom',
     remarks: '',
   });
+  const creamReceiptQuantity = parseAdditiveQuantity(creamReceipt.quantity);
 
   const handleCreateLot = () => {
     if (!newLot.lotCode) {
@@ -388,7 +390,7 @@ export default function MilkReceiving() {
   };
 
   const handleReceiveCream = () => {
-    if (creamReceipt.quantity <= 0 || !creamReceipt.receivedFrom.trim() || creamReceipt.receivingTemp === 0 || creamReceipt.receivingPh === 0) {
+    if (creamReceiptQuantity === null || creamReceiptQuantity <= 0 || !creamReceipt.receivedFrom.trim() || creamReceipt.receivingTemp === 0 || creamReceipt.receivingPh === 0) {
       showToast('error', 'Enter quantity, received from, temperature, and pH');
       return;
     }
@@ -404,7 +406,7 @@ export default function MilkReceiving() {
       lotCode,
       dateReceived,
       receivedAt: today,
-      quantity: creamReceipt.quantity,
+      quantity: creamReceiptQuantity,
       supplier: creamReceipt.receivedFrom.trim(),
       receivedFrom: creamReceipt.receivedFrom.trim(),
       receivingTemp: creamReceipt.receivingTemp,
@@ -412,11 +414,11 @@ export default function MilkReceiving() {
       storageLocation: creamReceipt.storageLocation,
       notes: creamReceipt.remarks.trim() || undefined,
       consumed: 0,
-      remaining: creamReceipt.quantity,
+      remaining: creamReceiptQuantity,
     });
-    showToast('success', `Received ${creamReceipt.quantity.toLocaleString()} kg cream · lot ${lotCode}`);
+    showToast('success', `Received ${creamReceiptQuantity.toLocaleString()} kg cream · lot ${lotCode}`);
     setShowReceiveCreamModal(false);
-    setCreamReceipt({ quantity: 0, receivedFrom: '', receivingTemp: 0, receivingPh: 0, storageLocation: 'container', remarks: '' });
+    setCreamReceipt({ quantity: '', receivedFrom: '', receivingTemp: 0, receivingPh: 0, storageLocation: 'container', remarks: '' });
   };
 
   // Format date
@@ -1083,7 +1085,7 @@ export default function MilkReceiving() {
 
       <Modal isOpen={showReceiveCreamModal} onClose={() => setShowReceiveCreamModal(false)} title="Receive purchased cream">
         <div className="space-y-4">
-          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of cream (kg)</label><input type="number" min="0" step="0.01" value={creamReceipt.quantity || ''} onChange={(e) => setCreamReceipt({ ...creamReceipt, quantity: Number(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Container weights / total cream (kg)</label><input type="text" inputMode="decimal" value={creamReceipt.quantity} onChange={(e) => setCreamReceipt({ ...creamReceipt, quantity: e.target.value })} placeholder="e.g. 12+13" className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /><p className="mt-1 text-xs text-slate-500">Enter one weight or add container weights with +.</p>{creamReceipt.quantity.trim() && <p className={`mt-1 text-sm font-semibold ${creamReceiptQuantity === null ? 'text-red-600' : 'text-emerald-700'}`}>{creamReceiptQuantity === null ? 'Use numbers separated by +, e.g. 12+13' : `Total: ${creamReceiptQuantity.toFixed(2)} kg`}</p>}</div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Received from</label><input value={creamReceipt.receivedFrom} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivedFrom: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receiving temp (°C)</label><input type="number" step="0.1" value={creamReceipt.receivingTemp || ''} onChange={(e) => setCreamReceipt({ ...creamReceipt, receivingTemp: Number(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>

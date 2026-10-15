@@ -4,6 +4,7 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getCreamBatchCode, getDateBatchCode, ProductionRound } from '../data/mockData';
+import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 
 type ButterStatus = 
   | 'scheduled'
@@ -83,7 +84,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     roundNumber: 1,
     creamSource: 'internal' as 'internal' | 'external',
     creamLotId: '',
-    inputQuantity: 0,
+    inputQuantity: '',
     team: '',
   });
 
@@ -106,6 +107,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     quantity: 0,
     unit: 'balls' as 'balls' | 'bricks',
   });
+  const inputCreamQuantity = parseAdditiveQuantity(newRound.inputQuantity);
 
   // Internal butter follows the selected milk lot. Purchased-cream butter is
   // standalone and remains visible regardless of which milk lot is selected.
@@ -224,7 +226,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
   };
 
   const handleCreateRound = () => {
-    if (!newRound.roundDate || (newRound.creamSource === 'internal' && !newRound.milkLotId) || !newRound.creamLotId || newRound.inputQuantity <= 0) {
+    if (!newRound.roundDate || (newRound.creamSource === 'internal' && !newRound.milkLotId) || !newRound.creamLotId || inputCreamQuantity === null || inputCreamQuantity <= 0) {
       showToast('error', 'Please fill all required fields');
       return;
     }
@@ -239,7 +241,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     if (newRound.creamSource === 'internal') {
       const milkLot = milkLots.find(m => m.id === newRound.creamLotId);
       if (milkLot && milkLot.creamPool) {
-        if (newRound.inputQuantity > milkLot.creamPool.availableBalance) {
+        if (inputCreamQuantity > milkLot.creamPool.availableBalance) {
           showToast('error', `Not enough cream in pool. Available: ${milkLot.creamPool.availableBalance} kg`);
           return;
         }
@@ -253,14 +255,14 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
         showToast('error', 'Select a valid purchased cream lot');
         return;
       }
-      if (newRound.inputQuantity > creamLot.remaining) {
+      if (inputCreamQuantity > creamLot.remaining) {
         showToast('error', `Not enough purchased cream. Available: ${creamLot.remaining} kg`);
         return;
       }
       if (creamLots.some(cream => cream.id === creamLot.id)) {
         updateCreamLot(creamLot.id, {
-          consumed: creamLot.consumed + newRound.inputQuantity,
-          remaining: creamLot.remaining - newRound.inputQuantity,
+          consumed: creamLot.consumed + inputCreamQuantity,
+          remaining: creamLot.remaining - inputCreamQuantity,
         });
       }
     }
@@ -294,8 +296,8 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       type: 'Butter',
       status: 'scheduled',
       team: newRound.team ? newRound.team.split(',').map(t => t.trim()).filter(Boolean) : [],
-      plannedInput: newRound.inputQuantity,
-      actualInput: newRound.inputQuantity,
+      plannedInput: inputCreamQuantity,
+      actualInput: inputCreamQuantity,
       outputWeight: 0,
       startTime: new Date(`${newRound.roundDate}T12:00:00`).toISOString(),
       locked: false,
@@ -306,11 +308,11 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     });
     
     const creamMessage = newRound.creamSource === 'internal' 
-      ? ` (cream pool: -${newRound.inputQuantity} kg)` 
+      ? ` (cream pool: -${inputCreamQuantity} kg)`
       : '';
     showToast('success', `Butter round created: ${batchCode}/R${roundNumber}${creamMessage}`);
     setShowNewRoundModal(false);
-    setNewRound({ roundDate: new Date().toISOString().slice(0, 10), milkLotId: '', roundNumber: 1, creamSource: 'internal', creamLotId: '', inputQuantity: 0, team: '' });
+    setNewRound({ roundDate: new Date().toISOString().slice(0, 10), milkLotId: '', roundNumber: 1, creamSource: 'internal', creamLotId: '', inputQuantity: '', team: '' });
   };
 
   const handleStatusChange = (roundId: string, newStatus: ButterStatus) => {
@@ -1052,15 +1054,17 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
           })()}
           
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Input Quantity (kg)</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Container Weights / Input Total (kg)</label>
             <input
-              type="number"
-              value={newRound.inputQuantity || ''}
-              onChange={(e) => setNewRound({ ...newRound, inputQuantity: parseFloat(e.target.value) })}
+              type="text"
+              inputMode="decimal"
+              value={newRound.inputQuantity}
+              onChange={(e) => setNewRound({ ...newRound, inputQuantity: e.target.value })}
+              placeholder="e.g. 12+13"
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              step="0.1"
-              min="0"
             />
+            <p className="mt-1 text-xs text-slate-500">Enter one weight or add container weights with +.</p>
+            {newRound.inputQuantity.trim() && <p className={`mt-1 text-sm font-semibold ${inputCreamQuantity === null ? 'text-red-600' : 'text-emerald-700'}`}>{inputCreamQuantity === null ? 'Use numbers separated by +, e.g. 12+13' : `Total input: ${inputCreamQuantity.toFixed(2)} kg`}</p>}
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (optional)</label>
