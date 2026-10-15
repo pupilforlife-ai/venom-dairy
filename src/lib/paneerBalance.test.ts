@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculatePaneerRemainingBalance } from './paneerBalance';
+import { calculatePaneerRemainingBalance, getPaneerRoundRemainingBalance } from './paneerBalance';
 
 describe('calculatePaneerRemainingBalance', () => {
   it('uses corrected block output when no packing or SPP has been recorded', () => {
@@ -19,5 +19,13 @@ describe('calculatePaneerRemainingBalance', () => {
   it('preserves an overdraw as a negative balance instead of hiding it', () => {
     expect(calculatePaneerRemainingBalance(20, 0, [{ sku: 'MPAN200', cases: 5, loose: 0 }]))
       .toBeCloseTo(-4, 6);
+  });
+
+  it('ignores a stale saved balance when reading a paneer round', () => {
+    expect(getPaneerRoundRemainingBalance({
+      type: 'C/S',
+      outputWeight: 84.168,
+      remainingBalance: 12087.153,
+    })).toBeCloseTo(84.168, 6);
   });
 });

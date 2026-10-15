@@ -26,3 +26,15 @@ export function calculatePaneerRemainingBalance(
 
   return outputWeight - Math.max(0, sppRecordedWeight) - packedWeight;
 }
+
+export function getPaneerRoundRemainingBalance(round: {
+  type: string;
+  outputWeight: number;
+  sppRecordedWeight?: number;
+  packedSkus?: PackedSku[];
+  remainingBalance?: number;
+}): number | undefined {
+  if (round.type !== 'D' && round.type !== 'C/S') return round.remainingBalance ?? round.outputWeight;
+  if (round.remainingBalance === undefined && round.sppRecordedWeight === undefined && !round.packedSkus?.length) return undefined;
+  return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || []);
+}

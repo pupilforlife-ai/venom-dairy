@@ -27,7 +27,7 @@ import { statusFlow, statusLabels, statusColors, CipRecord, PackedSku, Productio
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getDefaultPaneerCaseWeightKg, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import { reconcileFinishedStock } from '../lib/finishedStock';
-import { calculatePaneerRemainingBalance } from '../lib/paneerBalance';
+import { calculatePaneerRemainingBalance, getPaneerRoundRemainingBalance } from '../lib/paneerBalance';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { exportProductionBoardWorkbook } from '../lib/operationalExports';
 import { buildProductionRoundHistory, formatRoundHistoryTime } from '../lib/productionRoundHistory';
@@ -328,7 +328,7 @@ export default function ProductionBoard() {
     if (filters.type !== 'all' && round.type !== filters.type) return false;
     if (filters.shift !== 'all' && round.shiftId !== filters.shift) return false;
     if (filters.balance !== 'all') {
-      const balance = round.remainingBalance;
+      const balance = getPaneerRoundRemainingBalance(round);
       if (filters.balance === 'balance_left' && !(balance !== undefined && balance > 0.01)) return false;
       if (filters.balance === 'overpacked' && !(balance !== undefined && balance < -0.01)) return false;
       if (filters.balance === 'fully_packed' && !((balance !== undefined && Math.abs(balance) <= 0.01) || (balance === undefined && round.status === 'packed'))) return false;
@@ -2207,7 +2207,10 @@ export default function ProductionBoard() {
                               </div>
                             ) : <span className="text-slate-400">—</span>}
                             {round.pan111ApprovalStatus === 'pending' && <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
-                            {round.remainingBalance !== undefined && <div className={`mt-1 inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold ${round.remainingBalance > 0 ? 'border-amber-200 bg-amber-50 text-amber-600' : round.remainingBalance < 0 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>Balance {round.remainingBalance.toFixed(2)} kg</div>}
+                            {round.remainingBalance !== undefined && (() => {
+                              const balance = getPaneerRoundRemainingBalance(round) ?? 0;
+                              return <div className={`mt-1 inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold ${balance > 0 ? 'border-amber-200 bg-amber-50 text-amber-600' : balance < 0 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>Balance {balance.toFixed(2)} kg</div>;
+                            })()}
                             {['cut', 'chiller_storage', 'frozen', 'packed'].includes(round.status) && !round.locked && round.pan111ApprovalStatus !== 'pending' && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm(emptyPackForm); setShowPackModal(true); }} className="mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"><Package className="h-3 w-3" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
                           </td>
                           <td className="px-2 py-1.5 text-sm">
