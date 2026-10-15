@@ -1696,7 +1696,7 @@ export default function ProductionBoard() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="production-board-page min-w-0 w-full max-w-full space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
@@ -2081,7 +2081,7 @@ export default function ProductionBoard() {
 
               {/* Rounds table */}
               {!isCollapsed && rounds.length > 0 ? (
-                <div className="overflow-x-auto">
+                <div className="w-full min-w-0 max-w-full overflow-x-auto">
                   <table className="production-board-table w-full text-xs">
                     <colgroup>
                       <col style={{ width: '9rem' }} />

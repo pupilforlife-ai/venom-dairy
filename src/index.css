@@ -57,6 +57,14 @@
   border-collapse: collapse;
 }
 
+/* Keep the board itself inside the app viewport. Its wide rounds table scrolls
+   inside its own container; it must not widen the page and leave a blank tail. */
+.production-board-page {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 .production-board-table th,
 .production-board-table td {
   border: 1px solid rgb(226 232 240);

@@ -228,7 +228,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 p-4 lg:p-6 overflow-auto">{children}</main>
+        <main className={`flex-1 min-w-0 p-4 lg:p-6 ${location.pathname === '/production-board' ? 'w-full max-w-full overflow-x-hidden overflow-y-auto' : 'overflow-auto'}`}>
+          {children}
+        </main>
       </div>
     </div>
   );
