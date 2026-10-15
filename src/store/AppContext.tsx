@@ -22,6 +22,7 @@ import {
   WasteEvent,
   UtilityLog,
   CipRecord,
+  ButterLotClosure,
   cipRecords as initialCipRecords,
   statusFlow,
   getMilkLotCreamPool,
@@ -40,6 +41,7 @@ interface AppState {
   wasteEvents: WasteEvent[];
   utilityLogs: UtilityLog[];
   cipRecords: CipRecord[];
+  butterLotClosures: ButterLotClosure[];
 }
 
 interface AppContextType extends AppState {
@@ -92,6 +94,7 @@ interface AppContextType extends AppState {
   // CIP actions
   addCipRecord: (record: Omit<CipRecord, 'id'>) => void;
   updateCipRecord: (id: string, updates: Partial<CipRecord>) => void;
+  closeButterLot: (closure: Omit<ButterLotClosure, 'id'>) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -160,6 +163,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [wasteEvents, setWasteEvents] = useSupabaseState<WasteEvent[]>('vejoy_wasteEvents', initialWaste);
   const [utilityLogs, setUtilityLogs] = useSupabaseState<UtilityLog[]>('vejoy_utilityLogs', initialUtilities);
   const [cipRecords, setCipRecords] = useSupabaseState<CipRecord[]>('vejoy_cipRecords', initialCipRecords);
+  const [butterLotClosures, setButterLotClosures] = useSupabaseState<ButterLotClosure[]>('vejoy_butterLotClosures', []);
 
   // Milk lot actions
   const addMilkLot = (lot: Omit<MilkLot, 'id'>) => {
@@ -587,6 +591,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ));
   };
 
+  const closeButterLot = (closure: Omit<ButterLotClosure, 'id'>) => {
+    const id = `${closure.sourceType}:${closure.sourceLotId}`;
+    setButterLotClosures(current => current.some(existing => existing.id === id)
+      ? current
+      : [...current, { ...closure, id }]);
+  };
+
   const value: AppContextType = {
     milkLots,
     creamLots,
@@ -598,6 +609,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wasteEvents,
     utilityLogs,
     cipRecords,
+    butterLotClosures,
     addMilkLot,
     updateMilkLot,
     addCreamLot,
@@ -626,6 +638,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addUtilityLog,
     addCipRecord,
     updateCipRecord,
+    closeButterLot,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

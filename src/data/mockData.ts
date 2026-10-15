@@ -159,6 +159,18 @@ export interface ButterPool {
   roundsContributed: string[];
 }
 
+export interface ButterLotClosure {
+  id: string; // `${sourceType}:${sourceLotId}`
+  sourceType: 'internal' | 'external';
+  sourceLotId: string;
+  sourceLotCode: string;
+  closedAt: string;
+  closedBy: string;
+  reviewedCreamInputKg: number;
+  reviewedButterOutputKg: number;
+  reviewedButtermilkOutputKg: number;
+}
+
 export interface GheePool {
   batchId: string;
   sourceButterBatchId: string;
@@ -580,9 +592,13 @@ export interface ProductionRound {
   isSalted?: boolean;
   saltQuantity?: number; // kg, recorded when a blended pool is salted
   replacerQuantity?: number; // kg
+  blendRecipeFullRounds?: number;
+  blendPartialButterKg?: number;
   pool?: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05';
   usedInGhee?: number; // kg
   blendingInput?: number; // kg taken from the common butter pool for blending
+  blendingInternalButterPoolId?: string;
+  blendingExternalButterPoolId?: string;
   blendingInternalButterRoundId?: string;
   blendingExternalButterRoundId?: string;
   blendingInternalButterQuantity?: number;

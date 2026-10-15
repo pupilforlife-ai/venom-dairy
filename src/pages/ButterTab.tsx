@@ -7,6 +7,7 @@ import { getButterBatchCode, getCreamBatchCode, getDateBatchCode, ProductionRoun
 import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 import { normalizeExternalCreamBalance } from '../lib/externalCreamBalance';
 import { calculateYieldPercent } from '../lib/yieldCalculations';
+import { calculateButterBlendRecipe } from '../lib/butterBlendRecipe';
 
 type ButterStatus = 
   | 'scheduled'
@@ -65,8 +66,11 @@ const directButterStatuses = ['churned', 'packed_as_pubb'];
 const blendedButterStatuses = ['pubbb_pool', 'psbbb_pool', 'bb05_pool'];
 
 export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: string }) {
-  const { productionRounds, milkLots, creamLots, updateProductionRound, addProductionRound, updateMilkLot, updateCreamLot } = useApp();
+  const { productionRounds, milkLots, creamLots, butterLotClosures, closeButterLot, updateProductionRound, addProductionRound, updateMilkLot, updateCreamLot } = useApp();
   const { showToast } = useToast();
+  const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
+  const currentActor = typeof window === 'undefined' ? currentRole || 'User' : window.localStorage.getItem('vejoy_user_username') || currentRole || 'User';
+  const canCloseButterLot = currentRole === 'owner' || currentRole === 'admin';
 
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showOutputModal, setShowOutputModal] = useState(false);
@@ -74,6 +78,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
   const [selectedPoolId, setSelectedPoolId] = useState<string | null>(null);
+  const [selectedButterSourceLotKey, setSelectedButterSourceLotKey] = useState<string | null>(null);
+  const [butterLotToCloseKey, setButterLotToCloseKey] = useState<string | null>(null);
+  const [confirmButterLotClosure, setConfirmButterLotClosure] = useState(false);
   const [activeSection, setActiveSection] = useState<'cream' | 'blending' | 'packing'>('cream');
   const [creamSourceTab, setCreamSourceTab] = useState<'internal' | 'external'>('internal');
   const [blendingSourceTab, setBlendingSourceTab] = useState<'internal' | 'external'>('internal');
@@ -100,7 +107,6 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     externalButterPoolId: '',
     internalButterQuantity: 0,
     externalButterQuantity: 0,
-    saltQuantity: 0.145,
     isSalted: false,
   });
 
@@ -110,6 +116,10 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     unit: 'balls' as 'balls' | 'bricks',
   });
   const inputCreamQuantity = parseAdditiveQuantity(newRound.inputQuantity);
+  const blendRecipe = calculateButterBlendRecipe(
+    blendingForm.internalButterQuantity + blendingForm.externalButterQuantity,
+    blendingForm.isSalted,
+  );
 
   // Internal butter follows the selected milk lot. Purchased-cream butter is
   // standalone and remains visible regardless of which milk lot is selected.
@@ -119,38 +129,43 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
   );
   const churningRounds = butterRounds.filter(round => !round.blendedPoolId);
   const visibleChurningRounds = churningRounds.filter(round => round.creamSource === creamSourceTab);
+  const getButterSourceLotKey = (round: ProductionRound) => round.creamSource === 'external'
+    ? `external:${round.creamLotId || round.sourceBatchCode || round.id}`
+    : `internal:${round.milkLotId || round.milkLotCode || round.id}`;
+  const selectedSourceLotRounds = selectedButterSourceLotKey
+    ? visibleChurningRounds.filter(round => getButterSourceLotKey(round) === selectedButterSourceLotKey)
+    : [];
   const getRoundDate = (round: typeof butterRounds[number]) => round.roundDate || round.startTime.slice(0, 10);
   const formatRoundDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString();
-  const groupedByDate = visibleChurningRounds.reduce((acc, round) => {
+  const groupedByDate = selectedSourceLotRounds.reduce((acc, round) => {
     const date = getRoundDate(round);
     if (!acc[date]) acc[date] = [];
     acc[date].push(round);
     return acc;
   }, {} as Record<string, typeof butterRounds>);
-  const visibleButterTotals = visibleChurningRounds.reduce((totals, round) => ({
-    creamInputKg: totals.creamInputKg + Math.max(0, round.actualInput ?? round.plannedInput ?? 0),
-    butterOutputKg: totals.butterOutputKg + Math.max(0, round.butterOutput || 0),
-    buttermilkOutputKg: totals.buttermilkOutputKg + Math.max(0, round.buttermilkOutput || 0),
-  }), { creamInputKg: 0, butterOutputKg: 0, buttermilkOutputKg: 0 });
   const lotYieldTotals = Array.from(visibleChurningRounds.reduce((totals, round) => {
-    const lotKey = round.creamSource === 'external'
-      ? round.creamLotId || round.sourceBatchCode || 'unknown-external-cream'
-      : round.milkLotId || round.milkLotCode || 'unknown-milk-lot';
+    const lotKey = getButterSourceLotKey(round);
     const current = totals.get(lotKey) || {
       lotKey,
+      sourceType: round.creamSource === 'external' ? 'external' as const : 'internal' as const,
+      sourceLotId: round.creamSource === 'external'
+        ? round.creamLotId || round.sourceBatchCode || round.id
+        : round.milkLotId || round.milkLotCode || round.id,
       lotLabel: round.creamSource === 'external'
         ? round.sourceBatchCode || round.creamLotId || 'Unknown cream lot'
         : round.milkLotCode || round.milkLotId || 'Unknown milk lot',
+      rounds: [] as ProductionRound[],
       creamInputKg: 0,
       butterOutputKg: 0,
       buttermilkOutputKg: 0,
     };
+    current.rounds.push(round);
     current.creamInputKg += Math.max(0, round.actualInput ?? round.plannedInput ?? 0);
     current.butterOutputKg += Math.max(0, round.butterOutput || 0);
     current.buttermilkOutputKg += Math.max(0, round.buttermilkOutput || 0);
     totals.set(lotKey, current);
     return totals;
-  }, new Map<string, { lotKey: string; lotLabel: string; creamInputKg: number; butterOutputKg: number; buttermilkOutputKg: number }>() ).values());
+  }, new Map<string, { lotKey: string; sourceType: 'internal' | 'external'; sourceLotId: string; lotLabel: string; rounds: ProductionRound[]; creamInputKg: number; butterOutputKg: number; buttermilkOutputKg: number }>() ).values());
 
   // Get available cream pools (internal cream from milk lots)
   const internalCreamPools = milkLots.filter(lot =>
@@ -219,13 +234,52 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       sourceLabel: first.sourceBatchCode || 'Butter blend',
       poolSku,
       rounds,
-      totalProduced: rounds.reduce((sum, round) => sum + (round.blendingInput || round.outputWeight || round.butterOutput || 0), 0),
+      totalProduced: rounds.reduce((sum, round) => sum + (round.outputWeight || round.blendingInput || round.butterOutput || 0), 0),
       availableBalance: rounds.reduce((sum, round) => sum + Math.max(0, round.remainingBalance || 0), 0),
     };
   });
 
   const availableDirectPools = directButterPools.filter(pool => pool.availableBalance > 0);
   const availableBlendedPools = blendedButterPools.filter(pool => pool.availableBalance > 0);
+  const sourceLotSummaries = lotYieldTotals.map(lot => {
+    const representative = lot.rounds[0];
+    const directPoolId = lot.sourceType === 'internal'
+      ? `direct:internal:${representative.milkLotId}`
+      : `direct:external:${representative.sourceBatchCode || representative.creamLotId || representative.id}`;
+    const directPool = directButterPools.find(pool => pool.id === directPoolId);
+    const directBatchId = directPool?.batchId || lot.lotLabel;
+    const linkedBlendRounds = butterRounds.filter(round => {
+      if (!round.blendedPoolId) return false;
+      const linkedPoolId = lot.sourceType === 'internal'
+        ? round.blendingInternalButterPoolId
+        : round.blendingExternalButterPoolId;
+      if (linkedPoolId) return linkedPoolId === directPoolId;
+      return (round.sourceBatchCode || '').split(' + ').includes(directBatchId);
+    });
+    const pubbbButterKg = linkedBlendRounds.filter(round => round.pool === 'PUBBB')
+      .reduce((sum, round) => sum + (lot.sourceType === 'internal'
+        ? round.blendingInternalButterQuantity || 0
+        : round.blendingExternalButterQuantity || 0), 0);
+    const psbbbButterKg = linkedBlendRounds.filter(round => round.pool === 'PSBBB')
+      .reduce((sum, round) => sum + (lot.sourceType === 'internal'
+        ? round.blendingInternalButterQuantity || 0
+        : round.blendingExternalButterQuantity || 0), 0);
+    const packedSkus = Array.from(new Set(linkedBlendRounds.flatMap(round =>
+      (round.packedSkus || []).map(pack => `${pack.sku}: ${pack.cases} cases${pack.loose ? ` + ${pack.loose} loose` : ''}`),
+    )));
+    const closureId = `${lot.sourceType}:${lot.sourceLotId}`;
+    return {
+      ...lot,
+      directPoolId,
+      directBatchId,
+      pubbbButterKg,
+      psbbbButterKg,
+      packedSkus,
+      closure: butterLotClosures.find(closure => closure.id === closureId),
+    };
+  });
+  const selectedSourceLotSummary = sourceLotSummaries.find(lot => lot.lotKey === selectedButterSourceLotKey);
+  const butterLotToClose = sourceLotSummaries.find(lot => lot.lotKey === butterLotToCloseKey);
   const visibleBlendingPools = (blendingSourceTab === 'internal'
     ? availableDirectPools.filter(pool => pool.origin === 'internal')
     : availableDirectPools.filter(pool => pool.origin === 'external'));
@@ -255,6 +309,12 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       : undefined;
     if (newRound.creamSource === 'internal' && !sourceMilkLot) {
       showToast('error', 'Milk lot not found');
+      return;
+    }
+    const sourceLotId = newRound.creamSource === 'external' ? newRound.creamLotId : sourceMilkLot!.id;
+    const closureId = `${newRound.creamSource}:${sourceLotId}`;
+    if (butterLotClosures.some(closure => closure.id === closureId)) {
+      showToast('error', 'This butter source lot is closed and cannot receive more churning entries. Ask an owner/admin to review it.');
       return;
     }
     // Record the measured input even when it exceeds the current estimate.
@@ -402,7 +462,6 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       externalButterPoolId: pool.origin === 'external' ? pool.id : '',
       internalButterQuantity: pool.origin === 'internal' ? pool.availableBalance : 0,
       externalButterQuantity: pool.origin === 'external' ? pool.availableBalance : 0,
-      saltQuantity: 0.145,
       isSalted: false,
     });
     setShowBlendingModal(true);
@@ -416,11 +475,6 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       showToast('error', 'Select an internal or external butter pool and enter its quantity');
       return;
     }
-    if (blendingForm.isSalted && blendingForm.saltQuantity <= 0) {
-      showToast('error', 'Enter a salt quantity greater than 0 g');
-      return;
-    }
-
     const internalPool = internalQuantity > 0 ? availableDirectPools.find(pool => pool.id === blendingForm.internalButterPoolId && pool.origin === 'internal') : undefined;
     const externalPool = externalQuantity > 0 ? availableDirectPools.find(pool => pool.id === blendingForm.externalButterPoolId && pool.origin === 'external') : undefined;
     if (internalQuantity > 0 && !internalPool) {
@@ -440,7 +494,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       return;
     }
 
-    const calculatedReplacer = totalButter / 3.3;
+    const recipe = calculateButterBlendRecipe(totalButter, blendingForm.isSalted);
     const poolStatus = blendingForm.isSalted ? 'psbbb_pool' : 'pubbb_pool';
 
     const consumePool = (pool: ButterPoolView | undefined, quantity: number) => {
@@ -484,19 +538,23 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       team: [],
       plannedInput: totalButter,
       actualInput: totalButter,
-      outputWeight: totalButter,
+      outputWeight: recipe.outputKg,
       startTime: new Date().toISOString(),
       locked: false,
       batchCode: getDateBatchCode(blendingForm.isSalted ? 'PSBBB' : 'PUBBB', blendDate),
       sourceBatchCode: [internalPool?.batchId, externalPool?.batchId].filter(Boolean).join(' + '),
       creamSource: internalPool && externalPool ? undefined : internalPool ? 'internal' : 'external',
       butterOutput: totalButter,
-      remainingBalance: totalButter,
-      replacerQuantity: calculatedReplacer,
+      remainingBalance: recipe.outputKg,
+      replacerQuantity: recipe.replacerKg,
+      blendRecipeFullRounds: recipe.fullRounds,
+      blendPartialButterKg: recipe.partialButterKg,
       blendingInput: totalButter,
+      blendingInternalButterPoolId: internalPool?.id,
+      blendingExternalButterPoolId: externalPool?.id,
       blendingInternalButterQuantity: internalQuantity || undefined,
       blendingExternalButterQuantity: externalQuantity || undefined,
-      saltQuantity: blendingForm.isSalted ? blendingForm.saltQuantity : undefined,
+      saltQuantity: blendingForm.isSalted ? recipe.saltKg : undefined,
       isSalted: blendingForm.isSalted,
       pool: blendingForm.isSalted ? 'PSBBB' : 'PUBBB',
       blendedPoolId: blendPoolId,
@@ -520,11 +578,40 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       internalQuantity > 0 ? `${internalQuantity.toFixed(2)} kg internal butter` : '',
       externalQuantity > 0 ? `${externalQuantity.toFixed(2)} kg external butter` : '',
     ].filter(Boolean).join(' + ');
-    const saltSummary = blendingForm.isSalted ? ` + ${(blendingForm.saltQuantity * 1000).toFixed(0)} g salt` : '';
+    const saltSummary = blendingForm.isSalted ? ` + ${(recipe.saltKg * 1000).toFixed(0)} g salt` : '';
     showToast('success', `Blended ${sourceSummary}${saltSummary} · ${poolStatus === 'psbbb_pool' ? 'PSBBB' : 'PUBBB'} pool created`);
     setShowBlendingModal(false);
     setSelectedPoolId(null);
-    setBlendingForm({ internalButterPoolId: '', externalButterPoolId: '', internalButterQuantity: 0, externalButterQuantity: 0, saltQuantity: 0.145, isSalted: false });
+    setBlendingForm({ internalButterPoolId: '', externalButterPoolId: '', internalButterQuantity: 0, externalButterQuantity: 0, isSalted: false });
+  };
+
+  const handleCloseButterLot = () => {
+    if (!canCloseButterLot) {
+      showToast('error', 'Only an owner or admin can close a butter lot');
+      return;
+    }
+    if (!confirmButterLotClosure || !butterLotToClose) {
+      showToast('error', 'Review the lot details and confirm closure first');
+      return;
+    }
+    if (butterLotToClose.closure) {
+      showToast('error', 'This butter lot is already closed');
+      return;
+    }
+    closeButterLot({
+      sourceType: butterLotToClose.sourceType,
+      sourceLotId: butterLotToClose.sourceLotId,
+      sourceLotCode: butterLotToClose.lotLabel,
+      closedAt: new Date().toISOString(),
+      closedBy: currentActor,
+      reviewedCreamInputKg: butterLotToClose.creamInputKg,
+      reviewedButterOutputKg: butterLotToClose.butterOutputKg,
+      reviewedButtermilkOutputKg: butterLotToClose.buttermilkOutputKg,
+    });
+    showToast('success', `${butterLotToClose.lotLabel} butter lot closed. Remaining butter pools are still available for blending and packing.`);
+    setButterLotToCloseKey(null);
+    setConfirmButterLotClosure(false);
+    setSelectedButterSourceLotKey(null);
   };
 
   const openPacking = (pool: ButterPoolView, sku: 'PUBB' | 'PUBBB' | 'PSBBB' | 'BB05') => {
@@ -711,6 +798,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {internalCreamPools.map(lot => (
               <div key={lot.id} className="bg-white rounded-lg p-3 border border-blue-100">
+                {butterLotClosures.some(closure => closure.id === `internal:${lot.id}`) && <div className="mb-2 rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">Butter lot closed · no more churning entries</div>}
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <span className="text-sm font-bold text-slate-900">{lot.creamPool?.batchId || getCreamBatchCode(lot.lotCode)}</span>
@@ -741,7 +829,10 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       {activeSection === 'cream' && creamSourceTab === 'external' && (
         <div className="bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-200 rounded-xl p-4">
           <h4 className="text-sm font-semibold text-violet-900 mb-3 flex items-center gap-2"><span>🧴</span> Purchased Cream Lots</h4>
-          {externalCreamLots.filter(cream => cream.remaining > 0).length > 0 ? <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">{externalCreamLots.filter(cream => cream.remaining > 0).map(cream => <div key={cream.id} className="bg-white rounded-lg p-3 border border-violet-100"><div className="flex items-center justify-between"><span className="text-sm font-bold text-slate-900">{cream.lotCode}</span><span className="text-xs text-violet-700">{cream.remaining.toFixed(2)} kg available</span></div><p className="mt-1 text-xs text-slate-500">{cream.supplier}</p><button onClick={() => openNewButterRound('external', cream.id)} className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100">Use in butter round</button></div>)}</div> : <p className="text-sm text-violet-700">No purchased cream is currently available.</p>}
+          {externalCreamLots.filter(cream => cream.remaining > 0).length > 0 ? <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">{externalCreamLots.filter(cream => cream.remaining > 0).map(cream => {
+            const isClosed = butterLotClosures.some(closure => closure.id === `external:${cream.id}`);
+            return <div key={cream.id} className="bg-white rounded-lg p-3 border border-violet-100">{isClosed && <div className="mb-2 rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">Butter lot closed · no more churning entries</div>}<div className="flex items-center justify-between"><span className="text-sm font-bold text-slate-900">{cream.lotCode}</span><span className="text-xs text-violet-700">{cream.remaining.toFixed(2)} kg available</span></div><p className="mt-1 text-xs text-slate-500">{cream.supplier}</p><button disabled={isClosed} onClick={() => openNewButterRound('external', cream.id)} className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50">{isClosed ? 'Lot closed' : 'Use in butter round'}</button></div>;
+          })}</div> : <p className="text-sm text-violet-700">No purchased cream is currently available.</p>}
         </div>
       )}
 
@@ -808,32 +899,57 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
 
       {/* Production Board: individual churning rounds belong only to Cream → Butter. */}
       {activeSection === 'cream' && <div className="space-y-4">
-        {lotYieldTotals.length > 0 && (
+        {sourceLotSummaries.length > 0 && !selectedSourceLotSummary && (
           <section className="overflow-hidden rounded-xl border border-indigo-200 bg-white">
             <div className="border-b border-indigo-100 bg-indigo-50 px-4 py-3">
-              <h3 className="text-sm font-semibold text-indigo-950">Cream-to-butter yield by source lot</h3>
-              <p className="mt-1 text-xs text-indigo-800">Lot yields use total recorded output ÷ total cream consumed; they are not averages of round percentages.</p>
+              <h3 className="text-sm font-semibold text-indigo-950">Butter source lots</h3>
+              <p className="mt-1 text-xs text-indigo-800">Lot-level overview. Open a lot to inspect its churning records and review it for closure.</p>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm">
+              <table className="w-full min-w-[980px] text-sm">
                 <thead><tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-2">Source lot</th><th className="px-4 py-2 text-right">Cream used</th>
-                  <th className="px-4 py-2 text-right">Butter produced</th><th className="px-4 py-2 text-right">Butter yield</th>
-                  <th className="px-4 py-2 text-right">Buttermilk produced</th><th className="px-4 py-2 text-right">Buttermilk yield</th>
+                  <th className="px-4 py-2 text-right">Butter made</th><th className="px-4 py-2 text-right">Butter yield</th>
+                  <th className="px-4 py-2 text-right">Buttermilk</th><th className="px-4 py-2">Butter use</th>
+                  <th className="px-4 py-2">Packed SKU</th><th className="px-4 py-2">Lot status</th><th className="px-4 py-2">Details</th>
                 </tr></thead>
-                <tbody className="divide-y divide-slate-50">{lotYieldTotals.map(lot => (
+                <tbody className="divide-y divide-slate-50">{sourceLotSummaries.map(lot => (
                   <tr key={lot.lotKey}>
-                    <td className="px-4 py-3 font-mono text-xs font-semibold text-slate-900">{lot.lotLabel}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-mono text-xs font-semibold text-slate-900">{lot.lotLabel}</div>
+                      <div className="mt-1 text-[10px] text-slate-500">{lot.sourceType === 'external' ? 'Standalone external cream' : 'Milk-lot cream'} · {lot.rounds.length} churn record{lot.rounds.length === 1 ? '' : 's'}</div>
+                    </td>
                     <td className="px-4 py-3 text-right">{lot.creamInputKg.toFixed(2)} kg</td>
                     <td className="px-4 py-3 text-right">{lot.butterOutputKg.toFixed(2)} kg</td>
                     <td className="px-4 py-3 text-right font-semibold text-indigo-800">{calculateYieldPercent(lot.butterOutputKg, lot.creamInputKg)?.toFixed(2) ?? '—'}%</td>
                     <td className="px-4 py-3 text-right">{lot.buttermilkOutputKg.toFixed(2)} kg</td>
-                    <td className="px-4 py-3 text-right font-semibold text-indigo-800">{calculateYieldPercent(lot.buttermilkOutputKg, lot.creamInputKg)?.toFixed(2) ?? '—'}%</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      <div>PUBBB: {lot.pubbbButterKg.toFixed(2)} kg</div>
+                      <div>PSBBB: {lot.psbbbButterKg.toFixed(2)} kg</div>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{lot.packedSkus.length ? lot.packedSkus.join(', ') : '—'}</td>
+                    <td className="px-4 py-3">
+                      {lot.closure ? <span className="text-xs font-semibold text-slate-500">Closed · {lot.closure.closedBy}</span> : <span className="text-xs font-semibold text-emerald-700">Open</span>}
+                    </td>
+                    <td className="px-4 py-3"><button onClick={() => setSelectedButterSourceLotKey(lot.lotKey)} className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">Review details</button></td>
                   </tr>
                 ))}</tbody>
               </table>
             </div>
           </section>
+        )}
+        {selectedSourceLotSummary && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <div>
+              <button onClick={() => setSelectedButterSourceLotKey(null)} className="mb-1 text-xs font-semibold text-indigo-700 hover:underline">← Back to source lots</button>
+              <h3 className="font-mono text-sm font-bold text-slate-900">{selectedSourceLotSummary.lotLabel}</h3>
+              <p className="mt-1 text-xs text-slate-600">Reviewed totals: {selectedSourceLotSummary.creamInputKg.toFixed(2)} kg cream · {selectedSourceLotSummary.butterOutputKg.toFixed(2)} kg butter · {selectedSourceLotSummary.buttermilkOutputKg.toFixed(2)} kg buttermilk</p>
+              {selectedSourceLotSummary.closure && <p className="mt-1 text-xs font-semibold text-slate-600">Closed by {selectedSourceLotSummary.closure.closedBy} on {new Date(selectedSourceLotSummary.closure.closedAt).toLocaleString()}</p>}
+            </div>
+            {canCloseButterLot && !selectedSourceLotSummary.closure && (
+              <button onClick={() => { setButterLotToCloseKey(selectedSourceLotSummary.lotKey); setConfirmButterLotClosure(false); }} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">Review and close lot</button>
+            )}
+          </div>
         )}
         {Object.entries(groupedByDate).map(([roundDate, rounds]) => {
           const lotTotals = Object.entries(rounds.reduce((acc, round) => {
@@ -924,7 +1040,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                         <td className="px-4 py-3 text-slate-600 text-xs">{round.remainingBalance || '—'} kg</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1 flex-wrap">
-                            {getActionButtons(round)}
+                            {selectedSourceLotSummary?.closure
+                              ? <span className="text-xs text-slate-400">Closed · read only</span>
+                              : getActionButtons(round)}
                           </div>
                         </td>
                       </tr>
@@ -947,28 +1065,6 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
             </div>
           );
         })}
-
-        {visibleChurningRounds.length > 0 && (
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-indigo-800">
-              Total across visible {creamSourceTab === 'internal' ? 'internal-cream' : 'purchased-cream'} butter rounds
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-indigo-200 bg-white p-3">
-                <div className="text-xs text-slate-500">Cream used</div>
-                <div className="mt-1 text-lg font-bold text-slate-900">{visibleButterTotals.creamInputKg.toFixed(2)} kg</div>
-              </div>
-              <div className="rounded-lg border border-indigo-200 bg-white p-3">
-                <div className="text-xs text-slate-500">Butter produced</div>
-                <div className="mt-1 text-lg font-bold text-slate-900">{visibleButterTotals.butterOutputKg.toFixed(2)} kg</div>
-              </div>
-              <div className="rounded-lg border border-indigo-200 bg-white p-3">
-                <div className="text-xs text-slate-500">Buttermilk recorded</div>
-                <div className="mt-1 text-lg font-bold text-slate-900">{visibleButterTotals.buttermilkOutputKg.toFixed(2)} kg</div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {visibleChurningRounds.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
@@ -1202,9 +1298,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       <Modal isOpen={showBlendingModal} onClose={() => setShowBlendingModal(false)} title="Blending">
         <div className="space-y-4">
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-            <p className="text-xs text-purple-800">
-              <strong>Ratio:</strong> 3.3:1 (Butter : Replacer)
-            </p>
+            <p className="text-xs font-semibold text-purple-900">Recipe per full round: 16.5 kg butter + 5 kg replacer{blendingForm.isSalted ? ' + 145 g salt' : ''}.</p>
+            <p className="mt-1 text-xs text-purple-800">Partial quantities are calculated proportionally. This blend produces {blendRecipe.outputKg.toFixed(3)} kg of packable {blendingForm.isSalted ? 'PSBBB' : 'PUBBB'}.</p>
+            <p className="mt-1 text-xs text-purple-800">Recipe calculation: {blendRecipe.fullRounds} full round{blendRecipe.fullRounds === 1 ? '' : 's'} + {blendRecipe.partialButterKg.toFixed(2)} kg partial butter · replacer {blendRecipe.replacerKg.toFixed(2)} kg{blendingForm.isSalted ? ` · salt ${(blendRecipe.saltKg * 1000).toFixed(0)} g` : ''}</p>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Total butter selected (kg)</label>
@@ -1220,7 +1316,14 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
               <label className="text-xs font-medium uppercase tracking-wide text-blue-800">Internal butter pool</label>
               <select
                 value={blendingForm.internalButterPoolId}
-                onChange={(e) => setBlendingForm({ ...blendingForm, internalButterPoolId: e.target.value })}
+                onChange={(e) => {
+                  const pool = availableDirectPools.find(candidate => candidate.id === e.target.value);
+                  setBlendingForm({
+                    ...blendingForm,
+                    internalButterPoolId: e.target.value,
+                    internalButterQuantity: pool?.availableBalance || 0,
+                  });
+                }}
                 className="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-sm"
               >
                 <option value="">Not used</option>
@@ -1232,7 +1335,14 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
               <label className="text-xs font-medium uppercase tracking-wide text-violet-800">External butter pool</label>
               <select
                 value={blendingForm.externalButterPoolId}
-                onChange={(e) => setBlendingForm({ ...blendingForm, externalButterPoolId: e.target.value })}
+                onChange={(e) => {
+                  const pool = availableDirectPools.find(candidate => candidate.id === e.target.value);
+                  setBlendingForm({
+                    ...blendingForm,
+                    externalButterPoolId: e.target.value,
+                    externalButterQuantity: pool?.availableBalance || 0,
+                  });
+                }}
                 className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-2 py-2 text-sm"
               >
                 <option value="">Not used</option>
@@ -1243,14 +1353,32 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
-              Replacer Quantity (kg) - Auto-calculated
+              Full recipe rounds (16.5 kg butter each)
             </label>
             <input
               type="number"
-              value={((blendingForm.internalButterQuantity + blendingForm.externalButterQuantity) / 3.3).toFixed(2)}
+              value={blendRecipe.fullRounds}
               readOnly
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
             />
+            <p className="mt-1 text-xs text-slate-500">Partial butter remainder: {blendRecipe.partialButterKg.toFixed(2)} kg</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Replacer to add</div>
+              <div className="mt-1 text-lg font-bold text-slate-900">{blendRecipe.replacerKg.toFixed(2)} kg</div>
+              <div className="text-[11px] text-slate-500">5 kg per 16.5 kg butter</div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Salt to add</div>
+              <div className="mt-1 text-lg font-bold text-slate-900">{blendingForm.isSalted ? `${(blendRecipe.saltKg * 1000).toFixed(0)} g` : '0 g'}</div>
+              <div className="text-[11px] text-slate-500">{blendingForm.isSalted ? '145 g per 16.5 kg butter' : 'Unsalted blend'}</div>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-emerald-700">Total blend into pool</div>
+              <div className="mt-1 text-lg font-bold text-emerald-900">{blendRecipe.outputKg.toFixed(3)} kg</div>
+              <div className="text-[11px] text-emerald-700">Butter + replacer + salt</div>
+            </div>
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Salt?</label>
@@ -1272,7 +1400,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                 Salted (PSBBB)
               </button>
             </div>
-            {blendingForm.isSalted && <div className="mt-3"><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Salt quantity (g)</label><input type="number" min="0" step="1" value={(blendingForm.saltQuantity * 1000).toFixed(0)} onChange={(e) => setBlendingForm({ ...blendingForm, saltQuantity: (Number(e.target.value) || 0) / 1000 })} className="mt-1 w-full rounded-lg border border-pink-200 bg-pink-50 px-3 py-2 text-sm" /><p className="mt-1 text-xs text-pink-700">Default: 145 g</p></div>}
+            {blendingForm.isSalted && <p className="mt-3 rounded-lg border border-pink-200 bg-pink-50 p-3 text-xs text-pink-800">Salt is calculated automatically in proportion to the butter quantity; staff do not need to calculate or enter it.</p>}
           </div>
           <div className="flex gap-2 pt-2">
             <button
@@ -1289,6 +1417,35 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
             </button>
           </div>
         </div>
+      </Modal>
+
+      {/* Owner/admin review gate before closing a source butter lot. */}
+      <Modal
+        isOpen={Boolean(butterLotToClose)}
+        onClose={() => { setButterLotToCloseKey(null); setConfirmButterLotClosure(false); }}
+        title="Review and close butter lot"
+      >
+        {butterLotToClose && <div className="space-y-4">
+          <p className="text-sm text-slate-600">Review the source-lot totals and downstream butter use before closing. Closing stops new churning entries for this cream lot.</p>
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <span className="text-slate-500">Source lot</span><strong className="text-right">{butterLotToClose.lotLabel}</strong>
+            <span className="text-slate-500">Cream recorded</span><strong className="text-right">{butterLotToClose.creamInputKg.toFixed(2)} kg</strong>
+            <span className="text-slate-500">Butter produced</span><strong className="text-right">{butterLotToClose.butterOutputKg.toFixed(2)} kg</strong>
+            <span className="text-slate-500">Buttermilk produced</span><strong className="text-right">{butterLotToClose.buttermilkOutputKg.toFixed(2)} kg</strong>
+            <span className="text-slate-500">Butter allocated to PUBBB</span><strong className="text-right">{butterLotToClose.pubbbButterKg.toFixed(2)} kg</strong>
+            <span className="text-slate-500">Butter allocated to PSBBB</span><strong className="text-right">{butterLotToClose.psbbbButterKg.toFixed(2)} kg</strong>
+            <span className="text-slate-500">Blended SKUs packed</span><strong className="text-right">{butterLotToClose.packedSkus.length ? butterLotToClose.packedSkus.join(', ') : 'None recorded'}</strong>
+          </div>
+          <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+            <input type="checkbox" checked={confirmButterLotClosure} onChange={event => setConfirmButterLotClosure(event.target.checked)} className="mt-0.5" />
+            <span>I have reviewed these details and confirm this butter source lot is closed.</span>
+          </label>
+          <p className="text-xs text-slate-500">Remaining butter and blended stock remain available for blending/packing. The closed lot’s recorded churn history remains visible in read-only detail view.</p>
+          <div className="flex gap-2">
+            <button disabled={!confirmButterLotClosure} onClick={handleCloseButterLot} className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50">Confirm close lot</button>
+            <button onClick={() => { setButterLotToCloseKey(null); setConfirmButterLotClosure(false); }} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button>
+          </div>
+        </div>}
       </Modal>
 
       {/* Packing Modal */}
