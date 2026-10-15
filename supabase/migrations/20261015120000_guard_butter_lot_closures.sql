@@ -14,7 +14,10 @@ begin
       return old;
     end if;
 
-    if auth.uid() is not null and not public.is_app_state_manager() then
+    if auth.uid() is not null and not exists (
+      select 1 from public.profiles
+      where id = auth.uid() and status = 'approved' and role in ('owner', 'admin')
+    ) then
       raise exception using
         errcode = '42501',
         message = 'Only an approved owner or admin can change butter-lot closure records.';
@@ -28,7 +31,10 @@ begin
 
   -- SQL maintenance sessions have no auth.uid() and remain available for
   -- explicit recovery. Application writes must be made by an approved manager.
-  if auth.uid() is not null and not public.is_app_state_manager() then
+  if auth.uid() is not null and not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and status = 'approved' and role in ('owner', 'admin')
+  ) then
     raise exception using
       errcode = '42501',
       message = 'Only an approved owner or admin can close a butter lot.';
