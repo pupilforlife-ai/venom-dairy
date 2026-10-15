@@ -98,6 +98,24 @@ describe('cream pool accounting', () => {
       roundsContributed: ['cs-1', 'cs-2'],
     });
   });
+
+  it('preserves an overdrawn cream balance for review instead of clamping it to zero', () => {
+    const lot = milkLot();
+    const rounds = [
+      round({ id: 'cs-1', type: 'C/S', creamRecovered: 200 }),
+      round({
+        id: 'butter-1',
+        type: 'Butter',
+        status: 'scheduled',
+        creamSource: 'internal',
+        creamLotId: lot.id,
+        plannedInput: 205,
+        actualInput: 205,
+      }),
+    ];
+
+    expect(getMilkLotCreamPool(lot, rounds)?.availableBalance).toBe(-5);
+  });
 });
 
 describe('finished stock reconciliation', () => {

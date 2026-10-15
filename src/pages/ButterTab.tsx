@@ -155,8 +155,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
   // Get available cream pools (internal cream from milk lots)
   const internalCreamPools = milkLots.filter(lot =>
     lot.id === selectedMilkLotId &&
-    lot.creamPool &&
-    lot.creamPool.availableBalance > 0
+    lot.creamPool
   );
 
   const externalCreamLots = [
@@ -258,26 +257,18 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       showToast('error', 'Milk lot not found');
       return;
     }
-    // For internal cream, deduct from the cream pool
+    // Record the measured input even when it exceeds the current estimate.
+    // The round becomes the audit record and any mismatch remains visible as
+    // an overdraw instead of preventing staff from logging production.
     if (newRound.creamSource === 'internal') {
       const milkLot = milkLots.find(m => m.id === newRound.creamLotId);
-      if (milkLot && milkLot.creamPool) {
-        if (inputCreamQuantity > milkLot.creamPool.availableBalance) {
-          showToast('error', `Not enough cream in pool. Available: ${milkLot.creamPool.availableBalance} kg`);
-          return;
-        }
-        
-      } else {
+      if (!milkLot?.creamPool) {
         console.warn('Milk lot or cream pool not found:', { milkLotId: newRound.creamLotId, milkLot });
       }
     } else {
       const creamLot = externalCreamLots.find(cream => cream.id === newRound.creamLotId);
       if (!creamLot) {
         showToast('error', 'Select a valid purchased cream lot');
-        return;
-      }
-      if (inputCreamQuantity > creamLot.remaining) {
-        showToast('error', `Not enough purchased cream. Available: ${creamLot.remaining} kg`);
         return;
       }
       if (creamLots.some(cream => cream.id === creamLot.id)) {
@@ -291,6 +282,12 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     const externalCreamLot = newRound.creamSource === 'external'
       ? externalCreamLots.find(cream => cream.id === newRound.creamLotId)
       : undefined;
+    const recordedCreamBalance = newRound.creamSource === 'external'
+      ? externalCreamLot?.remaining
+      : sourceMilkLot?.creamPool?.availableBalance;
+    const creamOverdrawKg = recordedCreamBalance === undefined
+      ? 0
+      : Math.max(0, inputCreamQuantity - recordedCreamBalance);
     const sourceCream = newRound.creamSource === 'internal'
       ? getCreamBatchCode(sourceMilkLot!.lotCode)
       : externalCreamLot?.lotCode || newRound.creamLotId;
@@ -326,12 +323,15 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       sourceBatchCode: sourceCream,
       creamSource: newRound.creamSource,
       creamLotId: newRound.creamLotId,
+      creamOverdrawKg,
     });
     
     const creamMessage = newRound.creamSource === 'internal' 
       ? ` (cream pool: -${inputCreamQuantity} kg)`
       : '';
-    showToast('success', `Butter round created: ${batchCode}/R${roundNumber}${creamMessage}`);
+    showToast(creamOverdrawKg > 0 ? 'info' : 'success', creamOverdrawKg > 0
+      ? `Butter round recorded. Input is ${creamOverdrawKg.toFixed(2)} kg above the recorded cream balance; flagged for review.`
+      : `Butter round created: ${batchCode}/R${roundNumber}${creamMessage}`);
     setShowNewRoundModal(false);
     setNewRound({ roundDate: new Date().toISOString().slice(0, 10), milkLotId: '', roundNumber: 1, creamSource: 'internal', creamLotId: '', inputQuantity: '', team: '' });
   };
@@ -729,7 +729,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                   </div>
                   <div className="flex justify-between border-t border-slate-200 pt-1">
                     <span className="text-slate-700 font-medium">Available:</span>
-                    <span className="font-bold text-emerald-600">{lot.creamPool?.availableBalance.toFixed(2) || 0} kg</span>
+                  <span className={`font-bold ${(lot.creamPool?.availableBalance || 0) < 0 ? 'text-red-700' : 'text-emerald-600'}`}>{lot.creamPool?.availableBalance.toFixed(2) || 0} kg</span>
                   </div>
                 </div>
               </div>
@@ -908,6 +908,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                           </span>
                           <div className="mt-1 text-[10px] text-slate-500">{round.creamSource === 'external' ? `Standalone cream lot ${round.sourceBatchCode || round.creamLotId || 'missing'}` : round.milkLotCode || round.milkLotId}</div>
                           <div className="mt-1 text-[10px] text-slate-500">{round.sourceBatchCode || round.creamLotId || 'Source lot not recorded'}</div>
+                          {(round.creamOverdrawKg || 0) > 0 && <div className="mt-1 inline-flex rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">Balance overdraw: {round.creamOverdrawKg!.toFixed(2)} kg · review</div>}
                           {(round.blendingInternalButterQuantity || round.blendingExternalButterQuantity) && <div className="mt-1 text-[10px] text-purple-700">Blend butter: {[round.blendingInternalButterQuantity ? `${round.blendingInternalButterQuantity.toFixed(2)} kg internal` : '', round.blendingExternalButterQuantity ? `${round.blendingExternalButterQuantity.toFixed(2)} kg external` : ''].filter(Boolean).join(' + ')}</div>}
                         </td>
                         <td className="px-4 py-3">
@@ -1065,13 +1066,13 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
               {newRound.creamSource === 'internal' ? (
                 internalCreamPools.map(lot => (
                   <option key={lot.id} value={lot.id}>
-                    {lot.lotCode} - {lot.creamPool?.availableBalance} kg available (from {lot.creamPool?.roundsContributed.length || 0} rounds)
+                    {lot.lotCode} - {lot.creamPool?.availableBalance} kg recorded balance (from {lot.creamPool?.roundsContributed.length || 0} rounds)
                   </option>
                 ))
               ) : (
                 externalCreamLots.map(cream => (
                   <option key={cream.id} value={cream.id}>
-                    {cream.lotCode} - {cream.quantity} kg ({cream.supplier})
+                    {cream.lotCode} - {cream.remaining.toFixed(2)} kg balance / {cream.quantity} kg received ({cream.supplier})
                   </option>
                 ))
               )}
@@ -1097,7 +1098,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                   </div>
                   <div>
                     <span className="text-blue-700">Available:</span>
-                    <p className="font-bold text-emerald-600">{selectedLot.creamPool.availableBalance.toFixed(2)} kg</p>
+                    <p className={`font-bold ${selectedLot.creamPool.availableBalance < 0 ? 'text-red-700' : 'text-emerald-600'}`}>{selectedLot.creamPool.availableBalance.toFixed(2)} kg</p>
                   </div>
                 </div>
                 <p className="text-xs text-blue-600 mt-2">
@@ -1119,6 +1120,14 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
             />
             <p className="mt-1 text-xs text-slate-500">Enter one weight or add container weights with +.</p>
             {newRound.inputQuantity.trim() && <p className={`mt-1 text-sm font-semibold ${inputCreamQuantity === null ? 'text-red-600' : 'text-emerald-700'}`}>{inputCreamQuantity === null ? 'Use numbers separated by +, e.g. 12+13' : `Total input: ${inputCreamQuantity.toFixed(2)} kg`}</p>}
+            {inputCreamQuantity !== null && (() => {
+              const recordedBalance = newRound.creamSource === 'external'
+                ? externalCreamLots.find(cream => cream.id === newRound.creamLotId)?.remaining
+                : milkLots.find(lot => lot.id === newRound.creamLotId)?.creamPool?.availableBalance;
+              if (recordedBalance === undefined || inputCreamQuantity <= recordedBalance) return null;
+              const overdrawKg = inputCreamQuantity - recordedBalance;
+              return <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">This input is {overdrawKg.toFixed(2)} kg above the recorded balance ({recordedBalance.toFixed(2)} kg). You can still record it; the negative balance will remain visible for review.</p>;
+            })()}
           </div>
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Team (optional)</label>

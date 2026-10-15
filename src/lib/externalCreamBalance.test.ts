@@ -26,4 +26,15 @@ describe('normalizeExternalCreamBalance', () => {
     const lot = { id: 'cream-1', quantity: 200, consumed: 25, remaining: 175 };
     expect(normalizeExternalCreamBalance(lot, [])).toBe(lot);
   });
+
+  it('preserves a negative balance so recorded overdraw remains visible', () => {
+    const lot = { id: 'cream-1', quantity: 200, consumed: null, remaining: null };
+    const rounds = [
+      { type: 'Butter', creamSource: 'external', creamLotId: 'cream-1', actualInput: 205 },
+    ];
+    expect(normalizeExternalCreamBalance(lot, rounds)).toMatchObject({
+      consumed: 205,
+      remaining: -5,
+    });
+  });
 });

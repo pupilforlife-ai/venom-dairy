@@ -40,7 +40,7 @@ export function normalizeExternalCreamBalance<T extends CreamLotBalanceInput>(
     : recordedRoundUsage;
   const remaining = typeof lot.remaining === 'number' && Number.isFinite(lot.remaining)
     ? lot.remaining
-    : Math.max(0, lot.quantity - consumed);
+    : lot.quantity - consumed;
 
   return { ...lot, consumed, remaining };
 }

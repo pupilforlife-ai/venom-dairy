@@ -427,7 +427,7 @@ export function getMilkLotCreamPool(lot: MilkLot, rounds: ProductionRound[]): Cr
     batchId: lot.creamPool?.batchId || creamBatchCode,
     totalCream: reconciledTotal,
     usedInButter: reconciledUsed,
-    availableBalance: roundToTwo(Math.max(0, reconciledTotal - reconciledUsed)),
+    availableBalance: roundToTwo(reconciledTotal - reconciledUsed),
     roundsContributed: contributedRounds.map(round => round.id),
   };
 }
@@ -573,6 +573,7 @@ export interface ProductionRound {
   // Butter-specific fields
   creamSource?: 'internal' | 'external';
   creamLotId?: string;
+  creamOverdrawKg?: number; // cream input above the recorded source balance at round creation
   butterOutput?: number; // kg
   buttermilkOutput?: number; // kg
   destination?: 'ghee' | 'pubb' | 'blending';
