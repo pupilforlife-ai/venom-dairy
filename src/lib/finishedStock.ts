@@ -82,7 +82,8 @@ function matchesLegacyStock(
   return normalizeFinishedGoodsSku(stock.sku) === entry.pack.sku
     && (stock.sourceBatchCodes || []).includes(entry.sourceBatchCode)
     && (stock.cases || 0) === (entry.pack.cases || 0)
-    && (stock.loosePackets || 0) === (entry.pack.loose || 0);
+    && (stock.loosePackets || 0) === (entry.pack.loose || 0)
+    && (stock.caseWeightKg ?? 0) === (entry.pack.caseWeightKg ?? 0);
 }
 
 /**
@@ -137,6 +138,7 @@ export function reconcileFinishedStock(
       createdAt: entry.round.completedAt || entry.round.startTime,
       sourceBatchCodes: [entry.sourceBatchCode],
       ...(entry.pack.weightKg !== undefined ? { weightKg: entry.pack.weightKg } : {}),
+      ...(entry.pack.caseWeightKg !== undefined ? { caseWeightKg: entry.pack.caseWeightKg } : {}),
       ...(entry.pack.looseWeightKg !== undefined ? { looseWeightKg: entry.pack.looseWeightKg } : {}),
       persisted: false,
       sourceRoundId: entry.round.id,

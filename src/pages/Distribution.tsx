@@ -19,6 +19,7 @@ import {
   FinishedGoodsBatchCodeMode,
   buildFinishedGoodsBatchCode,
   getAllowedPaneerSkus,
+  getDefaultPaneerCaseWeightKg,
   getFinishedGoodsBatchCodeDefinition,
   getPaneerPackWeight,
   paneerSkuByCode,
@@ -38,6 +39,8 @@ interface DistributionCandidate {
   unit: CandidateUnit;
   cases?: number;
   looseQuantity?: number;
+  caseWeightKg?: number;
+  looseWeightKg?: number;
   storageLocation?: string;
   detail: string;
   sku?: string;
@@ -68,6 +71,7 @@ interface HandoverForm {
   handedOverBy: string;
   verifiedCases: number;
   verifiedLoose: number;
+  verifiedLooseWeightKg: number;
   quantityVerified: boolean;
   extraSourceRoundId: string;
   notes: string;
@@ -86,6 +90,7 @@ const emptyForm: HandoverForm = {
   handedOverBy: '',
   verifiedCases: 0,
   verifiedLoose: 0,
+  verifiedLooseWeightKg: 0,
   quantityVerified: false,
   extraSourceRoundId: '',
   notes: '',
@@ -110,6 +115,7 @@ function getFinishedStockLineWeight(stock: ReconciledFinishedStockLine, sku: str
     stock.loosePackets || 0,
     stock.looseWeightKg || 0,
     stock.weightKg || 0,
+    stock.caseWeightKg,
   );
 }
 
@@ -180,12 +186,18 @@ export default function Distribution() {
     reconciledFinishedStock
       .filter(stock => stock.status === 'awaiting_handover')
       .forEach(stock => {
-        const existing = finishedBySku.get(stock.sku) || [];
+        const definition = paneerSkuByCode[stock.sku];
+        const caseWeight = definition?.packMode === 'weight_loose'
+          ? stock.caseWeightKg ?? getDefaultPaneerCaseWeightKg(definition)
+          : undefined;
+        const groupKey = caseWeight === undefined ? stock.sku : `${stock.sku}::${caseWeight.toFixed(2)}`;
+        const existing = finishedBySku.get(groupKey) || [];
         existing.push(stock);
-        finishedBySku.set(stock.sku, existing);
+        finishedBySku.set(groupKey, existing);
       });
 
-    const finishedCandidates: DistributionCandidate[] = [...finishedBySku.entries()].map(([sku, stocks]) => {
+    const finishedCandidates: DistributionCandidate[] = [...finishedBySku.entries()].map(([groupKey, stocks]) => {
+      const sku = stocks[0].sku;
       const first = stocks[0];
       const sourceBatchCodes = [...new Set(stocks.flatMap(stock => stock.sourceBatchCodes || []).filter(Boolean))];
       const definition = getFinishedGoodsBatchCodeDefinition(sku);
@@ -209,8 +221,12 @@ export default function Distribution() {
         : stocks.reduce((sum, stock) => sum + (stock.totalPackets || 0), 0);
       const cases = stocks.reduce((sum, stock) => sum + (stock.cases || 0), 0);
       const loose = stocks.reduce((sum, stock) => sum + (stock.loosePackets || 0), 0);
+      const caseWeightKg = paneerDefinition?.packMode === 'weight_loose'
+        ? stocks[0].caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerDefinition)
+        : undefined;
+      const looseWeightKg = stocks.reduce((sum, stock) => sum + (stock.looseWeightKg || 0), 0);
       return {
-        id: `finished-sku:${sku}`,
+        id: `finished-sku:${groupKey}`,
         sourceType: 'finished_stock',
         sourceId: first.id,
         stockLines: stocks,
@@ -225,9 +241,11 @@ export default function Distribution() {
         unit: isWeightStock ? 'kg' : 'packets',
         cases,
         looseQuantity: loose,
+        caseWeightKg,
+        looseWeightKg,
         storageLocation: locations.length === 1 ? locations[0] : `${locations.length} locations`,
         detail: isWeightStock
-          ? `${cases} cases · ${quantity.toFixed(2)} kg · ${stocks.length} packed batches`
+          ? `${cases} cases${caseWeightKg !== undefined ? ` × ${caseWeightKg.toFixed(2)} kg` : ''}${looseWeightKg > 0 ? ` + ${looseWeightKg.toFixed(2)} kg loose` : ''} · ${quantity.toFixed(2)} kg · ${stocks.length} packed batches`
           : `${cases} cases · ${loose} loose · ${quantity} packets · ${stocks.length} packed batches`,
       };
     });
@@ -328,7 +346,7 @@ export default function Distribution() {
           ? (round.packedSkus || []).reduce((sum, pack) => {
               const definition = paneerSkuByCode[pack.sku];
               return definition
-                ? sum + getPaneerPackWeight(definition, pack.cases || 0, pack.loose || 0, pack.looseWeightKg || 0, pack.weightKg || 0)
+                ? sum + getPaneerPackWeight(definition, pack.cases || 0, pack.loose || 0, pack.looseWeightKg || 0, pack.weightKg || 0, pack.caseWeightKg)
                 : sum;
             }, 0)
           : 0;
@@ -387,6 +405,7 @@ export default function Distribution() {
       handedOverBy: '',
       verifiedCases: candidate.cases || 0,
       verifiedLoose: candidate.looseQuantity || 0,
+      verifiedLooseWeightKg: candidate.looseWeightKg || 0,
       quantityVerified: false,
       extraSourceRoundId: '',
       notes: '',
@@ -424,14 +443,18 @@ export default function Distribution() {
     ? Math.max(0, selectedCandidate.quantity - form.quantity)
     : 0;
 
-  const updateVerifiedPackedCounts = (changes: Partial<Pick<HandoverForm, 'verifiedCases' | 'verifiedLoose'>>) => {
+  const updateVerifiedPackedCounts = (changes: Partial<Pick<HandoverForm, 'verifiedCases' | 'verifiedLoose' | 'verifiedLooseWeightKg'>>) => {
     setForm(current => {
       const next = { ...current, ...changes };
       next.verifiedCases = Math.max(0, Math.floor(next.verifiedCases));
       next.verifiedLoose = Math.max(0, Math.floor(next.verifiedLoose));
+      next.verifiedLooseWeightKg = Math.max(0, next.verifiedLooseWeightKg);
       next.quantityVerified = false;
       if (selectedFinishedDefinition?.packMode === 'units') {
         next.quantity = Math.max(0, next.verifiedCases) * (selectedFinishedDefinition.unitsPerCase || 0) + Math.max(0, next.verifiedLoose);
+      } else if (selectedFinishedDefinition?.packMode === 'weight_loose') {
+        const caseWeight = selectedCandidate?.caseWeightKg ?? getDefaultPaneerCaseWeightKg(selectedFinishedDefinition);
+        next.quantity = Math.max(0, next.verifiedCases) * caseWeight + next.verifiedLooseWeightKg;
       }
       return next;
     });
@@ -503,8 +526,9 @@ export default function Distribution() {
         const packingRecordedAt = new Date().toISOString();
         const extraEntry = {
           sku: selectedCandidate.sku!,
-          cases: selectedFinishedDefinition.packMode === 'units' ? selectedFinishedExtraCases : 0,
+          cases: selectedFinishedDefinition.packMode === 'units' || selectedFinishedDefinition.packMode === 'weight_loose' ? selectedFinishedExtraCases : 0,
           loose: selectedFinishedDefinition.packMode === 'units' ? selectedFinishedExtraLoose : 0,
+          ...(selectedFinishedDefinition.packMode === 'weight_loose' ? { caseWeightKg: selectedCandidate.caseWeightKg, looseWeightKg: Math.max(0, form.verifiedLooseWeightKg - (selectedCandidate.looseWeightKg || 0)) } : {}),
           packingRunId,
           recordedBy: currentUsername || currentRole || 'User',
           recordedAt: packingRecordedAt,
@@ -512,7 +536,7 @@ export default function Distribution() {
           ...(selectedFinishedDefinition.packMode === 'weight_only'
             ? { weightKg: selectedFinishedExtraWeight }
             : selectedFinishedDefinition.packMode === 'weight_loose'
-              ? { looseWeightKg: selectedFinishedExtraWeight }
+              ? { caseWeightKg: selectedCandidate.caseWeightKg, looseWeightKg: Math.max(0, form.verifiedLooseWeightKg - (selectedCandidate.looseWeightKg || 0)) }
               : {}),
         };
         addFinishedStock({
@@ -535,7 +559,7 @@ export default function Distribution() {
           ...(selectedFinishedDefinition.packMode === 'weight_only'
             ? { weightKg: selectedFinishedExtraWeight }
             : selectedFinishedDefinition.packMode === 'weight_loose'
-              ? { looseWeightKg: selectedFinishedExtraWeight }
+              ? { caseWeightKg: selectedCandidate.caseWeightKg, looseWeightKg: Math.max(0, form.verifiedLooseWeightKg - (selectedCandidate.looseWeightKg || 0)) }
               : {}),
         });
         const newBalance = currentBalance - selectedFinishedExtraWeight;
@@ -561,6 +585,7 @@ export default function Distribution() {
       const splitToken = Date.now();
       let casesLeftToTransfer = Math.min(form.verifiedCases, selectedCandidate.cases || 0);
       let looseLeftToTransfer = Math.min(form.verifiedLoose, selectedCandidate.looseQuantity || 0);
+      let looseWeightLeftToTransfer = Math.min(form.verifiedLooseWeightKg, selectedCandidate.looseWeightKg || 0);
       let weightLeftToTransfer = Math.min(form.quantity, selectedCandidate.quantity);
 
       const persistNewLine = (
@@ -572,6 +597,7 @@ export default function Distribution() {
           totalPackets: number;
           weightKg?: number;
           looseWeightKg?: number;
+          caseWeightKg?: number;
         },
         status: 'awaiting_handover' | 'handed_over',
       ) => {
@@ -602,6 +628,45 @@ export default function Distribution() {
           finishedGoodsBatchCodeReviewedAt: reviewedAt,
           finishedGoodsBatchCodeReviewMethod: reviewMethod,
         } as const;
+
+        if (selectedFinishedDefinition?.packMode === 'weight_loose') {
+          const caseWeightKg = stock.caseWeightKg ?? selectedCandidate.caseWeightKg ?? getDefaultPaneerCaseWeightKg(selectedFinishedDefinition);
+          const transferredCases = Math.min(stock.cases || 0, casesLeftToTransfer);
+          const transferredLooseWeightKg = Math.min(stock.looseWeightKg || 0, looseWeightLeftToTransfer);
+          casesLeftToTransfer -= transferredCases;
+          looseWeightLeftToTransfer -= transferredLooseWeightKg;
+          if (transferredCases <= 0 && transferredLooseWeightKg <= 0.005) return;
+
+          const remainingCases = Math.max(0, (stock.cases || 0) - transferredCases);
+          const remainingLooseWeightKg = Math.max(0, (stock.looseWeightKg || 0) - transferredLooseWeightKg);
+          const transferredQuantities = {
+            cases: transferredCases,
+            loosePackets: 0,
+            totalPackets: 0,
+            caseWeightKg,
+            looseWeightKg: Math.round((transferredLooseWeightKg + Number.EPSILON) * 100) / 100,
+          };
+          const remainingQuantities = {
+            cases: remainingCases,
+            loosePackets: 0,
+            totalPackets: 0,
+            caseWeightKg,
+            looseWeightKg: Math.round((remainingLooseWeightKg + Number.EPSILON) * 100) / 100,
+          };
+          const hasRemaining = remainingCases > 0 || remainingLooseWeightKg > 0.005;
+          if (!hasRemaining) {
+            if (stock.persisted) updateFinishedStock(stock.id, { ...transferredQuantities, ...reviewedStock });
+            else persistNewLine(stock, stock.packingRunId, transferredQuantities, 'handed_over');
+            return;
+          }
+          if (stock.persisted) {
+            updateFinishedStock(stock.id, { ...remainingQuantities, status: 'awaiting_handover', storageLocation: stock.storageLocation });
+          } else {
+            persistNewLine(stock, stock.packingRunId, remainingQuantities, 'awaiting_handover');
+          }
+          persistNewLine(stock, `${stock.packingRunId}-handover-${splitToken}-${index}`, transferredQuantities, 'handed_over');
+          return;
+        }
 
         if (selectedFinishedDefinition?.packMode === 'units') {
           const transferredCases = Math.min(stock.cases || 0, casesLeftToTransfer);
@@ -765,11 +830,12 @@ export default function Distribution() {
       quantity: form.quantity,
       unit: form.unit,
       cases: isFinishedStockCandidate
-        ? selectedFinishedDefinition?.packMode === 'units' ? form.verifiedCases : undefined
+        ? selectedFinishedDefinition?.packMode === 'units' || selectedFinishedDefinition?.packMode === 'weight_loose' ? form.verifiedCases : undefined
         : selectedCandidate?.cases,
       looseQuantity: isFinishedStockCandidate
         ? selectedFinishedDefinition?.packMode === 'units' ? form.verifiedLoose : undefined
         : selectedCandidate?.looseQuantity,
+      caseWeightKg: isFinishedStockCandidate && selectedFinishedDefinition?.packMode === 'weight_loose' ? selectedCandidate?.caseWeightKg : undefined,
       storageLocation: form.destination,
       destination: form.destination,
       handedOverBy,
@@ -850,8 +916,8 @@ export default function Distribution() {
             <p className="mt-1 text-[11px] text-emerald-800">{selectedBatchDefinition?.mode === 'receipt_date' && selectedCandidate?.finishedGoodsBatchCode ? `Generated from the receipt date: ${selectedCandidate.receiptDates?.join(', ') || 'recorded source date'}.` : selectedCandidate?.receiptDates && selectedCandidate.receiptDates.length > 1 ? 'This SKU combines multiple receipt dates; an owner/admin must assign one finished-goods code.' : selectedBatchDefinition?.prefix ? `Owner/admin must assign this code using prefix ${selectedBatchDefinition.prefix}.` : 'Owner/admin assigns this code for products without one source receipt date.'}{!canAssignManualBatchCode && ' You can view it, but only an owner or admin can enter a manual code.'}</p>
             {!canAssignManualBatchCode && <p className="mt-2 text-xs font-semibold text-amber-800">Owner/admin review is required before this handover can be confirmed.</p>}
           </div>
-          {selectedCandidate?.sourceType === 'finished_stock' && selectedFinishedDefinition?.packMode === 'units' ? <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Physical packed quantity</p><p className="mt-1 text-xs text-indigo-700">Check the actual cases and loose packets. Any surplus will be attributed to a production round balance below.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified cases</label><input type="number" min="0" step="1" value={form.verifiedCases || ''} onChange={event => updateVerifiedPackedCounts({ verifiedCases: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified loose packets</label><input type="number" min="0" step="1" value={form.verifiedLoose || ''} onChange={event => updateVerifiedPackedCounts({ verifiedLoose: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div></div><div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-sm text-slate-700"><span className="font-semibold">Verified total:</span> {form.quantity} packets ({getPaneerPackWeight(selectedFinishedDefinition, form.verifiedCases, form.verifiedLoose, 0, 0).toFixed(2)} kg) · {form.verifiedCases} cases + {form.verifiedLoose} loose packets</div></div> : <div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">{selectedCandidate?.sourceType === 'finished_stock' ? 'Verified quantity' : 'Quantity'}</label><input type="number" min="0" step={form.unit === 'kg' ? '0.01' : '1'} max={selectedCandidate && selectedCandidate.sourceType !== 'finished_stock' ? selectedCandidate.quantity : undefined} value={form.quantity || ''} onChange={event => setForm({ ...form, quantity: Number(event.target.value) || 0, quantityVerified: false })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />{selectedCandidate && <p className="mt-1 text-[11px] text-slate-500">Recorded: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}</p>}</div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Unit</label><select value={form.unit} disabled={Boolean(selectedCandidate)} onChange={event => setForm({ ...form, unit: event.target.value as CandidateUnit })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50"><option value="kg">kg</option><option value="packets">packets</option><option value="bottles">bottles</option></select></div></div>}
-          {selectedCandidate?.sourceType === 'finished_stock' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Handover quantity check</p><div className="mt-1 space-y-1 text-xs text-amber-800"><p>Recorded on board: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}{selectedCandidate.cases !== undefined && ` · ${selectedCandidate.cases} cases + ${selectedCandidate.looseQuantity || 0} loose`}</p><p>Physical count: {formatQuantity(form.quantity, form.unit)}{selectedFinishedDefinition?.packMode === 'units' && ` · ${form.verifiedCases} cases + ${form.verifiedLoose} loose`}</p>{selectedFinishedExtraWeight > 0 && <p className="font-semibold">Extra to record against a production balance: {selectedFinishedExtraWeight.toFixed(2)} kg</p>}{selectedFinishedShortfall > 0.01 && <p className="font-semibold">Partial handover: {formatQuantity(selectedFinishedShortfall, form.unit)} will remain in finished-production stock for a later transfer or investigation.</p>}</div>{selectedFinishedExtraWeight > 0 && <div className="mt-3"><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Source round for extra quantity</label><select value={form.extraSourceRoundId} onChange={event => setForm({ ...form, extraSourceRoundId: event.target.value })} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"><option value="">Select a round with remaining balance</option>{extraSourceRounds.map(round => <option key={round.id} value={round.id}>{round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber} · {(round.remainingBalance ?? round.intermediateBalance ?? 0).toFixed(2)} kg balance</option>)}</select><p className="mt-1 text-[11px] text-amber-700">This adds the surplus packing entry to that round and reduces its remaining paneer balance.</p></div>}<label className="mt-3 flex items-start gap-2 text-xs text-amber-900"><input type="checkbox" checked={form.quantityVerified} onChange={event => setForm({ ...form, quantityVerified: event.target.checked })} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-emerald-600" /><span>I physically verified the packed quantity and confirm it is ready for transfer.</span></label></div>}
+          {selectedCandidate?.sourceType === 'finished_stock' && selectedFinishedDefinition?.packMode === 'weight_loose' ? <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Physical packed quantity</p><p className="mt-1 text-xs text-indigo-700">Verify cases and any loose kilograms separately. Recorded case size: {selectedCandidate.caseWeightKg?.toFixed(2)} kg per case.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified cases</label><input type="number" min="0" step="1" value={form.verifiedCases || ''} onChange={event => updateVerifiedPackedCounts({ verifiedCases: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified loose weight (kg)</label><input type="number" min="0" step="0.01" value={form.verifiedLooseWeightKg || ''} onChange={event => updateVerifiedPackedCounts({ verifiedLooseWeightKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div></div><div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-sm text-slate-700"><span className="font-semibold">Verified total:</span> {form.quantity.toFixed(2)} kg · {form.verifiedCases} cases × {(selectedCandidate.caseWeightKg || 0).toFixed(2)} kg + {form.verifiedLooseWeightKg.toFixed(2)} kg loose</div></div> : selectedCandidate?.sourceType === 'finished_stock' && selectedFinishedDefinition?.packMode === 'units' ? <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Physical packed quantity</p><p className="mt-1 text-xs text-indigo-700">Check the actual cases and loose packets. Any surplus will be attributed to a production round balance below.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified cases</label><input type="number" min="0" step="1" value={form.verifiedCases || ''} onChange={event => updateVerifiedPackedCounts({ verifiedCases: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified loose packets</label><input type="number" min="0" step="1" value={form.verifiedLoose || ''} onChange={event => updateVerifiedPackedCounts({ verifiedLoose: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div></div><div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-sm text-slate-700"><span className="font-semibold">Verified total:</span> {form.quantity} packets ({getPaneerPackWeight(selectedFinishedDefinition, form.verifiedCases, form.verifiedLoose, 0, 0).toFixed(2)} kg) · {form.verifiedCases} cases + {form.verifiedLoose} loose packets</div></div> : <div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">{selectedCandidate?.sourceType === 'finished_stock' ? 'Verified quantity' : 'Quantity'}</label><input type="number" min="0" step={form.unit === 'kg' ? '0.01' : '1'} max={selectedCandidate && selectedCandidate.sourceType !== 'finished_stock' ? selectedCandidate.quantity : undefined} value={form.quantity || ''} onChange={event => setForm({ ...form, quantity: Number(event.target.value) || 0, quantityVerified: false })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />{selectedCandidate && <p className="mt-1 text-[11px] text-slate-500">Recorded: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}</p>}</div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Unit</label><select value={form.unit} disabled={Boolean(selectedCandidate)} onChange={event => setForm({ ...form, unit: event.target.value as CandidateUnit })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50"><option value="kg">kg</option><option value="packets">packets</option><option value="bottles">bottles</option></select></div></div>}
+          {selectedCandidate?.sourceType === 'finished_stock' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Handover quantity check</p><div className="mt-1 space-y-1 text-xs text-amber-800"><p>Recorded on board: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}{selectedCandidate.cases !== undefined && ` · ${selectedCandidate.cases} cases${selectedCandidate.caseWeightKg ? ` × ${selectedCandidate.caseWeightKg} kg` : ''}${selectedFinishedDefinition?.packMode === 'weight_loose' ? ` + ${(selectedCandidate.looseWeightKg || 0).toFixed(2)} kg loose` : ` + ${selectedCandidate.looseQuantity || 0} loose`}`}</p><p>Physical count: {formatQuantity(form.quantity, form.unit)}{selectedFinishedDefinition?.packMode === 'units' && ` · ${form.verifiedCases} cases + ${form.verifiedLoose} loose`}{selectedFinishedDefinition?.packMode === 'weight_loose' && ` · ${form.verifiedCases} cases + ${form.verifiedLooseWeightKg.toFixed(2)} kg loose`}</p>{selectedFinishedExtraWeight > 0 && <p className="font-semibold">Extra to record against a production balance: {selectedFinishedExtraWeight.toFixed(2)} kg</p>}{selectedFinishedShortfall > 0.01 && <p className="font-semibold">Partial handover: {formatQuantity(selectedFinishedShortfall, form.unit)} will remain in finished-production stock for a later transfer or investigation.</p>}</div>{selectedFinishedExtraWeight > 0 && <div className="mt-3"><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Source round for extra quantity</label><select value={form.extraSourceRoundId} onChange={event => setForm({ ...form, extraSourceRoundId: event.target.value })} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"><option value="">Select a round with remaining balance</option>{extraSourceRounds.map(round => <option key={round.id} value={round.id}>{round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber} · {(round.remainingBalance ?? round.intermediateBalance ?? 0).toFixed(2)} kg balance</option>)}</select><p className="mt-1 text-[11px] text-amber-700">This adds the surplus packing entry to that round and reduces its remaining paneer balance.</p></div>}<label className="mt-3 flex items-start gap-2 text-xs text-amber-900"><input type="checkbox" checked={form.quantityVerified} onChange={event => setForm({ ...form, quantityVerified: event.target.checked })} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-emerald-600" /><span>I physically verified the packed quantity and confirm it is ready for transfer.</span></label></div>}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Receiving storage location</label><select value={form.destination} onChange={event => setForm({ ...form, destination: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select receiving location</option>{distributionStorageLocations.map(location => <option key={location} value={location}>{location}</option>)}</select></div>
             <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Handed over by</label><input value={form.handedOverBy} onChange={event => setForm({ ...form, handedOverBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Staff name" /></div>

@@ -155,8 +155,8 @@ export default function Reconciliation() {
     () => productionRounds.filter(round => (round.milkLotCode === lotCode || round.milkLotId === selectedLot?.id) && (round.type === 'D' || round.type === 'C/S') && (round.actualInput > 0 || round.outputWeight > 0 || round.blockWeights?.length || round.packedSkus?.length)),
     [productionRounds, lotCode, selectedLot?.id],
   );
-  const getPackWeight = (pack: { sku: string; cases: number; loose?: number; looseWeightKg?: number; weightKg?: number }) =>
-    getPaneerPackWeight(paneerSkuByCode[pack.sku], pack.cases || 0, pack.loose || 0, pack.looseWeightKg || 0, pack.weightKg || 0);
+  const getPackWeight = (pack: { sku: string; cases: number; loose?: number; looseWeightKg?: number; weightKg?: number; caseWeightKg?: number }) =>
+    getPaneerPackWeight(paneerSkuByCode[pack.sku], pack.cases || 0, pack.loose || 0, pack.looseWeightKg || 0, pack.weightKg || 0, pack.caseWeightKg);
   const getBlockTotal = (round: typeof productionRounds[number]) => (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
   const getStaffPackedWeight = (round: typeof productionRounds[number]) => (round.packedSkus || []).reduce((sum, pack) => sum + getPackWeight(pack), 0);
   const getRecordedPan111Weight = (round: typeof productionRounds[number]) => {

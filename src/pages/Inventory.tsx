@@ -15,6 +15,7 @@ import { useToast } from '../components/Toast';
 import { useApp } from '../store/AppContext';
 import { ProductionRound } from '../data/mockData';
 import { isOnSiteFinishedStock, reconcileFinishedStock, ReconciledFinishedStockLine } from '../lib/finishedStock';
+import { getDefaultPaneerCaseWeightKg, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 
 type Tab = 'intermediate' | 'finished';
 type TransferKind = 'intermediate';
@@ -134,7 +135,14 @@ export default function Inventory() {
         existing.cases += stock.cases || 0;
         existing.loosePackets += stock.loosePackets || 0;
         existing.totalPackets += stock.totalPackets || 0;
-        if (stock.weightKg !== undefined) {
+        const paneerDefinition = paneerSkuByCode[stock.sku];
+        if (paneerDefinition) {
+          const lineWeight = getPaneerPackWeight(paneerDefinition, stock.cases || 0, stock.loosePackets || 0, stock.looseWeightKg || 0, stock.weightKg || 0, stock.caseWeightKg);
+          if (lineWeight > 0) {
+            existing.weightKg += lineWeight;
+            existing.hasWeightKg = true;
+          }
+        } else if (stock.weightKg !== undefined) {
           existing.weightKg += stock.weightKg;
           existing.hasWeightKg = true;
         }
@@ -366,7 +374,7 @@ export default function Inventory() {
                                         return <tr key={item.id} className="align-top">
                                           <td className="px-3 py-2 text-slate-600">{new Date(item.createdAt).toLocaleString()}<div className="mt-1 font-mono text-[10px] text-slate-400">{item.packingRunId}</div></td>
                                           <td className="px-3 py-2"><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Finished batch: {item.finishedGoodsBatchCode || 'Assigned at Distribution'}</div>{item.finishedGoodsBatchCodeReviewedBy && <div className="mb-1 text-[10px] text-indigo-700">Reviewed by {item.finishedGoodsBatchCodeReviewedBy}{item.finishedGoodsBatchCodeReviewMethod === 'owner_admin_override' ? ' · changed' : ''}</div>}<div className="flex max-w-sm flex-wrap gap-1">{(item.sourceBatchCodes || []).map((code, index) => <code key={`${code}-${index}`} className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-700">{code}</code>)}</div>{lineRounds.length > 0 && <div className="mt-1 text-[10px] text-indigo-700">Linked to {lineRounds.length} production round{lineRounds.length === 1 ? '' : 's'}</div>}</td>
-                                          <td className="px-3 py-2 font-medium text-slate-700">{item.cases || 0} cases · {item.loosePackets || 0} loose<div className="text-slate-500">{item.totalPackets || 0} packets{item.weightKg !== undefined ? ` · ${formatQuantity(item.weightKg)} kg` : item.looseWeightKg !== undefined ? ` · ${formatQuantity(item.looseWeightKg)} kg loose` : ''}</div></td>
+                                          <td className="px-3 py-2 font-medium text-slate-700">{item.cases || 0} cases{paneerSkuByCode[item.sku]?.packMode === 'weight_loose' ? ` × ${formatQuantity(item.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[item.sku]))} kg/case` : ''} · {item.loosePackets || 0} loose<div className="text-slate-500">{item.totalPackets || 0} packets{item.weightKg !== undefined ? ` · ${formatQuantity(item.weightKg)} kg` : item.looseWeightKg !== undefined ? ` · ${formatQuantity(item.looseWeightKg)} kg loose` : ''}</div></td>
                                           <td className="px-3 py-2"><div className="text-slate-600">{item.storageLocation}</div><span className={`mt-1 inline-flex rounded-full px-2 py-0.5 font-medium ${item.status === 'awaiting_handover' ? 'bg-amber-100 text-amber-700' : item.status === 'handed_over' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{item.status === 'awaiting_handover' ? 'Awaiting' : item.status === 'handed_over' ? 'Handed Over' : 'Returned'}</span>{!item.persisted && <div className="mt-1 text-[10px] text-slate-400">Legacy round record</div>}</td>
                                           <td className="px-3 py-2"><span className="text-[10px] text-slate-500">{isOnSiteFinishedStock(item) ? 'Hand over in Distribution' : 'Movement recorded in Distribution'}{!item.persisted && <span className="block text-slate-400">Legacy round record</span>}</span></td>
                                         </tr>;

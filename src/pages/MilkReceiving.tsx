@@ -155,7 +155,7 @@ export default function MilkReceiving() {
       .filter(({ round }) => round.milkLotId === displayedLot.id || round.milkLotCode === displayedLot.lotCode)
       .map(({ pack }) => pack);
     const entries = boardEntries.length > 0 ? boardEntries : (displayedLot.packedSkus || []);
-    const summary = new Map<string, { sku: string; cases: number; loose: number; looseWeightKg: number; weightKg: number }>();
+    const summary = new Map<string, { sku: string; cases: number; loose: number; looseWeightKg: number; weightKg: number; caseWeights: Record<string, number> }>();
     entries.forEach((entry) => {
       const sku = normalizeFinishedGoodsSku(entry.sku);
       const definition = paneerSkuByCode[sku];
@@ -166,10 +166,16 @@ export default function MilkReceiving() {
           entry.loose || 0,
           entry.looseWeightKg || 0,
           entry.weightKg || 0,
+          entry.caseWeightKg,
         )
         : Math.max(0, entry.weightKg || entry.looseWeightKg || 0);
-      const existing = summary.get(sku) || { sku, cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0 };
+      const existing = summary.get(sku) || { sku, cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0, caseWeights: {} };
       existing.cases += entry.cases || 0;
+      if (definition?.packMode === 'weight_loose' && (entry.cases || 0) > 0) {
+        const caseWeight = entry.caseWeightKg ?? (definition.unitsPerCase || 0) * definition.unitWeightKg;
+        const key = caseWeight.toFixed(2);
+        existing.caseWeights[key] = (existing.caseWeights[key] || 0) + (entry.cases || 0);
+      }
       existing.loose += entry.loose || 0;
       existing.looseWeightKg += entry.looseWeightKg || 0;
       existing.weightKg += entryWeightKg;
@@ -700,7 +706,7 @@ export default function MilkReceiving() {
                                         {packedSkuSummary.map((sku) => (
                                           <tr key={sku.sku}>
                                             <td className="px-2 py-3 font-mono font-semibold text-slate-900">{sku.sku}</td>
-                                            <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.cases.toLocaleString()}</td>
+                                            <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.cases.toLocaleString()}{Object.keys(sku.caseWeights).length > 0 && <div className="mt-1 text-[10px] font-normal text-slate-500">{Object.entries(sku.caseWeights).map(([kg, count]) => `${count} × ${kg} kg`).join(' · ')}</div>}</td>
                                             <td className="px-2 py-3 text-right font-bold text-slate-900">
                                               {paneerSkuByCode[sku.sku]?.packMode === 'weight_loose'
                                                 ? `${sku.looseWeightKg.toFixed(2)} kg`

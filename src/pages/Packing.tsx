@@ -12,7 +12,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { paneerSkuDefinitions, paneerSkuByCode, getAllowedPaneerSkus, getPaneerPackWeight } from '../data/skuConfig';
+import { paneerSkuDefinitions, paneerSkuByCode, getAllowedPaneerSkus, getDefaultPaneerCaseWeightKg, getPaneerPackWeight } from '../data/skuConfig';
 import { reconcileFinishedStock } from '../lib/finishedStock';
 
 export default function Packing() {
@@ -42,6 +42,7 @@ export default function Packing() {
     lotId: '',
     sku: '',
     cases: 0,
+    caseWeightKg: 0,
     loosePackets: 0,
     looseWeightKg: 0,
     weightKg: 0,
@@ -75,7 +76,8 @@ export default function Packing() {
       return;
     }
     const totalPackets = definition.packMode === 'units' ? packForm.cases * (definition.unitsPerCase || 0) + packForm.loosePackets : 0;
-    const totalWeightKg = getPaneerPackWeight(definition, packForm.cases, packForm.loosePackets, packForm.looseWeightKg, packForm.weightKg);
+    const caseWeightKg = definition.packMode === 'weight_loose' ? packForm.caseWeightKg || getDefaultPaneerCaseWeightKg(definition) : undefined;
+    const totalWeightKg = getPaneerPackWeight(definition, packForm.cases, packForm.loosePackets, packForm.looseWeightKg, packForm.weightKg, caseWeightKg);
 
     // Check if we have enough stock
     if (totalWeightKg > lot.currentQuantity) {
@@ -100,7 +102,7 @@ export default function Packing() {
       status: 'awaiting_handover',
       createdAt: packingRecordedAt,
       sourceBatchCodes: [lot.sourceBatchCode],
-      ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightKg } : definition.packMode === 'weight_loose' ? { looseWeightKg: packForm.looseWeightKg } : {}),
+      ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightKg } : definition.packMode === 'weight_loose' ? { caseWeightKg, looseWeightKg: packForm.looseWeightKg } : {}),
     });
 
     // Update intermediate lot
@@ -125,7 +127,7 @@ export default function Packing() {
         ...(definition.packMode === 'weight_only'
           ? { weightKg: totalWeightKg }
           : definition.packMode === 'weight_loose'
-            ? { looseWeightKg: packForm.looseWeightKg }
+            ? { caseWeightKg, looseWeightKg: packForm.looseWeightKg }
             : {}),
       };
       recordProductionRoundActivity(round.id, {
@@ -145,7 +147,7 @@ export default function Packing() {
 
     showToast('success', `Packed ${packForm.cases} cases + ${packForm.loosePackets} loose packets of ${definition.productName}`);
     setShowPackModal(false);
-    setPackForm({ lotId: '', sku: '', cases: 0, loosePackets: 0, looseWeightKg: 0, weightKg: 0, notes: '' });
+    setPackForm({ lotId: '', sku: '', cases: 0, caseWeightKg: 0, loosePackets: 0, looseWeightKg: 0, weightKg: 0, notes: '' });
   };
 
   // Check if selected lot is FIFO compliant
@@ -270,7 +272,7 @@ export default function Packing() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Select Frozen Stock</label>
             <select
               value={packForm.lotId}
-              onChange={(e) => { const lot = intermediateLots.find(item => item.id === e.target.value); const sourceRound = lot ? productionRounds.find(round => round.id === lot.sourceBatchId) : undefined; const definitions = lot?.productId === 'pan111' ? paneerSkuDefinitions.filter(definition => definition.sku === 'PAN111') : sourceRound && (sourceRound.type === 'D' || sourceRound.type === 'C/S') ? getAllowedPaneerSkus(sourceRound.type, sourceRound.cuttingType) : paneerSkuDefinitions; setPackForm({ ...packForm, lotId: e.target.value, sku: definitions[0]?.sku || '' }); }}
+              onChange={(e) => { const lot = intermediateLots.find(item => item.id === e.target.value); const sourceRound = lot ? productionRounds.find(round => round.id === lot.sourceBatchId) : undefined; const definitions = lot?.productId === 'pan111' ? paneerSkuDefinitions.filter(definition => definition.sku === 'PAN111') : sourceRound && (sourceRound.type === 'D' || sourceRound.type === 'C/S') ? getAllowedPaneerSkus(sourceRound.type, sourceRound.cuttingType) : paneerSkuDefinitions; const sku = definitions[0]?.sku || ''; const definition = paneerSkuByCode[sku]; setPackForm({ ...packForm, lotId: e.target.value, sku, caseWeightKg: definition?.packMode === 'weight_loose' ? getDefaultPaneerCaseWeightKg(definition) : 0 }); }}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
               <option value="">Select a batch...</option>
@@ -299,7 +301,7 @@ export default function Packing() {
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">SKU to Pack</label>
             <select
               value={packForm.sku}
-              onChange={(e) => setPackForm({ ...packForm, sku: e.target.value })}
+              onChange={(e) => { const sku = e.target.value; const definition = paneerSkuByCode[sku]; setPackForm({ ...packForm, sku, caseWeightKg: definition?.packMode === 'weight_loose' ? getDefaultPaneerCaseWeightKg(definition) : 0 }); }}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
               <option value="">Select SKU...</option>
@@ -310,6 +312,8 @@ export default function Packing() {
               ))}
             </select>
           </div>
+
+          {paneerSkuByCode[packForm.sku]?.packMode === 'weight_loose' && <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Case weight (kg)</label><input type="number" value={packForm.caseWeightKg || ''} onChange={(e) => setPackForm({ ...packForm, caseWeightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0.01" step="0.01" /><p className="mt-1 text-[11px] text-slate-500">Default: {getDefaultPaneerCaseWeightKg(paneerSkuByCode[packForm.sku]).toFixed(2)} kg/case</p></div>}
 
           {paneerSkuByCode[packForm.sku]?.packMode !== 'weight_only' && <div className="grid grid-cols-2 gap-3">
             <div>
@@ -349,7 +353,7 @@ export default function Packing() {
                 </span>
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                Total weight: {getPaneerPackWeight(paneerSkuByCode[packForm.sku], packForm.cases, packForm.loosePackets, packForm.looseWeightKg, packForm.weightKg).toFixed(2)} kg
+                Total weight: {getPaneerPackWeight(paneerSkuByCode[packForm.sku], packForm.cases, packForm.loosePackets, packForm.looseWeightKg, packForm.weightKg, packForm.caseWeightKg).toFixed(2)} kg
               </p>
             </div>
           )}

@@ -74,6 +74,8 @@ export interface PackedSku {
   /** The user and moment that recorded this individual packing entry. */
   recordedBy?: string;
   recordedAt?: string;
+  /** Actual mass of one case for weight-based SKUs such as MPAN010. */
+  caseWeightKg?: number;
   looseWeightKg?: number;
   weightKg?: number;
   reason?: string;
@@ -218,6 +220,7 @@ export interface DistributionHandover {
   unit: 'kg' | 'packets' | 'bottles';
   cases?: number;
   looseQuantity?: number;
+  caseWeightKg?: number;
   storageLocation?: string;
   destination: string;
   handedOverBy: string;
@@ -668,6 +671,8 @@ export interface FinishedStockLot {
   finishedGoodsBatchCodeReviewedAt?: string;
   finishedGoodsBatchCodeReviewMethod?: 'automatic_suggestion' | 'owner_admin_override' | 'manual_entry';
   weightKg?: number;
+  /** Actual mass of one case for weight-based packed SKUs. */
+  caseWeightKg?: number;
   looseWeightKg?: number;
 }
 

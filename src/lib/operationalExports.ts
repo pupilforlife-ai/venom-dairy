@@ -14,6 +14,7 @@ import {
 import {
   crumbingSkuByCode,
   getCrumbingPackWeight,
+  getDefaultPaneerCaseWeightKg,
   getGheePackWeight,
   getPaneerPackWeight,
   gheeSkuByCode,
@@ -733,7 +734,7 @@ function amassiSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata']
   };
 }
 
-function packWeight(pack: { sku: string; cases: number; loose?: number; looseWeightKg?: number; weightKg?: number }) {
+function packWeight(pack: { sku: string; cases: number; loose?: number; looseWeightKg?: number; weightKg?: number; caseWeightKg?: number }) {
   const sku = normalizeFinishedGoodsSku(pack.sku);
   if (paneerSkuByCode[sku]) {
     return Math.round((getPaneerPackWeight(
@@ -742,6 +743,7 @@ function packWeight(pack: { sku: string; cases: number; loose?: number; looseWei
       pack.loose || 0,
       pack.looseWeightKg || 0,
       pack.weightKg || 0,
+      pack.caseWeightKg,
     ) + Number.EPSILON) * 100) / 100;
   }
   if (gheeSkuByCode[sku]) return Math.round((getGheePackWeight(gheeSkuByCode[sku], pack.cases || 0, pack.loose || 0) + Number.EPSILON) * 100) / 100;
@@ -754,7 +756,7 @@ function packingSummary(round: ProductionRound) {
     .map(pack => {
       const sku = normalizeFinishedGoodsSku(pack.sku);
       const quantities = [
-        `${Math.max(0, pack.cases || 0)} cs`,
+        `${Math.max(0, pack.cases || 0)} cs${paneerSkuByCode[sku]?.packMode === 'weight_loose' ? ` @ ${(pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[sku])).toFixed(2)} kg/case` : ''}`,
         pack.loose ? `${Math.max(0, pack.loose)} loose` : '',
       ].filter(Boolean).join(' + ');
       return `${sku}: ${quantities}`;
@@ -842,6 +844,7 @@ function paneerWorkbookSheet(
     { key: 'batch', header: 'Batch Code', width: 25 },
     { key: 'sku', header: 'SKU', width: 18 },
     { key: 'cases', header: 'Cases', width: 11, numberFormat: '0' },
+    { key: 'caseWeightKg', header: 'Case Weight kg', width: 16, numberFormat: '0.00' },
     { key: 'loose', header: 'Loose Units', width: 13, numberFormat: '0' },
     { key: 'looseWeightKg', header: 'Loose Weight kg', width: 17, numberFormat: '0.00' },
     { key: 'weightKg', header: 'Calculated Weight kg', width: 21, numberFormat: '0.00' },
@@ -856,6 +859,7 @@ function paneerWorkbookSheet(
     batch: productionBatchCode(round),
     sku: normalizeFinishedGoodsSku(pack.sku),
     cases: pack.cases || 0,
+    caseWeightKg: pack.caseWeightKg ?? (paneerSkuByCode[pack.sku]?.packMode === 'weight_loose' ? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku]) : ''),
     loose: pack.loose || 0,
     looseWeightKg: pack.looseWeightKg || 0,
     weightKg: packWeight(pack),
@@ -1337,11 +1341,16 @@ function packedSkuSummary(lot: MilkLot, rounds: ProductionRound[]) {
     .filter(({ round }) => round.milkLotId === lot.id || round.milkLotCode === lot.lotCode)
     .map(({ pack }) => pack);
   const entries = boardEntries.length > 0 ? boardEntries : (lot.packedSkus || []);
-  const summary = new Map<string, { sku: string; cases: number; loose: number; looseWeightKg: number; weightKg: number }>();
+  const summary = new Map<string, { sku: string; cases: number; loose: number; looseWeightKg: number; weightKg: number; caseWeights: Record<string, number> }>();
   entries.forEach(entry => {
     const sku = normalizeFinishedGoodsSku(entry.sku);
-    const current = summary.get(sku) || { sku, cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0 };
+    const current = summary.get(sku) || { sku, cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0, caseWeights: {} };
     current.cases += entry.cases || 0;
+    if (paneerSkuByCode[sku]?.packMode === 'weight_loose' && (entry.cases || 0) > 0) {
+      const caseWeight = entry.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[sku]);
+      const key = caseWeight.toFixed(2);
+      current.caseWeights[key] = (current.caseWeights[key] || 0) + (entry.cases || 0);
+    }
     current.loose += entry.loose || 0;
     current.looseWeightKg += entry.looseWeightKg || 0;
     current.weightKg += packWeight(entry);
@@ -1645,11 +1654,15 @@ export function buildMilkReceivingWorkbook(lot: MilkLot, rounds: ProductionRound
     columns: [
       { key: 'sku', header: 'SKU', width: 16 },
       { key: 'cases', header: 'Cases', width: 12, numberFormat: '0' },
+      { key: 'caseBreakdown', header: 'Cases by Weight', width: 26 },
       { key: 'loose', header: 'Loose Units', width: 14, numberFormat: '0' },
       { key: 'looseWeightKg', header: 'Loose Weight kg', width: 17, numberFormat: '0.00' },
       { key: 'weightKg', header: 'Calculated Weight kg', width: 20, numberFormat: '0.00' },
     ],
-    rows: skuTotals,
+    rows: skuTotals.map(({ caseWeights, ...row }) => ({
+      ...row,
+      caseBreakdown: Object.entries(caseWeights || {}).map(([weight, cases]) => `${cases} × ${weight} kg`).join('; '),
+    })),
   };
   const salesSheet: ExcelSheet = {
     name: 'Milk Sales',

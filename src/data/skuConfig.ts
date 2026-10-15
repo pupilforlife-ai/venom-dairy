@@ -175,10 +175,17 @@ export function getAllowedPaneerSkus(roundType: PaneerSourceType, cuttingType?: 
   });
 }
 
-export function getPaneerPackWeight(definition: PaneerSkuDefinition | undefined, cases: number, loose: number, looseWeightKg: number, weightKg: number) {
+export function getDefaultPaneerCaseWeightKg(definition: PaneerSkuDefinition | undefined) {
+  if (!definition) return 0;
+  return (definition.unitsPerCase || 0) * definition.unitWeightKg;
+}
+
+export function getPaneerPackWeight(definition: PaneerSkuDefinition | undefined, cases: number, loose: number, looseWeightKg: number, weightKg: number, caseWeightKg?: number) {
   if (!definition) return 0;
   if (definition.packMode === 'weight_only') return Math.max(0, weightKg);
-  const caseWeight = (definition.unitsPerCase || 0) * definition.unitWeightKg;
+  const caseWeight = definition.packMode === 'weight_loose'
+    ? Math.max(0, caseWeightKg || getDefaultPaneerCaseWeightKg(definition))
+    : getDefaultPaneerCaseWeightKg(definition);
   const looseWeight = definition.packMode === 'weight_loose'
     ? Math.max(0, looseWeightKg)
     : Math.max(0, loose) * definition.unitWeightKg;

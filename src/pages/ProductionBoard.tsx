@@ -25,7 +25,7 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { statusFlow, statusLabels, statusColors, CipRecord, PackedSku, ProductionRound } from '../data/mockData';
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
-import { getAllowedPaneerSkus, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
+import { getAllowedPaneerSkus, getDefaultPaneerCaseWeightKg, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import { reconcileFinishedStock } from '../lib/finishedStock';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { exportProductionBoardWorkbook } from '../lib/operationalExports';
@@ -37,7 +37,7 @@ import ButterTab from './ButterTab';
 import GheeTab from './GheeTab';
 import CrumbingTab, { type CrumbingBatch } from './CrumbingTab';
 
-const emptyPackForm = { sku: '', cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0, reason: '' };
+const emptyPackForm = { sku: '', cases: 0, caseWeightKg: 0, loose: 0, looseWeightKg: 0, weightKg: 0, reason: '' };
 
 function roundToTwo(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -50,7 +50,7 @@ function roundDisplayCode(round: { type: string; shiftNumber: number; roundNumbe
 
 function packingDetailsForAudit(pack: PackedSku) {
   if (pack.weightKg !== undefined) return `${pack.sku} · ${pack.weightKg.toFixed(2)} kg`;
-  if (pack.looseWeightKg !== undefined) return `${pack.sku} · ${pack.cases} cases + ${pack.looseWeightKg.toFixed(2)} kg loose`;
+  if (pack.looseWeightKg !== undefined) return `${pack.sku} · ${pack.cases} cases × ${(pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku])).toFixed(2)} kg/case + ${pack.looseWeightKg.toFixed(2)} kg loose`;
   return `${pack.sku} · ${pack.cases} cases + ${pack.loose || 0} loose`;
 }
 
@@ -195,6 +195,7 @@ export default function ProductionBoard() {
   const [packForm, setPackForm] = useState({
     sku: '',
     cases: 0,
+    caseWeightKg: 0,
     loose: 0,
     looseWeightKg: 0,
     weightKg: 0,
@@ -735,7 +736,10 @@ export default function ProductionBoard() {
       showToast('error', 'Enter a reason before recording PAN111');
       return;
     }
-    const totalWeightPacked = getPaneerPackWeight(definition, packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg);
+    const caseWeightKg = definition.packMode === 'weight_loose'
+      ? (packForm.caseWeightKg || getDefaultPaneerCaseWeightKg(definition))
+      : undefined;
+    const totalWeightPacked = getPaneerPackWeight(definition, packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg, caseWeightKg);
     const isZeroOwnerCorrection = editingPackIndex !== null && isOwner && totalWeightPacked === 0;
     if (totalWeightPacked <= 0 && !isZeroOwnerCorrection) {
       showToast('error', definition.packMode === 'weight_only' ? 'Enter a PAN111 weight' : 'Enter cases, loose packets, or loose weight');
@@ -746,7 +750,7 @@ export default function ProductionBoard() {
     // balance before applying the corrected values.
     const existingPacked = round.packedSkus || [];
     const previousPack = editingPackIndex !== null ? existingPacked[editingPackIndex] : undefined;
-    const previousWeight = previousPack ? getPaneerPackWeight(paneerSkuByCode[previousPack.sku], previousPack.cases, previousPack.loose, previousPack.looseWeightKg || 0, previousPack.weightKg || 0) : 0;
+    const previousWeight = previousPack ? getPaneerPackWeight(paneerSkuByCode[previousPack.sku], previousPack.cases, previousPack.loose, previousPack.looseWeightKg || 0, previousPack.weightKg || 0, previousPack.caseWeightKg) : 0;
     const currentBalance = (round.remainingBalance ?? round.outputWeight ?? 0) + previousWeight;
     const newBalance = currentBalance - totalWeightPacked;
 
@@ -790,6 +794,7 @@ export default function ProductionBoard() {
       packingRunId,
       recordedBy: currentActor,
       recordedAt: packingRecordedAt,
+      ...(caseWeightKg !== undefined ? { caseWeightKg } : {}),
       ...(definition.packMode === 'weight_loose' ? { looseWeightKg: packForm.looseWeightKg } : {}),
       ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightPacked, reason: packForm.reason.trim() } : {}),
     };
@@ -816,7 +821,7 @@ export default function ProductionBoard() {
       ...(definition.packMode === 'weight_only'
         ? { weightKg: totalWeightPacked }
         : definition.packMode === 'weight_loose'
-          ? { looseWeightKg: packForm.looseWeightKg }
+          ? { looseWeightKg: packForm.looseWeightKg, caseWeightKg }
           : {}),
     };
 
@@ -836,7 +841,7 @@ export default function ProductionBoard() {
     const packingDetails = definition.packMode === 'weight_only'
       ? `${packForm.sku} · ${totalWeightPacked.toFixed(2)} kg`
       : definition.packMode === 'weight_loose'
-        ? `${packForm.sku} · ${packForm.cases} cases + ${packForm.looseWeightKg.toFixed(2)} kg loose`
+        ? `${packForm.sku} · ${packForm.cases} cases × ${caseWeightKg?.toFixed(2)} kg/case + ${packForm.looseWeightKg.toFixed(2)} kg loose`
         : `${packForm.sku} · ${packForm.cases} cases + ${packForm.loose} loose`;
     recordProductionRoundActivity(roundId, {
       status: newStatus,
@@ -873,6 +878,7 @@ export default function ProductionBoard() {
     setPackForm({
       sku: pack.sku,
       cases: pack.cases || 0,
+      caseWeightKg: pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku]),
       loose: pack.loose || 0,
       looseWeightKg: pack.looseWeightKg || 0,
       weightKg: pack.weightKg || 0,
@@ -2186,7 +2192,7 @@ export default function ProductionBoard() {
                                   const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB') : 'timestamp not captured';
                                   const auditLabel = `${p.sku} · ${recordedBy} · ${recordedAt}`;
                                   return <div key={i} className="flex flex-wrap items-center gap-1">
-                                    <button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}<span className="sr-only"> ({auditLabel})</span></button>
+                                    <button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c × ${(p.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[p.sku])).toFixed(2)} kg + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}<span className="sr-only"> ({auditLabel})</span></button>
                                     {isOwner && <button type="button" onClick={() => openPackingCorrection(round, i)} className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
                                   </div>;
                                 })}
@@ -2465,7 +2471,7 @@ export default function ProductionBoard() {
             const round = productionRounds.find(r => r.id === selectedRound);
             const editedPack = editingPackIndex !== null ? round?.packedSkus?.[editingPackIndex] : undefined;
             const editedPackWeight = editedPack
-              ? getPaneerPackWeight(paneerSkuByCode[editedPack.sku], editedPack.cases || 0, editedPack.loose || 0, editedPack.looseWeightKg || 0, editedPack.weightKg || 0)
+              ? getPaneerPackWeight(paneerSkuByCode[editedPack.sku], editedPack.cases || 0, editedPack.loose || 0, editedPack.looseWeightKg || 0, editedPack.weightKg || 0, editedPack.caseWeightKg)
               : 0;
             const balance = (round?.remainingBalance ?? round?.outputWeight ?? 0) + editedPackWeight;
             const existingPacking = round?.packedSkus || [];
@@ -2483,7 +2489,7 @@ export default function ProductionBoard() {
                     <div className="space-y-1">
                       {existingPacking.map((pack, idx) => (
                         <div key={idx} className="text-xs text-blue-700">
-                        Session {idx + 1}: {pack.sku} - {pack.weightKg !== undefined ? `${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.cases} cases + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.cases} cases + ${pack.loose} loose`}
+                        Session {idx + 1}: {pack.sku} - {pack.weightKg !== undefined ? `${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.cases} cases × ${(pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku])).toFixed(2)} kg/case + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.cases} cases + ${pack.loose} loose`}
                         </div>
                       ))}
                     </div>
@@ -2494,11 +2500,20 @@ export default function ProductionBoard() {
           })()}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">SKU</label>
-            <select value={packForm.sku} onChange={(e) => setPackForm({ ...packForm, sku: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+            <select value={packForm.sku} onChange={(e) => {
+              const sku = e.target.value;
+              const definition = paneerSkuByCode[sku];
+              setPackForm({ ...packForm, sku, caseWeightKg: definition?.packMode === 'weight_loose' ? getDefaultPaneerCaseWeightKg(definition) : 0 });
+            }} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select SKU</option>
               {allowedPackSkus.map(definition => <option key={definition.sku} value={definition.sku}>{definition.sku} - {definition.productName}{definition.packMode === 'weight_only' ? ' (weight only)' : definition.packMode === 'weight_loose' ? ' (loose by weight)' : ` (${(definition.unitsPerCase || 0) * definition.unitWeightKg} kg/case)`}</option>)}
             </select>
           </div>
+          {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode === 'weight_loose' && <div>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Case weight (kg)</label>
+            <input type="number" value={packForm.caseWeightKg || ''} onChange={(e) => setPackForm({ ...packForm, caseWeightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0.01" step="0.01" />
+            <p className="mt-1 text-[11px] text-slate-500">Default is {getDefaultPaneerCaseWeightKg(paneerSkuByCode[packForm.sku]).toFixed(2)} kg per case. Change this entry when cases have a different weight.</p>
+          </div>}
           {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode !== 'weight_only' && <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cases</label>
@@ -2517,10 +2532,10 @@ export default function ProductionBoard() {
             const round = productionRounds.find(r => r.id === selectedRound);
             const editedPack = editingPackIndex !== null ? round?.packedSkus?.[editingPackIndex] : undefined;
             const editedPackWeight = editedPack
-              ? getPaneerPackWeight(paneerSkuByCode[editedPack.sku], editedPack.cases || 0, editedPack.loose || 0, editedPack.looseWeightKg || 0, editedPack.weightKg || 0)
+              ? getPaneerPackWeight(paneerSkuByCode[editedPack.sku], editedPack.cases || 0, editedPack.loose || 0, editedPack.looseWeightKg || 0, editedPack.weightKg || 0, editedPack.caseWeightKg)
               : 0;
             const balance = (round?.remainingBalance ?? round?.outputWeight ?? 0) + editedPackWeight;
-            const totalWeightPacked = getPaneerPackWeight(paneerSkuByCode[packForm.sku], packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg);
+            const totalWeightPacked = getPaneerPackWeight(paneerSkuByCode[packForm.sku], packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg, packForm.caseWeightKg);
             const newBalance = balance - totalWeightPacked;
             
             return (
