@@ -52,7 +52,7 @@
    small screens instead of allowing long values to stretch neighbouring
    columns. The board keeps its horizontal scroll container on narrow views. */
 .production-board-table {
-  min-width: 154rem;
+  min-width: 141rem;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -62,6 +62,13 @@
   border: 1px solid rgb(226 232 240);
   vertical-align: middle;
   white-space: nowrap;
+}
+
+/* The final column contains only compact actions/alerts. Allow its text to
+   wrap so it does not need an oversized fixed-width blank area. */
+.production-board-table th:last-child,
+.production-board-table td:last-child {
+  white-space: normal;
 }
 
 [data-theme="dark"] .production-board-table th,
