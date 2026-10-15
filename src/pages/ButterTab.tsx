@@ -6,6 +6,7 @@ import { Modal } from '../components/Modal';
 import { getButterBatchCode, getCreamBatchCode, getDateBatchCode, ProductionRound } from '../data/mockData';
 import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 import { normalizeExternalCreamBalance } from '../lib/externalCreamBalance';
+import { calculateYieldPercent } from '../lib/yieldCalculations';
 
 type ButterStatus = 
   | 'scheduled'
@@ -127,10 +128,29 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     return acc;
   }, {} as Record<string, typeof butterRounds>);
   const visibleButterTotals = visibleChurningRounds.reduce((totals, round) => ({
-    creamInputKg: totals.creamInputKg + Math.max(0, round.actualInput || 0),
+    creamInputKg: totals.creamInputKg + Math.max(0, round.actualInput ?? round.plannedInput ?? 0),
     butterOutputKg: totals.butterOutputKg + Math.max(0, round.butterOutput || 0),
     buttermilkOutputKg: totals.buttermilkOutputKg + Math.max(0, round.buttermilkOutput || 0),
   }), { creamInputKg: 0, butterOutputKg: 0, buttermilkOutputKg: 0 });
+  const lotYieldTotals = Array.from(visibleChurningRounds.reduce((totals, round) => {
+    const lotKey = round.creamSource === 'external'
+      ? round.creamLotId || round.sourceBatchCode || 'unknown-external-cream'
+      : round.milkLotId || round.milkLotCode || 'unknown-milk-lot';
+    const current = totals.get(lotKey) || {
+      lotKey,
+      lotLabel: round.creamSource === 'external'
+        ? round.sourceBatchCode || round.creamLotId || 'Unknown cream lot'
+        : round.milkLotCode || round.milkLotId || 'Unknown milk lot',
+      creamInputKg: 0,
+      butterOutputKg: 0,
+      buttermilkOutputKg: 0,
+    };
+    current.creamInputKg += Math.max(0, round.actualInput ?? round.plannedInput ?? 0);
+    current.butterOutputKg += Math.max(0, round.butterOutput || 0);
+    current.buttermilkOutputKg += Math.max(0, round.buttermilkOutput || 0);
+    totals.set(lotKey, current);
+    return totals;
+  }, new Map<string, { lotKey: string; lotLabel: string; creamInputKg: number; butterOutputKg: number; buttermilkOutputKg: number }>() ).values());
 
   // Get available cream pools (internal cream from milk lots)
   const internalCreamPools = milkLots.filter(lot =>
@@ -788,6 +808,33 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
 
       {/* Production Board: individual churning rounds belong only to Cream → Butter. */}
       {activeSection === 'cream' && <div className="space-y-4">
+        {lotYieldTotals.length > 0 && (
+          <section className="overflow-hidden rounded-xl border border-indigo-200 bg-white">
+            <div className="border-b border-indigo-100 bg-indigo-50 px-4 py-3">
+              <h3 className="text-sm font-semibold text-indigo-950">Cream-to-butter yield by source lot</h3>
+              <p className="mt-1 text-xs text-indigo-800">Lot yields use total recorded output ÷ total cream consumed; they are not averages of round percentages.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead><tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-2">Source lot</th><th className="px-4 py-2 text-right">Cream used</th>
+                  <th className="px-4 py-2 text-right">Butter produced</th><th className="px-4 py-2 text-right">Butter yield</th>
+                  <th className="px-4 py-2 text-right">Buttermilk produced</th><th className="px-4 py-2 text-right">Buttermilk yield</th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-50">{lotYieldTotals.map(lot => (
+                  <tr key={lot.lotKey}>
+                    <td className="px-4 py-3 font-mono text-xs font-semibold text-slate-900">{lot.lotLabel}</td>
+                    <td className="px-4 py-3 text-right">{lot.creamInputKg.toFixed(2)} kg</td>
+                    <td className="px-4 py-3 text-right">{lot.butterOutputKg.toFixed(2)} kg</td>
+                    <td className="px-4 py-3 text-right font-semibold text-indigo-800">{calculateYieldPercent(lot.butterOutputKg, lot.creamInputKg)?.toFixed(2) ?? '—'}%</td>
+                    <td className="px-4 py-3 text-right">{lot.buttermilkOutputKg.toFixed(2)} kg</td>
+                    <td className="px-4 py-3 text-right font-semibold text-indigo-800">{calculateYieldPercent(lot.buttermilkOutputKg, lot.creamInputKg)?.toFixed(2) ?? '—'}%</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </section>
+        )}
         {Object.entries(groupedByDate).map(([roundDate, rounds]) => {
           const lotTotals = Object.entries(rounds.reduce((acc, round) => {
             const key = round.milkLotCode || round.milkLotId || 'unknown';
@@ -795,7 +842,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
             return acc;
           }, {} as Record<string, number>));
           const dateTotals = rounds.reduce((totals, round) => ({
-            creamInputKg: totals.creamInputKg + Math.max(0, round.actualInput || 0),
+            creamInputKg: totals.creamInputKg + Math.max(0, round.actualInput ?? round.plannedInput ?? 0),
             butterOutputKg: totals.butterOutputKg + Math.max(0, round.butterOutput || 0),
             buttermilkOutputKg: totals.buttermilkOutputKg + Math.max(0, round.buttermilkOutput || 0),
             balanceKg: totals.balanceKg + Math.max(0, round.remainingBalance || 0),
@@ -838,7 +885,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Status</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Input</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Butter</th>
+                      <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-24">Butter yield</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Buttermilk</th>
+                      <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-28">Buttermilk yield</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide w-20">Balance</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wide">Actions</th>
                     </tr>
@@ -866,9 +915,11 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                             {butterStatusLabels[round.status as ButterStatus]}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-600 text-xs">{Math.max(0, round.actualInput || 0).toFixed(2)} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{Math.max(0, round.actualInput ?? round.plannedInput ?? 0).toFixed(2)} kg</td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{Math.max(0, round.butterOutput || 0).toFixed(2)} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{calculateYieldPercent(Math.max(0, round.butterOutput || 0), Math.max(0, round.actualInput ?? round.plannedInput ?? 0))?.toFixed(2) ?? '—'}%</td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{Math.max(0, round.buttermilkOutput || 0).toFixed(2)} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">{calculateYieldPercent(Math.max(0, round.buttermilkOutput || 0), Math.max(0, round.actualInput ?? round.plannedInput ?? 0))?.toFixed(2) ?? '—'}%</td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{round.remainingBalance || '—'} kg</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1 flex-wrap">
@@ -883,7 +934,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                       <td colSpan={3} className="px-4 py-3 text-right text-xs uppercase tracking-wide">Date total</td>
                       <td className="px-4 py-3 text-xs">{dateTotals.creamInputKg.toFixed(2)} kg</td>
                       <td className="px-4 py-3 text-xs">{dateTotals.butterOutputKg.toFixed(2)} kg</td>
+                      <td className="px-4 py-3 text-xs">{calculateYieldPercent(dateTotals.butterOutputKg, dateTotals.creamInputKg)?.toFixed(2) ?? '—'}%</td>
                       <td className="px-4 py-3 text-xs">{dateTotals.buttermilkOutputKg.toFixed(2)} kg</td>
+                      <td className="px-4 py-3 text-xs">{calculateYieldPercent(dateTotals.buttermilkOutputKg, dateTotals.creamInputKg)?.toFixed(2) ?? '—'}%</td>
                       <td className="px-4 py-3 text-xs">{dateTotals.balanceKg.toFixed(2)} kg</td>
                       <td className="px-4 py-3" />
                     </tr>
