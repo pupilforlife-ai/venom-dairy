@@ -27,6 +27,7 @@ import { statusFlow, statusLabels, statusColors, CipRecord, PackedSku, Productio
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getDefaultPaneerCaseWeightKg, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 import { reconcileFinishedStock } from '../lib/finishedStock';
+import { calculatePaneerRemainingBalance } from '../lib/paneerBalance';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { exportProductionBoardWorkbook } from '../lib/operationalExports';
 import { buildProductionRoundHistory, formatRoundHistoryTime } from '../lib/productionRoundHistory';
@@ -750,8 +751,13 @@ export default function ProductionBoard() {
     // balance before applying the corrected values.
     const existingPacked = round.packedSkus || [];
     const previousPack = editingPackIndex !== null ? existingPacked[editingPackIndex] : undefined;
-    const previousWeight = previousPack ? getPaneerPackWeight(paneerSkuByCode[previousPack.sku], previousPack.cases, previousPack.loose, previousPack.looseWeightKg || 0, previousPack.weightKg || 0, previousPack.caseWeightKg) : 0;
-    const currentBalance = (round.remainingBalance ?? round.outputWeight ?? 0) + previousWeight;
+    const currentBalance = calculatePaneerRemainingBalance(
+      round.outputWeight,
+      round.sppRecordedWeight,
+      editingPackIndex !== null
+        ? existingPacked.filter((_, index) => index !== editingPackIndex)
+        : existingPacked,
+    );
     const newBalance = currentBalance - totalWeightPacked;
 
     if (definition.packMode === 'weight_only' && editingPackIndex === null) {
@@ -1521,13 +1527,15 @@ export default function ProductionBoard() {
     }
     const totalWeight = blockWeightsDraft.reduce((sum, weight) => sum + weight, 0);
     const sppBalance = round.sppRecordedWeight !== undefined ? Math.max(0, totalWeight - round.sppRecordedWeight) : undefined;
+    const remainingBalance = calculatePaneerRemainingBalance(totalWeight, round.sppRecordedWeight, round.packedSkus || []);
     const previousBlockCount = round.numberOfBlocks || round.blockWeights?.length || 0;
     const previousTotalWeight = (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
     recordProductionRoundActivity(blockWeightsRoundId, {
       blockWeights: blockWeightsDraft,
       numberOfBlocks: blockWeightsDraft.length,
       outputWeight: totalWeight,
-      ...(sppBalance !== undefined ? { balancePaneerWeight: sppBalance, remainingBalance: sppBalance } : {}),
+      remainingBalance,
+      ...(sppBalance !== undefined ? { balancePaneerWeight: sppBalance } : {}),
     }, {
       type: 'block_weights_corrected',
       stage: 'Block Count / Weights Corrected',
@@ -2469,12 +2477,16 @@ export default function ProductionBoard() {
         <div className="space-y-4">
           {selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
-            const editedPack = editingPackIndex !== null ? round?.packedSkus?.[editingPackIndex] : undefined;
-            const editedPackWeight = editedPack
-              ? getPaneerPackWeight(paneerSkuByCode[editedPack.sku], editedPack.cases || 0, editedPack.loose || 0, editedPack.looseWeightKg || 0, editedPack.weightKg || 0, editedPack.caseWeightKg)
-              : 0;
-            const balance = (round?.remainingBalance ?? round?.outputWeight ?? 0) + editedPackWeight;
             const existingPacking = round?.packedSkus || [];
+            const balance = round
+              ? calculatePaneerRemainingBalance(
+                round.outputWeight,
+                round.sppRecordedWeight,
+                editingPackIndex !== null
+                  ? existingPacking.filter((_, index) => index !== editingPackIndex)
+                  : existingPacking,
+              )
+              : 0;
             return (
               <>
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -2530,11 +2542,15 @@ export default function ProductionBoard() {
           {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode === 'weight_only' && <div className="space-y-3"><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">PAN111 weight (kg)</span><input type="number" value={packForm.weightKg || ''} onChange={(e) => setPackForm({ ...packForm, weightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" /></label><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Reason (required for approval)</span><textarea value={packForm.reason} onChange={(e) => setPackForm({ ...packForm, reason: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={2} placeholder="Explain why this paneer is being recorded as PAN111" /></label></div>}
           {packForm.sku && selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
-            const editedPack = editingPackIndex !== null ? round?.packedSkus?.[editingPackIndex] : undefined;
-            const editedPackWeight = editedPack
-              ? getPaneerPackWeight(paneerSkuByCode[editedPack.sku], editedPack.cases || 0, editedPack.loose || 0, editedPack.looseWeightKg || 0, editedPack.weightKg || 0, editedPack.caseWeightKg)
+            const balance = round
+              ? calculatePaneerRemainingBalance(
+                round.outputWeight,
+                round.sppRecordedWeight,
+                editingPackIndex !== null
+                  ? (round.packedSkus || []).filter((_, index) => index !== editingPackIndex)
+                  : round.packedSkus || [],
+              )
               : 0;
-            const balance = (round?.remainingBalance ?? round?.outputWeight ?? 0) + editedPackWeight;
             const totalWeightPacked = getPaneerPackWeight(paneerSkuByCode[packForm.sku], packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg, packForm.caseWeightKg);
             const newBalance = balance - totalWeightPacked;
             
