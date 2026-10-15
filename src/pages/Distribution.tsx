@@ -127,10 +127,11 @@ function roundMatchesBatchCode(round: ProductionRound, sourceBatchCode: string) 
 
 function getCreamReceiptDate(round: ProductionRound, milkLots: MilkLot[], creamLots: CreamLot[]) {
   const fallbackMilkLot = milkLots.find(lot => lot.id === round.milkLotId || lot.lotCode === round.milkLotCode);
-  if (!round.creamLotId) return fallbackMilkLot?.receiptDate;
-  const externalCream = creamLots.find(lot => lot.id === round.creamLotId);
+  const creamLotId = round.sourceCreamLotId || round.creamLotId;
+  if (!creamLotId) return fallbackMilkLot?.receiptDate;
+  const externalCream = creamLots.find(lot => lot.id === creamLotId);
   if (externalCream) return externalCream.dateReceived || externalCream.receivedAt?.slice(0, 10);
-  const milkLot = milkLots.find(lot => lot.id === round.creamLotId || lot.lotCode === round.milkLotCode) || fallbackMilkLot;
+  const milkLot = milkLots.find(lot => lot.id === creamLotId || lot.lotCode === round.milkLotCode) || fallbackMilkLot;
   if (!milkLot) return undefined;
   const internalCream = milkLot.creamLots?.find(lot => lot.id === round.creamLotId);
   return internalCream?.dateReceived || internalCream?.receivedAt?.slice(0, 10) || milkLot.receiptDate;
@@ -333,6 +334,9 @@ export default function Distribution() {
           : 0;
         const receiptDate = getReceiptDateForRound(round, productSku, milkLots, creamLots);
         const generatedFinishedCode = productSku ? buildFinishedGoodsBatchCode(productSku, receiptDate) : undefined;
+        const externalCreamSource = round.sourceCreamLotId
+          ? creamLots.find(cream => cream.id === round.sourceCreamLotId)
+          : undefined;
         return {
           id: `round:${round.id}`,
           sourceType: 'production_round',
@@ -342,7 +346,9 @@ export default function Distribution() {
           quantity: packedPaneerWeight > 0 ? packedPaneerWeight : round.outputWeight,
           unit: 'kg',
           storageLocation: round.type === 'Ghee' ? 'Coldroom' : 'Chiller',
-          detail: `${round.type} production round · Milk lot ${round.milkLotCode}`,
+          detail: externalCreamSource
+            ? `${round.type} production round · External cream ${externalCreamSource.lotCode} (${externalCreamSource.supplier})`
+            : `${round.type} production round · Milk lot ${round.milkLotCode}`,
           sku: productSku,
           finishedGoodsBatchCode: generatedFinishedCode,
           finishedGoodsBatchCodeMode: getFinishedGoodsBatchCodeDefinition(productSku || '')?.mode || 'manual',

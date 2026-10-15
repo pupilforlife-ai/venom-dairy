@@ -46,7 +46,7 @@ interface GheeTabProps {
 }
 
 export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
-  const { productionRounds, milkLots, updateProductionRound, updateMilkLot, addProductionRound } = useApp();
+  const { productionRounds, milkLots, creamLots, updateProductionRound, updateMilkLot, addProductionRound } = useApp();
   const { showToast } = useToast();
 
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
@@ -58,7 +58,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   const [newRound, setNewRound] = useState({
     roundDate: new Date().toISOString().slice(0, 10),
     roundNumber: 1,
-    milkLotId: '', // Select specific milk lot
+    butterSource: '', // milk:<id> or cream:<id>
     butterInput: 0,
     team: '',
   });
@@ -82,12 +82,16 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   const scopedMilkLotId = selectedMilkLotId || newestMilkLot?.id || '';
   const scopedMilkLot = milkLots.find(lot => lot.id === scopedMilkLotId);
 
-  // Ghee production is a separate board, but its rounds still belong to one
-  // milk lot. Never show historical rounds from another lot on the selected
-  // lot's board.
+  // Keep milk-derived Ghee scoped to the selected milk lot, while standalone
+  // purchased-cream Ghee remains visible regardless of the selected milk lot.
   const gheeRounds = productionRounds.filter(r =>
     r.type === 'Ghee'
-    && (!scopedMilkLotId || r.milkLotId === scopedMilkLotId || r.milkLotCode === scopedMilkLot?.lotCode),
+    && (
+      r.sourceCreamLotId
+      || !scopedMilkLotId
+      || r.milkLotId === scopedMilkLotId
+      || r.milkLotCode === scopedMilkLot?.lotCode
+    ),
   );
   const getRoundDate = (round: typeof gheeRounds[number]) => round.roundDate || round.startTime.slice(0, 10);
   const formatRoundDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString();
@@ -99,19 +103,23 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   }, {} as Record<string, typeof gheeRounds>);
 
   const openNewRound = () => {
-    setNewRound(current => ({ ...current, milkLotId: scopedMilkLotId || current.milkLotId }));
+    setNewRound(current => ({
+      ...current,
+      butterSource: scopedMilkLotId ? `milk:${scopedMilkLotId}` : current.butterSource,
+    }));
     setShowNewRoundModal(true);
   };
 
-  // Get available butter from specific milk lots
-  const getAvailableButter = (milkLotId: string) => {
+  const getAvailableButter = (butterSource: string) => {
+    const [sourceType, sourceId] = butterSource.split(':', 2);
     const butterRounds = productionRounds.filter(r => 
       r.type === 'Butter' && 
-      r.milkLotId === milkLotId && 
+      (sourceType === 'cream'
+        ? r.creamSource === 'external' && r.creamLotId === sourceId
+        : r.creamSource !== 'external' && r.milkLotId === sourceId) &&
       r.butterOutput && 
       r.butterOutput > 0 &&
-      (r.remainingBalance || 0) > 0 &&
-      r.destination !== 'ghee' // Not already sent to ghee
+      (r.remainingBalance || 0) > 0
     );
     
     return butterRounds.reduce((total, round) => {
@@ -140,18 +148,21 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
 
   // Handlers
   const handleCreateRound = () => {
-    if (!newRound.roundDate || !newRound.milkLotId || newRound.butterInput <= 0) {
+    if (!newRound.roundDate || !newRound.butterSource || newRound.butterInput <= 0) {
       showToast('error', 'Please fill all required fields');
       return;
     }
 
-    const milkLot = milkLots.find(m => m.id === newRound.milkLotId);
-    if (!milkLot) {
-      showToast('error', 'Milk lot not found');
+    const [sourceType, sourceId] = newRound.butterSource.split(':', 2);
+    const isExternalSource = sourceType === 'cream';
+    const milkLot = isExternalSource ? undefined : milkLots.find(m => m.id === sourceId);
+    const externalCreamLot = isExternalSource ? creamLots.find(cream => cream.id === sourceId) : undefined;
+    if (!milkLot && !externalCreamLot) {
+      showToast('error', isExternalSource ? 'Purchased cream lot not found' : 'Milk lot not found');
       return;
     }
 
-    const availableButter = getAvailableButter(newRound.milkLotId);
+    const availableButter = getAvailableButter(newRound.butterSource);
     if (newRound.butterInput > availableButter) {
       showToast('error', `Not enough butter available. Available: ${availableButter.toFixed(2)} kg`);
       return;
@@ -165,11 +176,18 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       .filter(round => getRoundDate(round) === newRound.roundDate)
       .reduce((max, round) => Math.max(max, round.roundNumber), 0) + 1;
     const batchCode = getDateBatchCode('GHEE', newRound.roundDate);
-    const dateRoundId = `ghee-${newRound.roundDate}-${newRound.milkLotId}`;
+    const dateRoundId = `ghee-${newRound.roundDate}-${sourceType}-${sourceId}`;
+    const sourceLabel = milkLot?.lotCode || externalCreamLot?.lotCode || '';
+    const sourceButterBatch = milkLot
+      ? getButterBatchCode(milkLot.lotCode)
+      : `BUT-${externalCreamLot!.lotCode}`;
 
     const newRoundData = {
-      milkLotId: milkLot.id,
-      milkLotCode: milkLot.lotCode,
+      // External-cream Ghee has no milk lot by design; its genealogy is kept
+      // against the standalone cream lot and source butter batch.
+      milkLotId: milkLot?.id || '',
+      milkLotCode: milkLot?.lotCode || '',
+      sourceCreamLotId: externalCreamLot?.id,
       roundDate: newRound.roundDate,
       shiftId: dateRoundId,
       shiftNumber: 0,
@@ -186,8 +204,8 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       afOilInput: afOilInput,
       expectedYield: expectedYield,
       remainingBalance: 0,
-      batchCode,
-      sourceBatchCode: getButterBatchCode(milkLot.lotCode),
+      batchCode: externalCreamLot ? `GHEE-${externalCreamLot.lotCode}` : batchCode,
+      sourceBatchCode: sourceButterBatch,
     };
 
     addProductionRound(newRoundData);
@@ -195,9 +213,10 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
     // Update butter rounds to mark as used in ghee
     const butterRounds = productionRounds.filter(r => 
       r.type === 'Butter' && 
-      r.milkLotId === newRound.milkLotId && 
-      (r.remainingBalance || 0) > 0 &&
-      r.destination !== 'ghee'
+      (isExternalSource
+        ? r.creamSource === 'external' && r.creamLotId === externalCreamLot?.id
+        : r.creamSource !== 'external' && r.milkLotId === milkLot?.id) &&
+      (r.remainingBalance || 0) > 0
     );
 
     let remainingButterNeeded = newRound.butterInput;
@@ -218,36 +237,38 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       remainingButterNeeded -= toUse;
     });
 
-    const existingPool = milkLot.gheePool || {
-      batchId: getGheeBatchCode(milkLot.lotCode),
-      sourceButterBatchId: getButterBatchCode(milkLot.lotCode),
-      milkLotId: milkLot.id,
-      totalGheeProduced: 0,
-      packedWeight: 0,
-      availableBalance: 0,
-      roundsContributed: [],
-    };
-    if (milkLot.butterPool && butterUsed > 0) {
-      updateMilkLot(milkLot.id, {
-        butterPool: {
-          ...milkLot.butterPool,
-          usedInGhee: milkLot.butterPool.usedInGhee + butterUsed,
-          availableBalance: Math.max(0, milkLot.butterPool.availableBalance - butterUsed),
-        },
-        gheePool: {
-          ...existingPool,
-          batchId: existingPool.batchId || getGheeBatchCode(milkLot.lotCode),
-          sourceButterBatchId: existingPool.sourceButterBatchId || getButterBatchCode(milkLot.lotCode),
-          roundsContributed: existingPool.roundsContributed,
-        },
-      });
-    } else {
-      updateMilkLot(milkLot.id, { gheePool: existingPool });
+    if (milkLot) {
+      const existingPool = milkLot.gheePool || {
+        batchId: getGheeBatchCode(milkLot.lotCode),
+        sourceButterBatchId: getButterBatchCode(milkLot.lotCode),
+        milkLotId: milkLot.id,
+        totalGheeProduced: 0,
+        packedWeight: 0,
+        availableBalance: 0,
+        roundsContributed: [],
+      };
+      if (milkLot.butterPool && butterUsed > 0) {
+        updateMilkLot(milkLot.id, {
+          butterPool: {
+            ...milkLot.butterPool,
+            usedInGhee: milkLot.butterPool.usedInGhee + butterUsed,
+            availableBalance: Math.max(0, milkLot.butterPool.availableBalance - butterUsed),
+          },
+          gheePool: {
+            ...existingPool,
+            batchId: existingPool.batchId || getGheeBatchCode(milkLot.lotCode),
+            sourceButterBatchId: existingPool.sourceButterBatchId || getButterBatchCode(milkLot.lotCode),
+            roundsContributed: existingPool.roundsContributed,
+          },
+        });
+      } else {
+        updateMilkLot(milkLot.id, { gheePool: existingPool });
+      }
     }
 
-    showToast('success', `Ghee round created: ${batchCode}/R${roundNumber}`);
+    showToast('success', `Ghee round created: ${externalCreamLot ? `GHEE-${sourceLabel}` : batchCode}/R${roundNumber}`);
     setShowNewRoundModal(false);
-    setNewRound({ roundDate: new Date().toISOString().slice(0, 10), roundNumber: 1, milkLotId: '', butterInput: 0, team: '' });
+    setNewRound({ roundDate: new Date().toISOString().slice(0, 10), roundNumber: 1, butterSource: '', butterInput: 0, team: '' });
   };
 
   const handleStatusChange = (roundId: string, newStatus: GheeStatus) => {
@@ -569,7 +590,12 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
                       <tr key={round.id} className="hover:bg-slate-50/50">
                         <td className="px-4 py-3">
                           <div className="font-mono text-xs font-bold text-slate-900">
-                            {round.batchCode || getGheeBatchCode(round.milkLotCode)}/R{round.roundNumber}
+                            {round.batchCode || getGheeBatchCode(round.milkLotCode || 'EXTERNAL')}/R{round.roundNumber}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-1">
+                            Source: {round.sourceCreamLotId
+                              ? `${creamLots.find(cream => cream.id === round.sourceCreamLotId)?.lotCode || round.sourceBatchCode || 'Purchased cream'} (external cream)`
+                              : round.milkLotCode || 'Milk lot not linked'}
                           </div>
                         </td>
                         <td className="px-4 py-3">
@@ -613,14 +639,14 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
 
         {gheeRounds.length === 0 && (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <p className="text-slate-500">No ghee rounds are recorded for milk lot {scopedMilkLot?.lotCode || 'the selected lot'} yet. Create a round to begin.</p>
+            <p className="text-slate-500">No ghee rounds are recorded for milk lot {scopedMilkLot?.lotCode || 'the selected lot'} or purchased cream yet. Create a round to begin.</p>
           </div>
         )}
       </div>
 
       {/* Modals */}
       {/* New Round Modal */}
-      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title={`Create New Ghee Round${scopedMilkLot ? ` · Milk lot ${scopedMilkLot.lotCode}` : ''}`}>
+      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Ghee Round">
         <div className="space-y-4">
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Production date</label>
@@ -646,24 +672,38 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Milk Lot (Butter Source)</label>
+            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Butter Source</label>
             <select
-              value={newRound.milkLotId}
-              onChange={(e) => setNewRound({ ...newRound, milkLotId: e.target.value })}
+              value={newRound.butterSource}
+              onChange={(e) => setNewRound({ ...newRound, butterSource: e.target.value, butterInput: 0 })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
             >
-              <option value="">Select milk lot</option>
+              <option value="">Select butter source</option>
+              <optgroup label="Butter from milk-lot cream">
               {milkLots.map(lot => {
-                const availableButter = getAvailableButter(lot.id);
+                const source = `milk:${lot.id}`;
+                const availableButter = getAvailableButter(source);
                 return (
-                  <option key={lot.id} value={lot.id} disabled={availableButter === 0}>
+                  <option key={source} value={source} disabled={availableButter === 0}>
                     {lot.lotCode} - {availableButter.toFixed(2)} kg butter available
                   </option>
                 );
               })}
+              </optgroup>
+              <optgroup label="Butter from purchased cream">
+              {creamLots.map(cream => {
+                const source = `cream:${cream.id}`;
+                const availableButter = getAvailableButter(source);
+                return (
+                  <option key={source} value={source} disabled={availableButter === 0}>
+                    {cream.lotCode} · {cream.supplier} - {availableButter.toFixed(2)} kg butter available
+                  </option>
+                );
+              })}
+              </optgroup>
             </select>
           </div>
-          {newRound.milkLotId && (
+          {newRound.butterSource && (
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Butter Input (kg)</label>
               <input
@@ -673,10 +713,10 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
                 step="0.1"
                 min="0"
-                max={getAvailableButter(newRound.milkLotId)}
+                max={getAvailableButter(newRound.butterSource)}
               />
               <p className="text-xs text-slate-500 mt-1">
-                Available: {getAvailableButter(newRound.milkLotId).toFixed(2)} kg
+                Available: {getAvailableButter(newRound.butterSource).toFixed(2)} kg
               </p>
             </div>
           )}

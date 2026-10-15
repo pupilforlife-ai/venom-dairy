@@ -594,6 +594,7 @@ export interface ProductionRound {
   butterInput?: number; // kg
   afOilInput?: number; // kg
   expectedYield?: number; // kg
+  sourceCreamLotId?: string; // standalone purchased-cream genealogy for external ghee
 
   // Amassi-specific fields
   amassiType?: 'BM' | 'SKM';

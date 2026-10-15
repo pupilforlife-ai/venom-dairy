@@ -107,9 +107,12 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     unit: 'balls' as 'balls' | 'bricks',
   });
 
-  // Filter butter rounds to the selected milk lot so all cream-derived butter
-  // stays tied to the active milk lineage.
-  const butterRounds = productionRounds.filter(r => r.type === 'Butter' && r.milkLotId === selectedMilkLotId);
+  // Internal butter follows the selected milk lot. Purchased-cream butter is
+  // standalone and remains visible regardless of which milk lot is selected.
+  const butterRounds = productionRounds.filter(r =>
+    r.type === 'Butter'
+    && (r.creamSource === 'external' || r.milkLotId === selectedMilkLotId),
+  );
   const churningRounds = butterRounds.filter(round => !round.blendedPoolId);
   const visibleChurningRounds = churningRounds.filter(round => round.creamSource === creamSourceTab);
   const getRoundDate = (round: typeof butterRounds[number]) => round.roundDate || round.startTime.slice(0, 10);
@@ -211,17 +214,24 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
   // Handlers
   const openNewButterRound = (source: 'internal' | 'external' = creamSourceTab, creamLotId = '') => {
     setCreamSourceTab(source);
-    setNewRound(current => ({ ...current, creamSource: source, creamLotId: creamLotId || (source === 'internal' ? current.milkLotId : '') }));
+    setNewRound(current => ({
+      ...current,
+      creamSource: source,
+      milkLotId: source === 'external' ? '' : current.milkLotId,
+      creamLotId: creamLotId || (source === 'internal' ? current.milkLotId : ''),
+    }));
     setShowNewRoundModal(true);
   };
 
   const handleCreateRound = () => {
-    if (!newRound.roundDate || !newRound.milkLotId || !newRound.creamLotId || newRound.inputQuantity <= 0) {
+    if (!newRound.roundDate || (newRound.creamSource === 'internal' && !newRound.milkLotId) || !newRound.creamLotId || newRound.inputQuantity <= 0) {
       showToast('error', 'Please fill all required fields');
       return;
     }
-    const sourceMilkLot = milkLots.find(milkLot => milkLot.id === newRound.milkLotId);
-    if (!sourceMilkLot) {
+    const sourceMilkLot = newRound.creamSource === 'internal'
+      ? milkLots.find(milkLot => milkLot.id === newRound.milkLotId)
+      : undefined;
+    if (newRound.creamSource === 'internal' && !sourceMilkLot) {
       showToast('error', 'Milk lot not found');
       return;
     }
@@ -255,17 +265,28 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       }
     }
 
+    const externalCreamLot = newRound.creamSource === 'external'
+      ? externalCreamLots.find(cream => cream.id === newRound.creamLotId)
+      : undefined;
     const sourceCream = newRound.creamSource === 'internal'
-      ? getCreamBatchCode(sourceMilkLot.lotCode)
-      : externalCreamLots.find(cream => cream.id === newRound.creamLotId)?.lotCode || newRound.creamLotId;
+      ? getCreamBatchCode(sourceMilkLot!.lotCode)
+      : externalCreamLot?.lotCode || newRound.creamLotId;
     const roundNumber = butterRounds
-      .filter(round => getRoundDate(round) === newRound.roundDate)
+      .filter(round => getRoundDate(round) === newRound.roundDate && (
+        newRound.creamSource === 'internal'
+          ? round.creamSource !== 'external' && round.milkLotId === sourceMilkLot?.id
+          : round.creamSource === 'external' && round.creamLotId === externalCreamLot?.id
+      ))
       .reduce((max, round) => Math.max(max, round.roundNumber), 0) + 1;
-    const batchCode = getDateBatchCode('BUT', newRound.roundDate);
-    const dateRoundId = `butter-${newRound.roundDate}`;
+    const batchCode = newRound.creamSource === 'internal'
+      ? getDateBatchCode('BUT', newRound.roundDate)
+      : `BUT-${sourceCream}`;
+    const dateRoundId = `butter-${newRound.roundDate}-${newRound.creamSource === 'internal' ? sourceMilkLot!.id : externalCreamLot?.id || 'external'}`;
     addProductionRound({
-      milkLotId: sourceMilkLot.id,
-      milkLotCode: sourceMilkLot.lotCode,
+      // Empty milk-lot fields are intentional for purchased cream: its source
+      // genealogy is the standalone cream lot recorded below.
+      milkLotId: sourceMilkLot?.id || '',
+      milkLotCode: sourceMilkLot?.lotCode || '',
       roundDate: newRound.roundDate,
       shiftId: dateRoundId,
       shiftNumber: 0,
@@ -304,8 +325,11 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     }
 
     const round = butterRounds.find(r => r.id === selectedRound);
-    const milkLot = round ? milkLots.find(lot => lot.id === round.milkLotId) : undefined;
-    if (!round || !milkLot) return;
+    if (!round) return;
+    const milkLot = round.creamSource === 'internal'
+      ? milkLots.find(lot => lot.id === round.milkLotId)
+      : undefined;
+    if (round.creamSource === 'internal' && !milkLot) return;
     const outputDelta = outputForm.butterOutput - (round.butterOutput || 0);
 
     updateProductionRound(selectedRound, {
@@ -318,29 +342,31 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
         : `direct:external:${round.sourceBatchCode || round.creamLotId || round.id}`,
     });
 
-    const existingPool = milkLot.butterPool || {
-      batchId: getButterBatchCode(milkLot.lotCode),
-      sourceCreamBatchId: getCreamBatchCode(milkLot.lotCode),
-      milkLotId: milkLot.id,
-      totalButterProduced: 0,
-      usedInGhee: 0,
-      usedInBlending: 0,
-      packedAsPubb: 0,
-      availableBalance: 0,
-      roundsContributed: [],
-    };
-    updateMilkLot(milkLot.id, {
-      butterPool: {
-        ...existingPool,
-        batchId: existingPool.batchId || getButterBatchCode(milkLot.lotCode),
-        sourceCreamBatchId: existingPool.sourceCreamBatchId || getCreamBatchCode(milkLot.lotCode),
-        totalButterProduced: Math.max(0, existingPool.totalButterProduced + outputDelta),
-        availableBalance: Math.max(0, existingPool.availableBalance + outputDelta),
-        roundsContributed: existingPool.roundsContributed.includes(round.id)
-          ? existingPool.roundsContributed
-          : [...existingPool.roundsContributed, round.id],
-      },
-    });
+    if (milkLot) {
+      const existingPool = milkLot.butterPool || {
+        batchId: getButterBatchCode(milkLot.lotCode),
+        sourceCreamBatchId: getCreamBatchCode(milkLot.lotCode),
+        milkLotId: milkLot.id,
+        totalButterProduced: 0,
+        usedInGhee: 0,
+        usedInBlending: 0,
+        packedAsPubb: 0,
+        availableBalance: 0,
+        roundsContributed: [],
+      };
+      updateMilkLot(milkLot.id, {
+        butterPool: {
+          ...existingPool,
+          batchId: existingPool.batchId || getButterBatchCode(milkLot.lotCode),
+          sourceCreamBatchId: existingPool.sourceCreamBatchId || getCreamBatchCode(milkLot.lotCode),
+          totalButterProduced: Math.max(0, existingPool.totalButterProduced + outputDelta),
+          availableBalance: Math.max(0, existingPool.availableBalance + outputDelta),
+          roundsContributed: existingPool.roundsContributed.includes(round.id)
+            ? existingPool.roundsContributed
+            : [...existingPool.roundsContributed, round.id],
+        },
+      });
+    }
     showToast('success', `Output recorded: ${outputForm.butterOutput} kg butter, ${outputForm.buttermilkOutput} kg buttermilk`);
     setShowOutputModal(false);
     setOutputForm({ butterOutput: 0, buttermilkOutput: 0 });
@@ -828,7 +854,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                           }`}>
                             {round.creamSource === 'internal' ? 'Internal' : 'External'}
                           </span>
-                          <div className="mt-1 text-[10px] text-slate-500">{round.milkLotCode || round.milkLotId}</div>
+                          <div className="mt-1 text-[10px] text-slate-500">{round.creamSource === 'external' ? `Standalone cream lot ${round.sourceBatchCode || round.creamLotId || 'missing'}` : round.milkLotCode || round.milkLotId}</div>
                           <div className="mt-1 text-[10px] text-slate-500">{round.sourceBatchCode || round.creamLotId || 'Source lot not recorded'}</div>
                           {(round.blendingInternalButterQuantity || round.blendingExternalButterQuantity) && <div className="mt-1 text-[10px] text-purple-700">Blend butter: {[round.blendingInternalButterQuantity ? `${round.blendingInternalButterQuantity.toFixed(2)} kg internal` : '', round.blendingExternalButterQuantity ? `${round.blendingExternalButterQuantity.toFixed(2)} kg external` : ''].filter(Boolean).join(' + ')}</div>}
                         </td>
@@ -905,7 +931,13 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
               value={newRound.roundDate}
               onChange={(e) => {
                 const roundDate = e.target.value;
-                const existingRounds = butterRounds.filter(r => getRoundDate(r) === roundDate);
+                const existingRounds = butterRounds.filter(r =>
+                  getRoundDate(r) === roundDate && (
+                    newRound.creamSource === 'internal'
+                      ? r.creamSource !== 'external' && r.milkLotId === newRound.milkLotId
+                      : r.creamSource === 'external' && r.creamLotId === newRound.creamLotId
+                  ),
+                );
                 const nextRoundNumber = existingRounds.reduce((max, round) => Math.max(max, round.roundNumber), 0) + 1;
                 setNewRound({ ...newRound, roundDate, roundNumber: nextRoundNumber });
               }}
@@ -921,22 +953,28 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Source milk lot</label>
-            <select
-              value={newRound.milkLotId}
-              onChange={(e) => setNewRound({ ...newRound, milkLotId: e.target.value, creamLotId: newRound.creamSource === 'internal' ? e.target.value : newRound.creamLotId })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
-            >
-              <option value="">Select milk lot</option>
-              {milkLots.map(lot => (
-                <option key={lot.id} value={lot.id}>
-                  {lot.lotCode}{lot.productionClosed ? ' · milk processing closed' : ''}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-slate-500">Closing milk processing does not close downstream cream-to-butter production.</p>
-          </div>
+          {newRound.creamSource === 'internal' ? (
+            <div>
+              <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Source milk lot</label>
+              <select
+                value={newRound.milkLotId}
+                onChange={(e) => setNewRound({ ...newRound, milkLotId: e.target.value, creamLotId: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+              >
+                <option value="">Select milk lot</option>
+                {milkLots.map(lot => (
+                  <option key={lot.id} value={lot.id}>
+                    {lot.lotCode}{lot.productionClosed ? ' · milk processing closed' : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">Closing milk processing does not close downstream cream-to-butter production.</p>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900">
+              Standalone purchased-cream batch. No milk lot will be assigned; butter traceability will use the cream lot number.
+            </div>
+          )}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Source</label>
             <div className="mt-1 flex gap-2">
@@ -949,7 +987,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                 Internal (from C/S)
               </button>
               <button
-                onClick={() => setNewRound({ ...newRound, creamSource: 'external', creamLotId: '' })}
+                onClick={() => setNewRound({ ...newRound, creamSource: 'external', milkLotId: '', creamLotId: '' })}
                 className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium ${
                   newRound.creamSource === 'external' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-700'
                 }`}

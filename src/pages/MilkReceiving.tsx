@@ -9,6 +9,7 @@ import { getProductionPackingEntries } from '../lib/finishedStock';
 import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { exportMilkReceivingWorkbook } from '../lib/operationalExports';
 import { getMilkLotVesselBalances, getMilkSaleSourceAvailability, getMilkSaleVesselSource } from '../lib/milkVesselAllocation';
+import { createExternalCreamLotCode } from '../lib/creamLotCode';
 
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
@@ -391,10 +392,17 @@ export default function MilkReceiving() {
       showToast('error', 'Enter quantity, received from, temperature, and pH');
       return;
     }
-    const today = new Date().toISOString();
+    const receivedAtDate = new Date();
+    const today = receivedAtDate.toISOString();
+    const dateReceived = `${receivedAtDate.getFullYear()}-${String(receivedAtDate.getMonth() + 1).padStart(2, '0')}-${String(receivedAtDate.getDate()).padStart(2, '0')}`;
+    const existingCreamLotCodes = [
+      ...creamLots.map(cream => cream.lotCode),
+      ...milkLots.flatMap(lot => (lot.creamLots || []).map(cream => cream.lotCode)),
+    ];
+    const lotCode = createExternalCreamLotCode(creamReceipt.receivedFrom, dateReceived, existingCreamLotCodes);
     addCreamLot({
-      lotCode: `CREAM-${today.slice(0, 10).replace(/-/g, '')}-${Date.now().toString().slice(-4)}`,
-      dateReceived: today.slice(0, 10),
+      lotCode,
+      dateReceived,
       receivedAt: today,
       quantity: creamReceipt.quantity,
       supplier: creamReceipt.receivedFrom.trim(),
@@ -406,7 +414,7 @@ export default function MilkReceiving() {
       consumed: 0,
       remaining: creamReceipt.quantity,
     });
-    showToast('success', `Received ${creamReceipt.quantity.toLocaleString()} kg cream`);
+    showToast('success', `Received ${creamReceipt.quantity.toLocaleString()} kg cream · lot ${lotCode}`);
     setShowReceiveCreamModal(false);
     setCreamReceipt({ quantity: 0, receivedFrom: '', receivingTemp: 0, receivingPh: 0, storageLocation: 'container', remarks: '' });
   };
