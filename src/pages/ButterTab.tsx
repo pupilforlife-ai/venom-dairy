@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getCreamBatchCode, getDateBatchCode, ProductionRound } from '../data/mockData';
 import { parseAdditiveQuantity } from '../lib/additiveQuantity';
+import { normalizeExternalCreamBalance } from '../lib/externalCreamBalance';
 
 type ButterStatus = 
   | 'scheduled'
@@ -141,7 +142,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
   const externalCreamLots = [
     ...creamLots,
     ...milkLots.flatMap(lot => lot.creamLots || []),
-  ];
+  ].map(creamLot => normalizeExternalCreamBalance(creamLot, productionRounds));
 
   // Butter is reconciled at pool level. The cream → butter table remains the
   // audit trail for individual churning rounds, but blending and packing only
