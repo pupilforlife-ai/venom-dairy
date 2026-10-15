@@ -1206,15 +1206,32 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
           
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Cream Container Weights / Input Total (kg)</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={newRound.inputQuantity}
-              onChange={(e) => setNewRound({ ...newRound, inputQuantity: e.target.value })}
-              placeholder="e.g. 12+13"
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-            />
-            <p className="mt-1 text-xs text-slate-500">Enter one weight or add container weights with +.</p>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={newRound.inputQuantity}
+                onChange={(e) => setNewRound({ ...newRound, inputQuantity: e.target.value })}
+                placeholder="e.g. 12+13"
+                className="min-w-0 flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                aria-label="Cream container weights in kilograms; use plus between containers"
+              />
+              <button
+                type="button"
+                aria-label="Add another container weight"
+                title="Add another container weight"
+                onClick={() => setNewRound(current => ({
+                  ...current,
+                  inputQuantity: current.inputQuantity.trim()
+                    ? current.inputQuantity.trimEnd().endsWith('+')
+                      ? current.inputQuantity.trimEnd()
+                      : `${current.inputQuantity.trimEnd()}+`
+                    : current.inputQuantity,
+                }))}
+                className="min-w-12 rounded-lg border border-emerald-300 bg-emerald-50 px-4 text-xl font-bold text-emerald-800 active:bg-emerald-100"
+              >+</button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">Enter one weight, or enter a weight and tap + to add the next container.</p>
             {newRound.inputQuantity.trim() && <p className={`mt-1 text-sm font-semibold ${inputCreamQuantity === null ? 'text-red-600' : 'text-emerald-700'}`}>{inputCreamQuantity === null ? 'Use numbers separated by +, e.g. 12+13' : `Total input: ${inputCreamQuantity.toFixed(2)} kg`}</p>}
             {inputCreamQuantity !== null && (() => {
               const recordedBalance = newRound.creamSource === 'external'
