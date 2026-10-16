@@ -3,12 +3,12 @@ import { Plus, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation } from '../data/mockData';
+import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, milkStorageVessels } from '../data/mockData';
 import { getPaneerPackWeight, normalizeFinishedGoodsSku, paneerSkuByCode } from '../data/skuConfig';
 import { getProductionPackingEntries } from '../lib/finishedStock';
 import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { exportMilkReceivingWorkbook } from '../lib/operationalExports';
-import { getMilkLotVesselBalances, getMilkSaleSourceAvailability, getMilkSaleVesselSource } from '../lib/milkVesselAllocation';
+import { getMilkLotVesselBalances, getMilkSaleSourceAvailability, getMilkSaleVesselSource, planMilkSaleAllocations } from '../lib/milkVesselAllocation';
 import { createExternalCreamLotCode } from '../lib/creamLotCode';
 import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 
@@ -76,6 +76,7 @@ export default function MilkReceiving() {
     quantity: 0,
     customer: '',
     saleDate: new Date().toISOString().split('T')[0],
+    sourceVessel: 'auto',
   });
   const [creamReceipt, setCreamReceipt] = useState({
     quantity: '',
@@ -191,7 +192,20 @@ export default function MilkReceiving() {
   const displayedSaleSource = getMilkSaleVesselSource(milkSale.quantity);
   const displayedSaleAvailability = displayedLot
     ? getMilkSaleSourceAvailability(displayedLot, productionRounds)
-    : { ibc: 0, auxiliary: 0 };
+    : { ibc: 0, auxiliary: 0, vessels: [] };
+  const displayedSalePlan = planMilkSaleAllocations(
+    milkSale.quantity,
+    displayedSaleAvailability.vessels,
+    displayedSaleSource,
+    milkSale.sourceVessel,
+  );
+
+  const milkVesselLabel = (vesselId: string) => {
+    if (vesselId === 'ibc') return 'IBC stock';
+    if (vesselId === 'multiple') return 'Multiple vessels';
+    if (vesselId === 'auxiliary') return 'Auxiliary storage';
+    return milkStorageVessels.find(vessel => vessel.id === vesselId)?.label || 'Legacy / unassigned';
+  };
 
   const handleExport = async () => {
     if (!isExportOwner) {
@@ -284,7 +298,7 @@ export default function MilkReceiving() {
 
   const openMilkSale = (lot: typeof milkLots[number]) => {
     setSelectedLot(lot.id);
-    setMilkSale({ quantity: 0, customer: '', saleDate: new Date().toISOString().split('T')[0] });
+    setMilkSale({ quantity: 0, customer: '', saleDate: new Date().toISOString().split('T')[0], sourceVessel: 'auto' });
     setShowMilkSaleModal(true);
   };
 
@@ -299,17 +313,21 @@ export default function MilkReceiving() {
       showToast('error', `Only ${available.toLocaleString()} L is available in this lot`);
       return;
     }
-    const sourceVessel = getMilkSaleVesselSource(milkSale.quantity);
-    if (!sourceVessel) {
-      showToast('error', 'Milk sales must be an exact multiple of 1,000 L (IBC) or less than 400 L (auxiliary)');
-      return;
-    }
     const sourceAvailability = getMilkSaleSourceAvailability(lot, productionRounds);
-    if (milkSale.quantity > sourceAvailability[sourceVessel]) {
-      const sourceLabel = sourceVessel === 'ibc' ? 'IBCs' : 'auxiliary storage';
-      showToast('error', `Only ${sourceAvailability[sourceVessel].toLocaleString()} L is available in ${sourceLabel}`);
+    const sourcePlan = planMilkSaleAllocations(
+      milkSale.quantity,
+      sourceAvailability.vessels,
+      getMilkSaleVesselSource(milkSale.quantity),
+      milkSale.sourceVessel,
+    );
+    if (sourcePlan.shortfall > 0.01) {
+      const sourceAvailable = sourceAvailability.vessels.find(vessel => vessel.id === milkSale.sourceVessel)?.litres || 0;
+      const requestedSource = milkSale.sourceVessel === 'auto' ? 'all available vessels' : milkVesselLabel(milkSale.sourceVessel);
+      showToast('error', `Only ${sourceAvailable.toLocaleString()} L is available in ${requestedSource}; ${sourcePlan.shortfall.toLocaleString()} L is still needed`);
       return;
     }
+    const firstSource = sourcePlan.allocations[0]?.vesselId;
+    const sourceVessel = sourcePlan.allocations.length > 1 ? 'multiple' : firstSource || 'unassigned';
     updateMilkLot(lot.id, {
       litresConsumed: getMilkLotAccounting(lot, productionRounds).consumed,
       litresSold: (lot.litresSold || 0) + milkSale.quantity,
@@ -321,9 +339,11 @@ export default function MilkReceiving() {
         customer: milkSale.customer.trim(),
         quantity: milkSale.quantity,
         sourceVessel,
+        sourceAllocations: sourcePlan.allocations,
       }],
     });
-    showToast('success', `${milkSale.quantity.toLocaleString()} L sold from ${sourceVessel === 'ibc' ? 'IBC stock' : 'auxiliary storage'}`);
+    const sourceSummary = sourcePlan.allocations.map(allocation => `${allocation.quantity.toLocaleString()} L ${milkVesselLabel(allocation.vesselId)}`).join(' + ');
+    showToast('success', `${milkSale.quantity.toLocaleString()} L sale recorded from ${sourceSummary}`);
     setShowMilkSaleModal(false);
   };
 
@@ -826,11 +846,9 @@ export default function MilkReceiving() {
                                         <td className="px-4 py-3 text-slate-700">{formatDate(sale.saleDate)}</td>
                                         <td className="px-4 py-3 text-slate-900 font-medium">{sale.customer}</td>
                                         <td className="px-4 py-3 text-slate-700">
-                                          {(sale.sourceVessel || getMilkSaleVesselSource(sale.quantity)) === 'ibc'
-                                            ? 'IBC stock'
-                                            : (sale.sourceVessel || getMilkSaleVesselSource(sale.quantity)) === 'auxiliary'
-                                              ? 'Auxiliary storage'
-                                              : 'Legacy / unassigned'}
+                                          {sale.sourceAllocations?.length
+                                            ? sale.sourceAllocations.map(allocation => `${allocation.quantity.toLocaleString()} L ${milkVesselLabel(allocation.vesselId)}`).join(' + ')
+                                            : milkVesselLabel(sale.sourceVessel || getMilkSaleVesselSource(sale.quantity) || 'unassigned')}
                                         </td>
                                         <td className="px-4 py-3 text-right text-slate-700 font-semibold">{sale.quantity.toLocaleString()} L</td>
                                       </tr>
@@ -1014,17 +1032,16 @@ export default function MilkReceiving() {
         <div className="space-y-4">
           <p className="text-xs text-slate-500">Only the selected lot’s remaining milk can be sold. Total available: <strong>{totals.remaining.toLocaleString()} L</strong>.</p>
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
-            <p><strong>Automatic sale source:</strong> exact multiples of 1,000 L are deducted from IBC stock; quantities below 400 L are deducted from auxiliary storage.</p>
-            <p className="mt-1">Available now: {displayedSaleAvailability.ibc.toLocaleString()} L in IBCs · {displayedSaleAvailability.auxiliary.toLocaleString()} L in auxiliary storage.</p>
+            <p><strong>Preferred source is guidance:</strong> 1,000 L multiples prefer IBCs, and sales below 400 L prefer auxiliary storage. If that stock is unavailable, the sale can use another vessel or split across vessels.</p>
+            <p className="mt-1">Available by vessel: {displayedSaleAvailability.vessels.length ? displayedSaleAvailability.vessels.map(vessel => `${vessel.label} ${vessel.litres.toLocaleString()} L`).join(' · ') : 'No vessel stock currently available'}.</p>
           </div>
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Quantity of milk (L)</label><input type="number" min="1" value={milkSale.quantity || ''} onChange={(e) => setMilkSale({ ...milkSale, quantity: Number(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
+          <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Sale source</label><select value={milkSale.sourceVessel} onChange={e => setMilkSale({ ...milkSale, sourceVessel: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="auto">Auto: preferred vessel, then any available stock</option>{displayedSaleAvailability.vessels.map(vessel => <option key={vessel.id} value={vessel.id}>{vessel.label} · {vessel.litres.toLocaleString()} L available</option>)}</select><p className="mt-1 text-[11px] text-slate-500">Choose a specific vessel or let the app use and record the available vessel(s).</p></div>
           {milkSale.quantity > 0 && (
-            <p className={`text-xs font-medium ${displayedSaleSource ? 'text-emerald-700' : 'text-red-700'}`}>
-              {displayedSaleSource === 'ibc'
-                ? 'This sale will be deducted from IBC stock.'
-                : displayedSaleSource === 'auxiliary'
-                  ? 'This sale will be deducted from auxiliary storage.'
-                  : 'Invalid quantity: enter an exact 1,000 L multiple or a quantity below 400 L.'}
+            <p className={`text-xs font-medium ${displayedSalePlan.shortfall <= 0.01 ? 'text-emerald-700' : 'text-red-700'}`}>
+              {displayedSalePlan.shortfall <= 0.01
+                ? `This sale will be deducted from ${displayedSalePlan.allocations.map(allocation => `${allocation.quantity.toLocaleString()} L ${milkVesselLabel(allocation.vesselId)}`).join(' + ')}.`
+                : `Not enough milk in the selected source(s): ${displayedSalePlan.shortfall.toLocaleString()} L still needed.`}
             </p>
           )}
           <div><label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Sold to customer</label><input value={milkSale.customer} onChange={(e) => setMilkSale({ ...milkSale, customer: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Customer name" /></div>

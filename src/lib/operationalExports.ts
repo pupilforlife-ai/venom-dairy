@@ -7,6 +7,7 @@ import {
   FinishedStockLot,
   isMilkProductionRound,
   MilkLot,
+  milkStorageVessels,
   ProductionRound,
   ProductionShift,
   WasteEvent,
@@ -1676,10 +1677,16 @@ export function buildMilkReceivingWorkbook(lot: MilkLot, rounds: ProductionRound
     ],
     rows: (lot.milkSales || []).map(sale => {
       const source = sale.sourceVessel || getMilkSaleVesselSource(sale.quantity);
+      const sourceLabel = sale.sourceAllocations?.length
+        ? sale.sourceAllocations.map(allocation => {
+          const vesselLabel = milkStorageVessels.find(vessel => vessel.id === allocation.vesselId)?.label || allocation.vesselId;
+          return `${allocation.quantity} L ${vesselLabel}`;
+        }).join(' + ')
+        : source === 'ibc' ? 'IBC stock' : source === 'auxiliary' ? 'Auxiliary storage' : 'Legacy / unassigned';
       return {
         date: excelDate(sale.saleDate),
         customer: sale.customer,
-        source: source === 'ibc' ? 'IBC stock' : source === 'auxiliary' ? 'Auxiliary storage' : 'Legacy / unassigned',
+        source: sourceLabel,
         quantityL: sale.quantity,
       };
     }),

@@ -12,7 +12,10 @@ export interface MilkSale {
   saleDate: string;
   customer: string;
   quantity: number;
-  sourceVessel?: 'ibc' | 'auxiliary';
+  // Old records use the aliases `ibc` / `auxiliary`; new sales may identify a
+  // specific vessel or store a precise multi-vessel allocation.
+  sourceVessel?: string;
+  sourceAllocations?: { vesselId: string; quantity: number }[];
 }
 
 export interface MilkBalanceSnapshot {

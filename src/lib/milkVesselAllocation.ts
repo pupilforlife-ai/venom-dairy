@@ -13,6 +13,11 @@ export interface MilkVesselBalance {
   litres: number;
 }
 
+export interface MilkSaleAllocation {
+  vesselId: string;
+  quantity: number;
+}
+
 const fixedOpeningOrder = ['direct-production', 'bmc-2', 'silo', 'bmc-1', 'bmc-3'];
 const ibcIds = milkStorageVessels.filter(vessel => vessel.id.startsWith('ibc-')).map(vessel => vessel.id);
 export const productionVesselDeductionOrder = [...fixedOpeningOrder, 'auxiliary', ...ibcIds];
@@ -82,15 +87,27 @@ export function getMilkLotVesselBalances(lot: MilkLot, rounds: ProductionRound[]
   (lot.milkSales || []).forEach(sale => {
     if (saleLitresToAllocate <= 0) return;
     const saleQuantity = Math.min(Math.max(0, sale.quantity), saleLitresToAllocate);
-    const source = sale.sourceVessel || getMilkSaleVesselSource(sale.quantity);
-    if (source === 'ibc') {
-      ruleShortfallLitres += deduct(balances, ibcIds, saleQuantity, 'salesDrawLitres');
-    } else if (source === 'auxiliary') {
-      ruleShortfallLitres += deduct(balances, ['auxiliary'], saleQuantity, 'salesDrawLitres');
+    if (sale.sourceAllocations?.length) {
+      let allocatedSale = 0;
+      sale.sourceAllocations.forEach(allocation => {
+        const requested = Math.min(Math.max(0, allocation.quantity), saleQuantity - allocatedSale);
+        if (requested <= 0) return;
+        const shortfall = deduct(balances, [allocation.vesselId], requested, 'salesDrawLitres');
+        allocatedSale += requested - shortfall;
+      });
+      ruleShortfallLitres += Math.max(0, saleQuantity - allocatedSale);
     } else {
-      // Preserve historical sales created before the source rule existed,
-      // without treating the fallback as a valid rule for new entries.
-      ruleShortfallLitres += deduct(balances, productionVesselDeductionOrder, saleQuantity, 'salesDrawLitres');
+      const source = sale.sourceVessel || getMilkSaleVesselSource(sale.quantity);
+      if (source === 'ibc') {
+        ruleShortfallLitres += deduct(balances, ibcIds, saleQuantity, 'salesDrawLitres');
+      } else if (source === 'auxiliary') {
+        ruleShortfallLitres += deduct(balances, ['auxiliary'], saleQuantity, 'salesDrawLitres');
+      } else if (source && balances.has(source)) {
+        ruleShortfallLitres += deduct(balances, [source], saleQuantity, 'salesDrawLitres');
+      } else {
+        // Preserve historical sales created before source recording existed.
+        ruleShortfallLitres += deduct(balances, productionVesselDeductionOrder, saleQuantity, 'salesDrawLitres');
+      }
     }
     saleLitresToAllocate -= saleQuantity;
   });
@@ -129,5 +146,40 @@ export function getMilkSaleSourceAvailability(lot: MilkLot, rounds: ProductionRo
   return {
     ibc: vessels.filter(vessel => vessel.id.startsWith('ibc-')).reduce((sum, vessel) => sum + vessel.litres, 0),
     auxiliary: vessels.find(vessel => vessel.id === 'auxiliary')?.litres || 0,
+    vessels: vessels.filter(vessel => vessel.litres > 0.01),
   };
+}
+
+/**
+ * Preferred sources are operational guidance only. Automatic allocation tries
+ * the preferred source first, then uses any remaining vessel stock so a sale
+ * is not blocked just because the preferred vessel is empty.
+ */
+export function planMilkSaleAllocations(
+  quantity: number,
+  availability: MilkVesselBalance[],
+  preferredSource: MilkSaleVesselSource | null,
+  selectedSource = 'auto',
+): { allocations: MilkSaleAllocation[]; shortfall: number } {
+  let remaining = Math.max(0, quantity);
+  const availableById = new Map(availability.map(vessel => [vessel.id, Math.max(0, vessel.litres)]));
+  const ids = selectedSource === 'auto'
+    ? [
+      ...(preferredSource === 'ibc' ? ibcIds : preferredSource === 'auxiliary' ? ['auxiliary'] : []),
+      ...productionVesselDeductionOrder,
+    ]
+    : [selectedSource];
+  const uniqueIds = [...new Set(ids)];
+  const allocations: MilkSaleAllocation[] = [];
+
+  uniqueIds.forEach(vesselId => {
+    if (remaining <= 0) return;
+    const available = availableById.get(vesselId) || 0;
+    if (available <= 0) return;
+    const allocated = Math.min(available, remaining);
+    allocations.push({ vesselId, quantity: allocated });
+    remaining -= allocated;
+  });
+
+  return { allocations, shortfall: remaining };
 }
