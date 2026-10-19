@@ -615,6 +615,7 @@ export interface ProductionRound {
   
   // Ghee-specific fields
   butterInput?: number; // kg
+  butterOverdrawKg?: number; // kg physically used above the recorded source butter balance; retained for reconciliation
   afOilInput?: number; // kg
   expectedYield?: number; // kg
   sourceCreamLotId?: string; // standalone purchased-cream genealogy for external ghee

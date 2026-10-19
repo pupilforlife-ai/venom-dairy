@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getDateBatchCode, getGheeBatchCode } from '../data/mockData';
 import { getGheePackWeight, gheeSkuByCode, gheeSkuDefinitions } from '../data/skuConfig';
+import { allocateGheeButter } from '../lib/gheeButterAllocation';
 
 type GheeStatus = 
   | 'scheduled'
@@ -112,8 +113,8 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
 
   const getAvailableButter = (butterSource: string) => {
     const [sourceType, sourceId] = butterSource.split(':', 2);
-    const butterRounds = productionRounds.filter(r => 
-      r.type === 'Butter' && 
+    const butterRounds = productionRounds.filter(r =>
+      r.type === 'Butter' &&
       (sourceType === 'cream'
         ? r.creamSource === 'external' && r.creamLotId === sourceId
         : r.creamSource !== 'external' && r.milkLotId === sourceId) &&
@@ -162,12 +163,6 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       return;
     }
 
-    const availableButter = getAvailableButter(newRound.butterSource);
-    if (newRound.butterInput > availableButter) {
-      showToast('error', `Not enough butter available. Available: ${availableButter.toFixed(2)} kg`);
-      return;
-    }
-
     const afOilInput = calculateAFOil(newRound.butterInput);
     const totalInput = newRound.butterInput + afOilInput;
     const expectedYield = calculateExpectedYield(totalInput);
@@ -181,6 +176,15 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
     const sourceButterBatch = milkLot
       ? getButterBatchCode(milkLot.lotCode)
       : `BUT-${externalCreamLot!.lotCode}`;
+
+    const butterRounds = productionRounds.filter(r =>
+      r.type === 'Butter' &&
+      (isExternalSource
+        ? r.creamSource === 'external' && r.creamLotId === externalCreamLot?.id
+        : r.creamSource !== 'external' && r.milkLotId === milkLot?.id) &&
+      (r.remainingBalance || 0) > 0
+    );
+    const butterAllocation = allocateGheeButter(newRound.butterInput, butterRounds);
 
     const newRoundData = {
       // External-cream Ghee has no milk lot by design; its genealogy is kept
@@ -201,6 +205,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       startTime: new Date().toISOString(),
       locked: false,
       butterInput: newRound.butterInput,
+      butterOverdrawKg: butterAllocation.overdrawKg,
       afOilInput: afOilInput,
       expectedYield: expectedYield,
       remainingBalance: 0,
@@ -210,31 +215,18 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
 
     addProductionRound(newRoundData);
 
-    // Update butter rounds to mark as used in ghee
-    const butterRounds = productionRounds.filter(r => 
-      r.type === 'Butter' && 
-      (isExternalSource
-        ? r.creamSource === 'external' && r.creamLotId === externalCreamLot?.id
-        : r.creamSource !== 'external' && r.milkLotId === milkLot?.id) &&
-      (r.remainingBalance || 0) > 0
-    );
-
-    let remainingButterNeeded = newRound.butterInput;
-    let butterUsed = 0;
-    butterRounds.forEach(round => {
-      if (remainingButterNeeded <= 0) return;
-      
+    // Deduct only the source butter actually represented in app stock. Any
+    // shortfall is preserved on the Ghee round as butterOverdrawKg for review.
+    const butterUsed = butterAllocation.recordedFromSourceKg;
+    butterAllocation.allocations.forEach(allocation => {
+      const round = butterRounds.find(item => item.id === allocation.id);
+      if (!round) return;
       const available = round.remainingBalance || 0;
-      const toUse = Math.min(available, remainingButterNeeded);
-      
       updateProductionRound(round.id, {
-        usedInGhee: (round.usedInGhee || 0) + toUse,
-        remainingBalance: available - toUse,
+        usedInGhee: (round.usedInGhee || 0) + allocation.quantityKg,
+        remainingBalance: Math.max(0, available - allocation.quantityKg),
         destination: 'ghee',
       });
-      
-      butterUsed += toUse;
-      remainingButterNeeded -= toUse;
     });
 
     if (milkLot) {
@@ -603,7 +595,14 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
                             {gheeStatusLabels[round.status as GheeStatus]}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-600 text-xs">{round.butterInput || '—'} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">
+                          <div>{round.butterInput || '—'} kg</div>
+                          {(round.butterOverdrawKg || 0) > 0 && (
+                            <div className="mt-1 inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] font-medium text-amber-800" title="Physical butter input exceeded the app's recorded source balance">
+                              <AlertTriangle size={12} /> {round.butterOverdrawKg!.toFixed(2)} kg over recorded balance · review
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{round.afOilInput?.toFixed(2) || '—'} kg</td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{round.expectedYield?.toFixed(2) || '—'} kg</td>
                         <td className="px-4 py-3 text-slate-600 text-xs">
@@ -684,7 +683,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
                 const source = `milk:${lot.id}`;
                 const availableButter = getAvailableButter(source);
                 return (
-                  <option key={source} value={source} disabled={availableButter === 0}>
+                  <option key={source} value={source}>
                     {lot.lotCode} - {availableButter.toFixed(2)} kg butter available
                   </option>
                 );
@@ -695,7 +694,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
                 const source = `cream:${cream.id}`;
                 const availableButter = getAvailableButter(source);
                 return (
-                  <option key={source} value={source} disabled={availableButter === 0}>
+                  <option key={source} value={source}>
                     {cream.lotCode} · {cream.supplier} - {availableButter.toFixed(2)} kg butter available
                   </option>
                 );
@@ -713,11 +712,15 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
                 step="0.1"
                 min="0"
-                max={getAvailableButter(newRound.butterSource)}
               />
               <p className="text-xs text-slate-500 mt-1">
-                Available: {getAvailableButter(newRound.butterSource).toFixed(2)} kg
+                App-recorded balance: {getAvailableButter(newRound.butterSource).toFixed(2)} kg. Enter the physical amount used; any excess is saved and flagged for reconciliation.
               </p>
+              {newRound.butterInput > getAvailableButter(newRound.butterSource) && (
+                <p className="mt-2 flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs font-medium text-amber-900">
+                  <AlertTriangle size={14} /> This will record {newRound.butterInput.toFixed(2)} kg production and flag {(newRound.butterInput - getAvailableButter(newRound.butterSource)).toFixed(2)} kg above the app balance for review.
+                </p>
+              )}
             </div>
           )}
           {newRound.butterInput > 0 && (
