@@ -185,6 +185,10 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       (r.remainingBalance || 0) > 0
     );
     const butterAllocation = allocateGheeButter(newRound.butterInput, butterRounds);
+    const createdAt = new Date().toISOString();
+    const recordedBy = typeof window === 'undefined'
+      ? undefined
+      : window.localStorage.getItem('vejoy_user_username') || window.localStorage.getItem('vejoy_user_role') || 'User';
 
     const newRoundData = {
       // External-cream Ghee has no milk lot by design; its genealogy is kept
@@ -202,7 +206,16 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       plannedInput: newRound.butterInput,
       actualInput: newRound.butterInput,
       outputWeight: 0,
-      startTime: new Date().toISOString(),
+      startTime: createdAt,
+      historyEvents: butterAllocation.overdrawKg > 0 ? [{
+        id: `ghee-overdraw-${Date.now()}`,
+        type: 'butter_balance_overdraw',
+        stage: 'Butter balance review',
+        occurredAt: createdAt,
+        details: `Recorded ${newRound.butterInput.toFixed(2)} kg physical butter input; app source balances covered ${butterAllocation.recordedFromSourceKg.toFixed(2)} kg, leaving ${butterAllocation.overdrawKg.toFixed(2)} kg for reconciliation.`,
+        recordedBy,
+        source: 'override' as const,
+      }] : undefined,
       locked: false,
       butterInput: newRound.butterInput,
       butterOverdrawKg: butterAllocation.overdrawKg,
