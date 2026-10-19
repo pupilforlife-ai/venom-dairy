@@ -1765,11 +1765,14 @@ export default function ProductionBoard() {
       </div>
 
       {/* Master Product Tabs */}
-      <div className="bg-white rounded-xl border border-slate-200 p-2">
-        <div className="flex gap-1">
+      <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-2">
+        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain" role="region" aria-label="Production product tabs" tabIndex={0}>
+        <div className="flex min-w-[720px] gap-1">
           <button
             onClick={() => setActiveTab('paneer')}
-            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            role="tab"
+            aria-selected={activeTab === 'paneer'}
+            className={`min-w-0 flex-1 whitespace-nowrap px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               activeTab === 'paneer'
                 ? 'bg-emerald-600 text-white shadow-sm'
                 : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -1779,7 +1782,9 @@ export default function ProductionBoard() {
           </button>
           <button
             onClick={() => setActiveTab('halloumi')}
-            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            role="tab"
+            aria-selected={activeTab === 'halloumi'}
+            className={`min-w-0 flex-1 whitespace-nowrap px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               activeTab === 'halloumi'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -1789,7 +1794,9 @@ export default function ProductionBoard() {
           </button>
           <button
             onClick={() => setActiveTab('amassi')}
-            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            role="tab"
+            aria-selected={activeTab === 'amassi'}
+            className={`min-w-0 flex-1 whitespace-nowrap px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               activeTab === 'amassi'
                 ? 'bg-cyan-600 text-white shadow-sm'
                 : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -1799,7 +1806,9 @@ export default function ProductionBoard() {
           </button>
           <button
             onClick={() => setActiveTab('butter')}
-            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            role="tab"
+            aria-selected={activeTab === 'butter'}
+            className={`min-w-0 flex-1 whitespace-nowrap px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               activeTab === 'butter'
                 ? 'bg-amber-600 text-white shadow-sm'
                 : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -1809,7 +1818,9 @@ export default function ProductionBoard() {
           </button>
           <button
             onClick={() => setActiveTab('ghee')}
-            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            role="tab"
+            aria-selected={activeTab === 'ghee'}
+            className={`min-w-0 flex-1 whitespace-nowrap px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               activeTab === 'ghee'
                 ? 'bg-orange-600 text-white shadow-sm'
                 : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -1819,7 +1830,9 @@ export default function ProductionBoard() {
           </button>
           <button
             onClick={() => setActiveTab('crumbing')}
-            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            role="tab"
+            aria-selected={activeTab === 'crumbing'}
+            className={`min-w-0 flex-1 whitespace-nowrap px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               activeTab === 'crumbing'
                 ? 'bg-pink-600 text-white shadow-sm'
                 : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -1827,6 +1840,7 @@ export default function ProductionBoard() {
           >
             🍗 Crumbing
           </button>
+        </div>
         </div>
       </div>
 
