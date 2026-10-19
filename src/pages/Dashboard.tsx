@@ -27,6 +27,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { getMilkLotAccounting, getRoundMilkInput, statusLabels } from '../data/mockData';
 import { reconcileFinishedStock } from '../lib/finishedStock';
+import { getPaneerRoundRemainingBalance } from '../lib/paneerBalance';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { Modal } from '../components/Modal';
 
@@ -149,7 +150,7 @@ export default function Dashboard() {
   const legacyFrozenRounds = activeLotRounds
     .filter((round) => round.status === 'frozen' && !intermediateSourceRoundIds.has(round.id));
   const legacyFrozenRoundStock = legacyFrozenRounds
-    .reduce((s, round) => s + Math.max(0, round.remainingBalance ?? 0), 0);
+    .reduce((s, round) => s + Math.max(0, getPaneerRoundRemainingBalance(round) ?? 0), 0);
   const frozenStock = recordedFrozenStock + legacyFrozenRoundStock;
   const unexplainedMilk = activeMilkLot
     ? activeMilkLot.litresReceived - milkAccounting.consumed - milkAccounting.remaining
@@ -407,7 +408,7 @@ export default function Dashboard() {
                 <tbody className="divide-y divide-slate-100">{legacyFrozenRounds.map(round => <tr key={round.id}>
                   <td className="px-3 py-2 font-mono text-slate-700">{round.milkLotCode} · S{round.shiftNumber}/R{round.roundNumber}</td>
                   <td className="px-3 py-2 text-slate-600">{round.type}</td>
-                  <td className="px-3 py-2 font-semibold text-slate-900">{Math.max(0, round.remainingBalance ?? 0).toFixed(2)} kg</td>
+                  <td className="px-3 py-2 font-semibold text-slate-900">{Math.max(0, getPaneerRoundRemainingBalance(round) ?? 0).toFixed(2)} kg</td>
                 </tr>)}</tbody>
               </table>
             </div>
