@@ -334,6 +334,7 @@ export default function ProductionBoard() {
       if (filters.balance === 'overpacked' && !(balance !== undefined && balance < -0.01)) return false;
       if (filters.balance === 'fully_packed' && !((balance !== undefined && Math.abs(balance) <= 0.01) || (balance === undefined && round.status === 'packed'))) return false;
       if (filters.balance === 'no_balance' && !(balance === undefined && round.status !== 'packed')) return false;
+      if (filters.balance === 'no_packing_recorded' && (round.packedSkus?.length ?? 0) > 0) return false;
     }
     if (filters.workflow !== 'all') {
       const isSpp = round.cuttingType === 'SPP pieces' || round.status === 'spp_pending' || round.sppRecordedWeight !== undefined;
@@ -1930,6 +1931,7 @@ export default function ProductionBoard() {
               <option value="overpacked">Over-packed</option>
               <option value="fully_packed">Fully packed</option>
               <option value="no_balance">No balance recorded</option>
+              <option value="no_packing_recorded">No packing recorded</option>
             </select>
           </div>
           <div>
