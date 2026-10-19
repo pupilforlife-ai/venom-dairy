@@ -40,6 +40,8 @@ interface DashboardCrumbingBatch {
   packedSkus?: Array<{ sku: string; cases: number; loose: number }>;
 }
 
+type DashboardSummaryKey = 'milk' | 'output' | 'yield' | 'frozen' | 'waste' | 'cases' | 'cold-chain' | 'alerts' | 'weekly-output';
+
 type DashboardMetric = {
   label: string;
   value: number | string;
@@ -47,6 +49,7 @@ type DashboardMetric = {
   trend: 'up' | 'down' | 'stable';
   trendValue: string;
   color: string;
+  detail?: DashboardSummaryKey;
 };
 
 function MetricCard({ metric, onClick }: { metric: DashboardMetric; onClick?: () => void }) {
@@ -81,12 +84,12 @@ function MetricCard({ metric, onClick }: { metric: DashboardMetric; onClick?: ()
 
   const cardClass = `rounded-xl border p-4 text-left ${colorMap[metric.color] || 'bg-slate-50 text-slate-700 border-slate-200'}${onClick ? ' w-full cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2' : ''}`;
   return onClick
-    ? <button type="button" className={cardClass} onClick={onClick} aria-haspopup="dialog">{content}<span className="sr-only">Open freezer stock details</span></button>
+    ? <button type="button" className={cardClass} onClick={onClick} aria-haspopup="dialog" aria-label={`Open ${metric.label} details`}>{content}<span className="mt-2 block text-[10px] font-semibold uppercase tracking-wide opacity-60">View breakdown</span></button>
     : <div className={cardClass}>{content}</div>;
 }
 
 export default function Dashboard() {
-  const [showFrozenStockDetails, setShowFrozenStockDetails] = useState(false);
+  const [selectedDashboardDetail, setSelectedDashboardDetail] = useState<DashboardSummaryKey | null>(null);
   const {
     productionRounds,
     temperatureReadings,
@@ -168,13 +171,13 @@ export default function Dashboard() {
       - activeMilkLot.litresRejected - activeMilkLot.litresSpilled - milkAccounting.sold
     : 0;
   const metrics: DashboardMetric[] = [
-    { label: 'Milk Remaining', value: milkAccounting.remaining, unit: 'L', trend: 'down', trendValue: activeMilkLot ? `${Math.round((milkAccounting.consumed / activeMilkLot.litresReceived) * 100)}% consumed` : 'No active lot', color: 'blue' },
-    { label: 'Current Lot Output', value: totalOutput.toFixed(1), unit: 'kg', trend: 'up', trendValue: `${activeLotRounds.filter((r) => r.outputWeight > 0).length} completed rounds`, color: 'emerald' },
-    { label: 'Paneer Yield', value: paneerYield.toFixed(1), unit: '%', trend: 'stable', trendValue: paneerInput > 0 ? 'Calculated from rounds' : 'No paneer input recorded', color: 'teal' },
-    { label: 'Frozen Stock', value: frozenStock.toFixed(1), unit: 'kg', trend: 'up', trendValue: 'Available intermediate stock', color: 'indigo' },
-    { label: 'Recorded Waste', value: `${totalWasteKg.toFixed(1)} / ${totalWasteL.toFixed(1)}`, unit: 'kg / L', trend: 'down', trendValue: `${wasteEvents.length} recorded events`, color: 'red' },
-    { label: 'Cases Ready', value: totalCases + otherRoundCases + crumbingCases, unit: 'cases', trend: 'up', trendValue: 'Awaiting handover across all packed products', color: 'purple' },
-    { label: 'Cold Chain', value: `${latestTemperatureReadings.filter((t) => t.inRange).length}/${latestTemperatureReadings.length}`, unit: 'OK', trend: 'stable', trendValue: `${outOfRangeTemps.length} current excursion(s)`, color: 'amber' },
+    { label: 'Milk Remaining', value: milkAccounting.remaining, unit: 'L', trend: 'down', trendValue: activeMilkLot ? `${Math.round((milkAccounting.consumed / activeMilkLot.litresReceived) * 100)}% consumed` : 'No active lot', color: 'blue', detail: 'milk' },
+    { label: 'Current Lot Output', value: totalOutput.toFixed(1), unit: 'kg', trend: 'up', trendValue: `${activeLotRounds.filter((r) => r.outputWeight > 0).length} completed rounds`, color: 'emerald', detail: 'output' },
+    { label: 'Paneer Yield', value: paneerYield.toFixed(1), unit: '%', trend: 'stable', trendValue: paneerInput > 0 ? 'Calculated from rounds' : 'No paneer input recorded', color: 'teal', detail: 'yield' },
+    { label: 'Frozen Stock', value: frozenStock.toFixed(1), unit: 'kg', trend: 'up', trendValue: 'Available intermediate stock', color: 'indigo', detail: 'frozen' },
+    { label: 'Recorded Waste', value: `${totalWasteKg.toFixed(1)} / ${totalWasteL.toFixed(1)}`, unit: 'kg / L', trend: 'down', trendValue: `${wasteEvents.length} recorded events`, color: 'red', detail: 'waste' },
+    { label: 'Cases Ready', value: totalCases + otherRoundCases + crumbingCases, unit: 'cases', trend: 'up', trendValue: 'Awaiting handover across all packed products', color: 'purple', detail: 'cases' },
+    { label: 'Cold Chain', value: `${latestTemperatureReadings.filter((t) => t.inRange).length}/${latestTemperatureReadings.length}`, unit: 'OK', trend: 'stable', trendValue: `${outOfRangeTemps.length} current excursion(s)`, color: 'amber', detail: 'cold-chain' },
     { label: 'Weekly Fuel Cost', value: '—', unit: '', trend: 'stable', trendValue: 'Available after Utilities data is complete', color: 'orange' },
   ];
   const now = new Date();
@@ -206,20 +209,119 @@ export default function Dashboard() {
     weeklyProduction[day] = entry;
   });
   const weeklyProductionData = Object.values(weeklyProduction);
+  const outputByProduct = Array.from(activeLotRounds.reduce((totals, round) => {
+    const current = totals.get(round.type) || { rounds: 0, outputKg: 0 };
+    current.rounds += round.outputWeight > 0 ? 1 : 0;
+    current.outputKg += Math.max(0, round.outputWeight || 0);
+    totals.set(round.type, current);
+    return totals;
+  }, new Map<string, { rounds: number; outputKg: number }>()).entries())
+    .map(([product, totals]) => ({ product, ...totals }))
+    .filter(row => row.rounds > 0 || row.outputKg > 0);
+  const paneerYieldByType = (['D', 'C/S'] as const).map(type => {
+    const rounds = paneerRounds.filter(round => round.type === type);
+    const inputLitres = rounds.reduce((sum, round) => sum + getRoundMilkInput(round), 0);
+    const outputKg = rounds.reduce((sum, round) => sum + Math.max(0, round.outputWeight || 0), 0);
+    return { type, rounds, inputLitres, outputKg, yieldPer100L: inputLitres > 0 ? outputKg / inputLitres * 100 : 0 };
+  });
+  const casesReadyBySku = new Map<string, { cases: number; loose: number; locations: Set<string>; entries: number }>();
+  const addCasesReady = (sku: string, cases: number, loose: number, location: string) => {
+    const current = casesReadyBySku.get(sku) || { cases: 0, loose: 0, locations: new Set<string>(), entries: 0 };
+    current.cases += cases;
+    current.loose += loose;
+    current.locations.add(location || 'Location not recorded');
+    current.entries += 1;
+    casesReadyBySku.set(sku, current);
+  };
+  awaitingHandover.forEach(stock => addCasesReady(stock.sku, stock.cases || 0, stock.loosePackets || 0, stock.storageLocation));
+  productionRounds
+    .filter(round => !reconciledRoundIds.has(round.id) && !['handed_over', 'cancelled', 'spoiled'].includes(round.status))
+    .forEach(round => (round.packedSkus || []).forEach(pack => addCasesReady(pack.sku, Math.max(0, pack.cases || 0), Math.max(0, pack.loose || 0), 'Production board')));
+  crumbingBatches
+    .filter(batch => batch.status === 'packed')
+    .forEach(batch => (batch.packedSkus || []).forEach(pack => addCasesReady(pack.sku, Math.max(0, pack.cases || 0), Math.max(0, pack.loose || 0), 'Crumbing')));
+  const casesReadyRows = Array.from(casesReadyBySku.entries()).map(([sku, values]) => ({ sku, ...values }));
+  const wasteRows = [...wasteEvents].sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime());
+  const dashboardDetailTitles: Record<DashboardSummaryKey, string> = {
+    milk: `Milk balance · Lot ${activeMilkLot?.lotCode || '—'}`,
+    output: `Production output · Lot ${activeMilkLot?.lotCode || '—'}`,
+    yield: `Paneer yield · Lot ${activeMilkLot?.lotCode || '—'}`,
+    frozen: 'Freezer stock details',
+    waste: 'Recorded waste details',
+    cases: 'Cases awaiting handover',
+    'cold-chain': 'Cold-chain readings',
+    alerts: 'Dashboard alerts and work in progress',
+    'weekly-output': 'This week’s production output',
+  };
+
+  const renderDashboardDetail = (detail: Exclude<DashboardSummaryKey, 'frozen'>) => {
+    switch (detail) {
+      case 'milk':
+        return <div className="space-y-4">
+          {!activeMilkLot ? <p className="text-sm text-slate-500">No milk lot is available.</p> : <>
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+              <p className="font-semibold">{activeMilkLot.lotCode}: received − round input − rejected − spilled − sold = remaining</p>
+              <p className="mt-1 font-mono text-xs">{activeMilkLot.litresReceived.toLocaleString()} − {milkAccounting.consumed.toLocaleString()} − {activeMilkLot.litresRejected.toLocaleString()} − {activeMilkLot.litresSpilled.toLocaleString()} − {milkAccounting.sold.toLocaleString()} = {milkAccounting.remaining.toLocaleString()} L</p>
+              {milkAccounting.overdraw > 0.01 && <p className="mt-1 font-semibold text-red-700">Overdraw: {milkAccounting.overdraw.toFixed(2)} L</p>}
+              {Math.abs(unexplainedMilk) > 0.01 && milkAccounting.overdraw <= 0.01 && <p className="mt-1 font-semibold text-amber-700">Unexplained variance: {unexplainedMilk.toFixed(2)} L</p>}
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[580px] text-left text-xs">
+              <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Round</th><th className="px-3 py-2">Product</th><th className="px-3 py-2">Milk input</th><th className="px-3 py-2">Status</th></tr></thead>
+              <tbody className="divide-y divide-slate-100">{activeLotRounds.filter(round => getRoundMilkInput(round) > 0).map(round => <tr key={round.id}><td className="px-3 py-2 font-mono">S{round.shiftNumber}/R{round.roundNumber}</td><td className="px-3 py-2">{round.type}</td><td className="px-3 py-2">{getRoundMilkInput(round).toLocaleString()} L</td><td className="px-3 py-2">{statusLabels[round.status] || round.status}</td></tr>)}</tbody>
+            </table></div>
+          </>}
+        </div>;
+      case 'output':
+        return <div className="space-y-4">
+          <p className="text-sm text-slate-600">Gross recorded output from rounds linked to milk lot {activeMilkLot?.lotCode || '—'}; recovered cream is shown separately and is not added to Paneer output.</p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Product</th><th className="px-3 py-2">Rounds with output</th><th className="px-3 py-2">Output</th></tr></thead><tbody className="divide-y divide-slate-100">{outputByProduct.map(row => <tr key={row.product}><td className="px-3 py-2 font-medium">{row.product}</td><td className="px-3 py-2">{row.rounds}</td><td className="px-3 py-2 font-semibold">{row.outputKg.toFixed(2)} kg</td></tr>)}{outputByProduct.length === 0 && <tr><td colSpan={3} className="px-3 py-4 text-center text-slate-500">No recorded output for this lot.</td></tr>}</tbody></table></div>
+          <p className="text-xs text-slate-500">All product total: {totalOutput.toFixed(2)} kg across {activeLotRounds.filter(round => round.outputWeight > 0).length} rounds.</p>
+        </div>;
+      case 'yield':
+        return <div className="space-y-4">
+          <div className="rounded-lg border border-teal-100 bg-teal-50 p-3 text-sm text-teal-900"><p className="font-semibold">Paneer yield = Paneer output ÷ Paneer milk input × 100</p><p className="mt-1 text-xs">Only D and C/S Paneer rounds are included. Recovered cream is a separate product and is not part of the Paneer output numerator.</p></div>
+          <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Type</th><th className="px-3 py-2">Rounds</th><th className="px-3 py-2">Milk input</th><th className="px-3 py-2">Paneer output</th><th className="px-3 py-2">kg / 100 L</th></tr></thead><tbody className="divide-y divide-slate-100">{paneerYieldByType.map(row => <tr key={row.type}><td className="px-3 py-2 font-medium">{row.type === 'D' ? 'D · Malai' : 'C/S · Rozana'}</td><td className="px-3 py-2">{row.rounds.length}</td><td className="px-3 py-2">{row.inputLitres.toLocaleString()} L</td><td className="px-3 py-2">{row.outputKg.toFixed(2)} kg</td><td className="px-3 py-2 font-semibold">{row.yieldPer100L.toFixed(2)}</td></tr>)}</tbody></table></div>
+          <p className="text-sm font-semibold text-slate-800">Combined: {paneerOutput.toFixed(2)} kg ÷ {paneerInput.toLocaleString()} L × 100 = {paneerYield.toFixed(2)} kg/100 L</p>
+          <p className="text-xs text-amber-700">Recovered cream recorded separately for this lot: {activeLotRounds.reduce((sum, round) => sum + (round.creamRecovered || 0), 0).toFixed(2)} kg (excluded from Paneer yield).</p>
+        </div>;
+      case 'waste':
+        return <div className="space-y-3"><p className="text-sm text-slate-600">{wasteRows.length} recorded waste event(s): {totalWasteKg.toFixed(2)} kg and {totalWasteL.toFixed(2)} L.</p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Product / reason</th><th className="px-3 py-2">Batch</th><th className="px-3 py-2">Quantity</th><th className="px-3 py-2">Recorded by</th></tr></thead><tbody className="divide-y divide-slate-100">{wasteRows.map(event => <tr key={event.id}><td className="px-3 py-2 whitespace-nowrap">{event.date || '—'}</td><td className="px-3 py-2">{event.product}<div className="text-slate-500">{event.reason}</div></td><td className="px-3 py-2 font-mono">{event.batchCode || '—'}</td><td className="px-3 py-2 font-semibold">{event.quantity} {event.unit}</td><td className="px-3 py-2">{event.recordedBy || '—'}</td></tr>)}{wasteRows.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-500">No waste events recorded.</td></tr>}</tbody></table></div>
+        </div>;
+      case 'cases':
+        return <div className="space-y-3"><p className="text-sm text-slate-600">Recorded packed quantities awaiting handover: {totalCases + otherRoundCases + crumbingCases} cases.</p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[560px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">SKU</th><th className="px-3 py-2">Cases</th><th className="px-3 py-2">Loose</th><th className="px-3 py-2">Source location</th></tr></thead><tbody className="divide-y divide-slate-100">{casesReadyRows.map(row => <tr key={row.sku}><td className="px-3 py-2 font-semibold">{row.sku}</td><td className="px-3 py-2">{row.cases}</td><td className="px-3 py-2">{row.loose}</td><td className="px-3 py-2">{Array.from(row.locations).join(', ')}</td></tr>)}{casesReadyRows.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-slate-500">No packed cases awaiting handover.</td></tr>}</tbody></table></div>
+        </div>;
+      case 'cold-chain':
+        return <div className="space-y-3"><p className="text-sm text-slate-600">Latest reading per location: {latestTemperatureReadings.filter(reading => reading.inRange).length} in range, {outOfRangeTemps.length} out of range.</p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[620px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Location</th><th className="px-3 py-2">Temperature</th><th className="px-3 py-2">Target range</th><th className="px-3 py-2">Recorded at</th><th className="px-3 py-2">By</th><th className="px-3 py-2">Result</th></tr></thead><tbody className="divide-y divide-slate-100">{latestTemperatureReadings.map(reading => <tr key={reading.id}><td className="px-3 py-2 font-medium">{reading.location}</td><td className="px-3 py-2">{reading.temperature}°C</td><td className="px-3 py-2">{reading.targetMin}–{reading.targetMax}°C</td><td className="px-3 py-2">{new Date(reading.recordedAt).toLocaleString()}</td><td className="px-3 py-2">{reading.recordedBy}</td><td className={`px-3 py-2 font-semibold ${reading.inRange ? 'text-emerald-700' : 'text-red-700'}`}>{reading.inRange ? 'In range' : 'Excursion'}</td></tr>)}{latestTemperatureReadings.length === 0 && <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-500">No temperature readings recorded.</td></tr>}</tbody></table></div>
+        </div>;
+      case 'alerts':
+        return <div className="space-y-4">
+          <section><h4 className="mb-2 text-sm font-semibold text-slate-900">Temperature excursions</h4>{outOfRangeTemps.length ? <ul className="space-y-2">{outOfRangeTemps.map(reading => <li key={reading.id} className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-800">{reading.location}: {reading.temperature}°C (target {reading.targetMin}–{reading.targetMax}°C) · {new Date(reading.recordedAt).toLocaleString()} · {reading.recordedBy}</li>)}</ul> : <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">No current temperature excursions.</p>}</section>
+          <section><h4 className="mb-2 text-sm font-semibold text-slate-900">Rounds in progress · Lot {activeMilkLot?.lotCode || '—'}</h4>{activeRounds.length ? <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[520px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th className="px-3 py-2">Round</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Stage</th></tr></thead><tbody className="divide-y divide-slate-100">{activeRounds.map(round => <tr key={round.id}><td className="px-3 py-2 font-mono">S{round.shiftNumber}/R{round.roundNumber}</td><td className="px-3 py-2">{round.type}</td><td className="px-3 py-2">{statusLabels[round.status] || round.status}</td></tr>)}</tbody></table></div> : <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No rounds currently in progress.</p>}</section>
+          <section><h4 className="mb-2 text-sm font-semibold text-slate-900">Awaiting handover</h4><p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{totalCases + otherRoundCases + crumbingCases} cases across {readyHandoverSkus.join(', ') || 'no SKUs'}.</p></section>
+        </div>;
+      case 'weekly-output':
+        return <div className="space-y-3"><p className="text-sm text-slate-600">Production rounds started this week ({weekStart.toLocaleDateString()}–{new Date(weekEnd.getTime() - 1).toLocaleDateString()}); packed crumbing batches are shown by completion date.</p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[600px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Day</th><th className="px-3 py-2">Paneer</th><th className="px-3 py-2">Halloumi</th><th className="px-3 py-2">Butter / Ghee</th><th className="px-3 py-2">Poppers</th></tr></thead><tbody className="divide-y divide-slate-100">{weeklyProductionData.map(day => <tr key={day.day}><td className="px-3 py-2 font-semibold">{day.day}</td><td className="px-3 py-2">{day.paneer.toFixed(2)} kg</td><td className="px-3 py-2">{day.halloumi.toFixed(2)} kg</td><td className="px-3 py-2">{day.butter.toFixed(2)} kg</td><td className="px-3 py-2">{day.poppers.toFixed(2)} kg</td></tr>)}{weeklyProductionData.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-500">No output recorded for this week.</td></tr>}</tbody></table></div>
+        </div>;
+    }
+  };
 
   return (
     <div className="space-y-6">
       {/* Metric tiles — management priorities */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {metrics.map((metric, i) => (
-          <MetricCard key={i} metric={metric} onClick={metric.label === 'Frozen Stock' ? () => setShowFrozenStockDetails(true) : undefined} />
+          <MetricCard key={i} metric={metric} onClick={metric.detail ? () => setSelectedDashboardDetail(metric.detail!) : undefined} />
         ))}
       </div>
 
       {/* Quick status row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Milk lot progress */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <button type="button" onClick={() => setSelectedDashboardDetail('milk')} aria-haspopup="dialog" className="w-full bg-white rounded-xl border border-slate-200 p-4 text-left transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
           <div className="flex items-center gap-2 mb-3">
             <Milk className="w-4 h-4 text-blue-600" />
             <h3 className="text-sm font-semibold text-slate-900">Milk Lot {activeMilkLot?.lotCode}</h3>
@@ -266,10 +368,11 @@ export default function Dashboard() {
               </div>
             </div>
           )}
-        </div>
+          <span className="mt-3 block text-[10px] font-semibold uppercase tracking-wide text-blue-600">View milk balance details</span>
+        </button>
 
         {/* Alerts */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <button type="button" onClick={() => setSelectedDashboardDetail('alerts')} aria-haspopup="dialog" className="w-full bg-white rounded-xl border border-slate-200 p-4 text-left transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle className="w-4 h-4 text-amber-600" />
             <h3 className="text-sm font-semibold text-slate-900">Active Alerts</h3>
@@ -298,18 +401,19 @@ export default function Dashboard() {
                 <p className="text-xs text-blue-600">{readyHandoverSkus.join(', ') || 'None'}</p>
               </div>
             </div>
-            <button type="button" onClick={() => setShowFrozenStockDetails(true)} aria-haspopup="dialog" className="flex w-full items-start gap-2 rounded-lg bg-emerald-50 p-2 text-left transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+            <div className="flex w-full items-start gap-2 rounded-lg bg-emerald-50 p-2 text-left">
               <Snowflake className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
               <div>
                 <p className="text-xs font-medium text-emerald-700">{frozenStock.toFixed(1)} kg frozen intermediate stock</p>
                 <p className="text-xs text-emerald-600">View freezer stock details</p>
               </div>
-            </button>
+            </div>
           </div>
-        </div>
+          <span className="mt-3 block text-[10px] font-semibold uppercase tracking-wide text-amber-600">View all alerts</span>
+        </button>
 
         {/* Quick stats */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <button type="button" onClick={() => setSelectedDashboardDetail('weekly-output')} aria-haspopup="dialog" className="w-full bg-white rounded-xl border border-slate-200 p-4 text-left transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
           <div className="flex items-center gap-2 mb-3">
             <BarChart3 className="w-4 h-4 text-emerald-600" />
             <h3 className="text-sm font-semibold text-slate-900">This Week's Output</h3>
@@ -340,7 +444,8 @@ export default function Dashboard() {
               <span className="text-sm font-bold text-emerald-600">{paneerYield.toFixed(1)}%</span>
             </div>
           </div>
-        </div>
+          <span className="mt-3 block text-[10px] font-semibold uppercase tracking-wide text-emerald-600">View weekly breakdown</span>
+        </button>
       </div>
 
       {/* Charts row */}
@@ -381,7 +486,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <Modal isOpen={showFrozenStockDetails} onClose={() => setShowFrozenStockDetails(false)} title="Freezer stock details" size="lg">
+      <Modal isOpen={selectedDashboardDetail === 'frozen'} onClose={() => setSelectedDashboardDetail(null)} title={dashboardDetailTitles.frozen} size="lg">
         <div className="space-y-5">
           <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -429,6 +534,19 @@ export default function Dashboard() {
             </div>
           </section>}
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={selectedDashboardDetail !== null && selectedDashboardDetail !== 'frozen'}
+        onClose={() => setSelectedDashboardDetail(null)}
+        title={selectedDashboardDetail && selectedDashboardDetail !== 'frozen' ? dashboardDetailTitles[selectedDashboardDetail] : ''}
+        size="lg"
+      >
+        {selectedDashboardDetail && selectedDashboardDetail !== 'frozen' && (
+          <div className="max-h-[70vh] overflow-y-auto pr-1">
+            {renderDashboardDetail(selectedDashboardDetail)}
+          </div>
+        )}
       </Modal>
 
       {/* Active rounds table */}
