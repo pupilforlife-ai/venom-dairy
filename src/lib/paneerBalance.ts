@@ -1,4 +1,4 @@
-import type { PackedSku } from '../data/mockData';
+import type { IntermediateLot, PackedSku } from '../data/mockData';
 import { getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
 
 /**
@@ -37,6 +37,12 @@ export function getPaneerRoundRemainingBalance(round: {
   if (round.type !== 'D' && round.type !== 'C/S') return round.remainingBalance ?? round.outputWeight;
   if (round.remainingBalance === undefined && round.sppRecordedWeight === undefined && !round.packedSkus?.length) return undefined;
   return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || []);
+}
+
+/** A recovered-cream lot can share a source round ID without representing its paneer. */
+export function isPaneerIntermediateLot(lot: Pick<IntermediateLot, 'productId' | 'productName'>): boolean {
+  const productId = lot.productId.toLowerCase();
+  return productId === 'pan111' || productId.startsWith('paneer-') || /\bpaneer\b/i.test(lot.productName);
 }
 
 /**

@@ -27,7 +27,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { getMilkLotAccounting, getRoundMilkInput, statusLabels } from '../data/mockData';
 import { reconcileFinishedStock } from '../lib/finishedStock';
-import { getPaneerRoundRemainingBalance, reconcileFrozenRoundBalances } from '../lib/paneerBalance';
+import { getPaneerRoundRemainingBalance, isPaneerIntermediateLot, reconcileFrozenRoundBalances } from '../lib/paneerBalance';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { Modal } from '../components/Modal';
 
@@ -142,13 +142,18 @@ export default function Dashboard() {
   const csYield = csInput > 0 ? (csRounds.reduce((sum, round) => sum + round.outputWeight, 0) / csInput) * 100 : 0;
   const totalWasteKg = wasteEvents.filter(event => event.unit.toLowerCase() === 'kg').reduce((s, event) => s + event.quantity, 0);
   const totalWasteL = wasteEvents.filter(event => event.unit.toLowerCase() === 'l').reduce((s, event) => s + event.quantity, 0);
-  const intermediateSourceRoundIds = new Set(intermediateLots.map((lot) => lot.sourceBatchId));
-  const frozenFreezerLots = intermediateLots
+  const paneerIntermediateLots = intermediateLots.filter(isPaneerIntermediateLot);
+  const paneerIntermediateSourceRoundIds = new Set(paneerIntermediateLots.map((lot) => lot.sourceBatchId));
+  const frozenFreezerLots = paneerIntermediateLots
     .filter((lot) => lot.status !== 'consumed' && lot.currentQuantity > 0 && /freezer/i.test(lot.storageLocation));
   const recordedFrozenStock = frozenFreezerLots
     .reduce((s, lot) => s + lot.currentQuantity, 0);
   const legacyFrozenRounds = activeLotRounds
-    .filter((round) => round.status === 'frozen' && !intermediateSourceRoundIds.has(round.id));
+    .filter((round) =>
+      (round.type === 'D' || round.type === 'C/S') &&
+      (round.status === 'frozen' || round.status === 'cut') &&
+      !paneerIntermediateSourceRoundIds.has(round.id)
+    );
   const legacyFrozenRoundBalances = legacyFrozenRounds.map((round) => ({
     round,
     balanceKg: getPaneerRoundRemainingBalance(round) ?? 0,
@@ -385,7 +390,7 @@ export default function Dashboard() {
             </div>
             <div className="mt-2 space-y-1 text-xs text-indigo-700">
               <p>{frozenFreezerLots.length} recorded freezer intermediate lot{frozenFreezerLots.length === 1 ? '' : 's'}: {recordedFrozenStock.toFixed(2)} kg.</p>
-              {legacyFrozenRounds.length > 0 && <p>Legacy round pool: max(0, positive balances {legacyFrozenBalanceTotals.positiveBalanceKg.toFixed(2)} kg − overpacked stock {legacyFrozenBalanceTotals.overpackedKg.toFixed(2)} kg) = {legacyFrozenRoundStock.toFixed(2)} kg.</p>}
+              {legacyFrozenRounds.length > 0 && <p>Unrepresented frozen/cut Paneer round pool: max(0, positive balances {legacyFrozenBalanceTotals.positiveBalanceKg.toFixed(2)} kg − overpacked stock {legacyFrozenBalanceTotals.overpackedKg.toFixed(2)} kg) = {legacyFrozenRoundStock.toFixed(2)} kg.</p>}
               <p>Total frozen stock: {recordedFrozenStock.toFixed(2)} kg + {legacyFrozenRoundStock.toFixed(2)} kg legacy pool = <strong>{frozenStock.toFixed(2)} kg</strong>. Consumed lots and non-freezer locations are excluded.</p>
             </div>
           </div>
@@ -411,7 +416,7 @@ export default function Dashboard() {
           </section>
 
           {legacyFrozenRounds.length > 0 && <section>
-            <h4 className="mb-2 text-sm font-semibold text-slate-900">Legacy frozen rounds not yet represented by an intermediate lot</h4>
+            <h4 className="mb-2 text-sm font-semibold text-slate-900">Frozen/cut Paneer rounds not represented by Paneer intermediate lots</h4>
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full min-w-[460px] text-left text-xs">
                 <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Round</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Remaining balance</th></tr></thead>

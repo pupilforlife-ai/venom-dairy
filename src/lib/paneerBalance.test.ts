@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   calculatePaneerRemainingBalance,
   getPaneerRoundRemainingBalance,
+  isPaneerIntermediateLot,
   reconcileFrozenRoundBalances,
 } from './paneerBalance';
 
@@ -58,5 +59,13 @@ describe('reconcileFrozenRoundBalances', () => {
       overpackedKg: 0,
       netBalanceKg: 0,
     });
+  });
+});
+
+describe('isPaneerIntermediateLot', () => {
+  it('recognizes paneer stock but not cream sourced from the same round', () => {
+    expect(isPaneerIntermediateLot({ productId: 'paneer-c/s-cut', productName: 'Rozana Paneer (Cut)' })).toBe(true);
+    expect(isPaneerIntermediateLot({ productId: 'pan111', productName: 'PAN111 (Recovered Paneer)' })).toBe(true);
+    expect(isPaneerIntermediateLot({ productId: 'cream-recovered', productName: 'Recovered Cream (from C/S)' })).toBe(false);
   });
 });

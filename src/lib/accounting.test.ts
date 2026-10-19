@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getMilkLotAccounting,
   getMilkLotCreamPool,
+  getMilkLotProductionReconciliation,
   MilkLot,
   ProductionRound,
 } from '../data/mockData';
@@ -115,6 +116,21 @@ describe('cream pool accounting', () => {
     ];
 
     expect(getMilkLotCreamPool(lot, rounds)?.availableBalance).toBe(-5);
+  });
+});
+
+describe('milk-lot Paneer yield', () => {
+  it('keeps recovered cream separate from Paneer output and yield', () => {
+    const result = getMilkLotProductionReconciliation(milkLot(), [
+      round({ type: 'C/S', outputWeight: 80, creamRecovered: 50 }),
+    ]);
+
+    expect(result).toMatchObject({
+      paneerRecorded: 80,
+      paneerInputLitres: 500,
+      paneerYieldPer100L: 16,
+      cream: 50,
+    });
   });
 });
 
