@@ -49,6 +49,8 @@ interface GheeTabProps {
 export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   const { productionRounds, milkLots, creamLots, updateProductionRound, updateMilkLot, addProductionRound } = useApp();
   const { showToast } = useToast();
+  const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
+  const canRunSupervisorCheck = currentRole === 'admin' || currentRole === 'owner';
 
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showPackingModal, setShowPackingModal] = useState(false);
@@ -282,6 +284,10 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   };
 
   const handleSupervisorCheck = (roundId: string) => {
+    if (!canRunSupervisorCheck) {
+      showToast('error', 'Only an admin or owner can complete the Ghee supervisor check');
+      return;
+    }
     updateProductionRound(roundId, { 
       status: 'supervisor_check',
       notes: 'Supervisor checked and approved',
@@ -439,7 +445,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
         </button>
       );
     } else if (round.status === 'cooking') {
-      buttons.push(
+      buttons.push(canRunSupervisorCheck ? (
         <button
           key="supervisor_check"
           onClick={() => handleSupervisorCheck(round.id)}
@@ -447,7 +453,11 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
         >
           <CheckCircle2 className="w-3 h-3" /> Supervisor Check
         </button>
-      );
+      ) : (
+        <span key="supervisor_check_pending" className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-800">
+          <AlertTriangle className="h-3 w-3" /> Awaiting admin/owner supervisor check
+        </span>
+      ));
     } else if (round.status === 'supervisor_check') {
       buttons.push(
         <button
