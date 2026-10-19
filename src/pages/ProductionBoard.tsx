@@ -2044,7 +2044,7 @@ export default function ProductionBoard() {
           return (
             <div key={shift.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               {/* Shift header */}
-              <div className={`px-4 py-3 border-b flex items-center justify-between ${
+              <div className={`px-3 py-3 border-b flex flex-col gap-3 sm:px-4 sm:flex-row sm:items-center sm:justify-between ${
                 shift.status === 'active' ? 'bg-indigo-50 border-indigo-200' :
                 shift.status === 'completed' ? 'bg-slate-50 border-slate-200' :
                 'bg-amber-50 border-amber-200'
@@ -2084,7 +2084,7 @@ export default function ProductionBoard() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                   <span className="text-xs text-slate-500">{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>
                   {canForceStage && !productionRounds.some(round => round.shiftId === shift.id) && (
                     <button onClick={() => handleDeleteShift(shift.id)} className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors">
@@ -2116,7 +2116,97 @@ export default function ProductionBoard() {
 
               {/* Rounds table */}
               {!isCollapsed && rounds.length > 0 ? (
-                <div className="w-full min-w-0 max-w-full overflow-x-auto">
+                <>
+                <div className="space-y-3 bg-slate-50 p-3 lg:hidden">
+                  {rounds.map((round) => {
+                    const blockCount = round.numberOfBlocks ?? round.blockWeights?.length ?? 0;
+                    const remainingBalance = getPaneerRoundRemainingBalance(round);
+                    return (
+                    <article key={round.id} className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                      <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-3">
+                        <div className="min-w-0">
+                          <button type="button" onClick={() => { setHistoryRoundId(round.id); setShowHistoryModal(true); }} className="font-mono text-base font-bold text-slate-900 hover:text-indigo-600">{roundDisplayCode(round)}</button>
+                          <button type="button" onClick={() => { setHistoryRoundId(round.id); setShowHistoryModal(true); }} className="mt-1 block text-xs font-semibold text-indigo-600">View history</button>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <span className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm font-bold text-slate-700">{round.type}</span>
+                          {round.locked && <span className="inline-flex items-center gap-1 text-[10px] text-slate-500"><Lock className="h-3 w-3" /> Locked</span>}
+                        </div>
+                      </div>
+
+                      <div className="min-w-0 space-y-4 p-3">
+                        <section>
+                          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Current stage</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {canForceStage && !round.locked ? (
+                              <select value={round.status} onChange={(event) => handleStageChange(round.id, event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700" aria-label={`Current stage for round ${round.roundNumber}`}>
+                                {editableStageOptions.map(stage => <option key={stage} value={stage}>{statusLabels[stage] || stage}</option>)}
+                              </select>
+                            ) : <span className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700">{statusLabels[round.status] || round.status}</span>}
+                            <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-medium text-white ${statusColors[round.status]}`}>{statusLabels[round.status] || round.status}</span>
+                          </div>
+                          <div className="mt-3 max-w-full overflow-x-auto overscroll-x-contain pb-1"><StatusPipeline currentStatus={round.status} /></div>
+                          {round.startTime && <div className="mt-2 text-[10px] text-slate-500">Started {new Date(round.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
+                          {round.status === 'cooling' && round.coolingStartedAt && round.coolingLocation && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                            <span className="font-mono font-bold">{formatTime(timers[round.id] || 0)}</span>
+                            <span className="text-slate-500">{round.coolingLocation === 'tank' ? 'Cooling Tank · 90 min' : 'Chiller · 120 min'}</span>
+                            {(timers[round.id] || 0) === 0 && <button onClick={() => handleStartResting(round.id)} className="rounded bg-teal-500 px-2 py-1 font-medium text-white">Start Resting</button>}
+                          </div>}
+                          {getStageActionButtons(round)}
+                        </section>
+
+                        <section className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-2.5">
+                          <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Milk quantity
+                            <input type="number" min="1" value={(round.actualInput > 0 ? round.actualInput : round.plannedInput) || ''} onChange={(event) => { const quantity = Math.max(1, parseInt(event.target.value) || 1); updateProductionRound(round.id, { plannedInput: quantity, actualInput: quantity }); }} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-medium text-slate-700" aria-label={`Milk quantity for round ${round.roundNumber}`} />
+                          </label>
+                          <div><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Milk temperature</p><p className="mt-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-medium text-slate-700">{round.startingTemperature !== undefined ? `${round.startingTemperature}°C` : '—'}</p></div>
+                          <div><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Blocks</p>{round.blockWeights?.length ? <button onClick={() => openBlockWeights(round.id)} className="mt-1 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-2 text-left text-sm font-semibold text-indigo-700">{blockCount} blocks · review</button> : <p className="mt-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-500">{blockCount || '—'}</p>}</div>
+                          <div><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Block weight</p><p className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-sm font-bold text-emerald-700">{round.outputWeight > 0 ? `${round.outputWeight.toFixed(2)} kg` : '—'}</p></div>
+                        </section>
+
+                        <section>
+                          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Type &amp; cream</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {canRequestTypeChange && (round.type === 'D' || round.type === 'C/S') && round.typeChangeRequest?.status === 'pending' && canForceStage && <button type="button" onClick={() => openTypeChangeModal(round.id)} className="flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-800"><ArrowLeftRight className="h-3 w-3" /> Review request</button>}
+                            {canRequestTypeChange && (round.type === 'D' || round.type === 'C/S') && round.typeChangeRequest?.status === 'pending' && !canForceStage && <span className="flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-800"><Clock className="h-3 w-3" /> Change pending</span>}
+                            {canRequestTypeChange && (round.type === 'D' || round.type === 'C/S') && round.typeChangeRequest?.status !== 'pending' && <button type="button" onClick={() => openTypeChangeModal(round.id)} className="flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"><ArrowLeftRight className="h-3 w-3" /> Request type change</button>}
+                            {round.creamRecovered !== undefined && <button type="button" onClick={() => openCreamDetails(round.id)} className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-700">Cream {round.creamRecovered.toFixed(2)} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</button>}
+                            {renderCreamAction(round)}
+                          </div>
+                        </section>
+
+                        <section>
+                          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Cutting</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {round.cuttingType || round.status === 'ready_cutting' ? <select value={round.cuttingType || ''} onChange={(event) => updateProductionRound(round.id, { cuttingType: event.target.value || undefined })} className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" aria-label={`Cutting option for round ${round.roundNumber}`}><option value="">Select cut</option><option value="400g cubes">400g cubes</option><option value="200g cubes">200g cubes</option><option value="Restaurant blocks">Restaurant blocks</option><option value="SPP pieces">SPP pieces</option><option value="Clingwrapped / Stored">Clingwrapped / Stored</option></select> : round.status === 'clingwrapped' ? <span className="rounded-lg border border-pink-200 bg-pink-50 px-2 py-1.5 text-xs font-medium text-pink-600">Clingwrapped</span> : <span className="text-sm text-slate-400">Not recorded</span>}
+                            {round.cutBy && <span className="text-xs text-slate-500">By {round.cutBy}</span>}
+                          </div>
+                          {getCutActionButtons(round)}
+                        </section>
+
+                        <section>
+                          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Packed SKUs</p>
+                          {round.packedSkus?.length ? <div className="space-y-1.5">{round.packedSkus.map((pack, packIndex) => {
+                            const historyEvent = getPackingAuditEvent(round, packIndex);
+                            const recordedBy = pack.recordedBy || historyEvent?.recordedBy || 'Recorder not captured';
+                            const recordedAtValue = pack.recordedAt || historyEvent?.occurredAt;
+                            const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB') : 'timestamp not captured';
+                            const packLabel = pack.weightKg !== undefined ? `${pack.sku}: ${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.sku}: ${pack.cases}c × ${(pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku])).toFixed(2)} kg + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.sku}: ${pack.cases}c + ${pack.loose || 0} loose`;
+                            return <div key={`${pack.sku}-${packIndex}`} className="flex flex-wrap items-center gap-1"><button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="max-w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-left text-xs font-semibold text-emerald-700">{packLabel}</button>{isOwner && <button type="button" onClick={() => openPackingCorrection(round, packIndex)} className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-700">Correct</button>}</div>;
+                          })}</div> : <p className="text-sm text-slate-400">Nothing packed yet</p>}
+                          {round.pan111ApprovalStatus === 'pending' && <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
+                          {remainingBalance !== undefined && <div className={`mt-2 inline-flex rounded-lg border px-2 py-1.5 text-xs font-bold ${remainingBalance > 0.01 ? 'border-amber-200 bg-amber-50 text-amber-600' : remainingBalance < -0.01 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>Balance {remainingBalance.toFixed(2)} kg</div>}
+                          {['cut', 'chiller_storage', 'frozen', 'packed'].includes(round.status) && !round.locked && round.pan111ApprovalStatus !== 'pending' && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm(emptyPackForm); setShowPackModal(true); }} className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"><Package className="h-3.5 w-3.5" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
+                        </section>
+
+                        {!round.locked && <section className="border-t border-slate-100 pt-3"><div className="flex flex-wrap gap-2">{getActionButtons(round)}{canForceStage && round.status === 'scheduled' && <button onClick={() => handleDeleteRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs font-semibold text-red-700"><Trash2 className="h-3 w-3" />Cancel</button>}{canForceStage && round.status !== 'scheduled' && <button onClick={() => handleCancelRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs font-semibold text-red-700"><XCircle className="h-3 w-3" />Cancel</button>}</div></section>}
+                      </div>
+                    </article>
+                    );
+                  })}
+                </div>
+
+                <div className="hidden w-full min-w-0 max-w-full overflow-x-auto lg:block">
                   <table className="production-board-table w-full text-xs">
                     <colgroup>
                       <col style={{ width: '9rem' }} />
@@ -2264,6 +2354,7 @@ export default function ProductionBoard() {
                     </tbody>
                   </table>
                 </div>
+                </>
               ) : (
                 <div className="p-6 text-center text-slate-400 text-sm">
                   No rounds in this shift yet. <button onClick={openNewRoundModal} className="text-emerald-600 hover:text-emerald-700 font-medium">Add a round →</button>
