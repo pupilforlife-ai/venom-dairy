@@ -2117,7 +2117,7 @@ export default function ProductionBoard() {
               {/* Rounds table */}
               {!isCollapsed && rounds.length > 0 ? (
                 <>
-                <div className="space-y-3 bg-slate-50 p-3 lg:hidden">
+                <div className="space-y-3 bg-slate-50 p-3 md:hidden">
                   {rounds.map((round) => {
                     const blockCount = round.numberOfBlocks ?? round.blockWeights?.length ?? 0;
                     const remainingBalance = getPaneerRoundRemainingBalance(round);
@@ -2206,7 +2206,7 @@ export default function ProductionBoard() {
                   })}
                 </div>
 
-                <div className="hidden w-full min-w-0 max-w-full overflow-x-auto lg:block">
+                <div className="hidden w-full min-w-0 max-w-full overflow-x-auto md:block">
                   <table className="production-board-table w-full text-xs">
                     <colgroup>
                       <col style={{ width: '9rem' }} />
