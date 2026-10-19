@@ -11,6 +11,7 @@ import {
   Thermometer,
   CheckCircle2,
 } from 'lucide-react';
+import { useState } from 'react';
 import {
   BarChart,
   Bar,
@@ -27,6 +28,7 @@ import { useApp } from '../store/AppContext';
 import { getMilkLotAccounting, getRoundMilkInput, statusLabels } from '../data/mockData';
 import { reconcileFinishedStock } from '../lib/finishedStock';
 import { useSupabaseState } from '../hooks/useSupabaseState';
+import { Modal } from '../components/Modal';
 
 interface DashboardCrumbingBatch {
   id: string;
@@ -46,7 +48,7 @@ type DashboardMetric = {
   color: string;
 };
 
-function MetricCard({ metric }: { metric: DashboardMetric }) {
+function MetricCard({ metric, onClick }: { metric: DashboardMetric; onClick?: () => void }) {
   const colorMap: Record<string, string> = {
     emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     blue: 'bg-blue-50 text-blue-700 border-blue-200',
@@ -60,8 +62,8 @@ function MetricCard({ metric }: { metric: DashboardMetric }) {
 
   const TrendIcon = metric.trend === 'up' ? TrendingUp : metric.trend === 'down' ? TrendingDown : Minus;
 
-  return (
-    <div className={`rounded-xl border p-4 ${colorMap[metric.color] || 'bg-slate-50 text-slate-700 border-slate-200'}`}>
+  const content = (
+    <>
       <p className="text-xs font-medium opacity-75 uppercase tracking-wide">{metric.label}</p>
       <div className="flex items-end gap-2 mt-1.5">
         <span className="text-2xl font-bold">{metric.value}</span>
@@ -73,11 +75,17 @@ function MetricCard({ metric }: { metric: DashboardMetric }) {
           <span>{metric.trendValue}</span>
         </div>
       )}
-    </div>
+    </>
   );
+
+  const cardClass = `rounded-xl border p-4 text-left ${colorMap[metric.color] || 'bg-slate-50 text-slate-700 border-slate-200'}${onClick ? ' w-full cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2' : ''}`;
+  return onClick
+    ? <button type="button" className={cardClass} onClick={onClick} aria-haspopup="dialog">{content}<span className="sr-only">Open freezer stock details</span></button>
+    : <div className={cardClass}>{content}</div>;
 }
 
 export default function Dashboard() {
+  const [showFrozenStockDetails, setShowFrozenStockDetails] = useState(false);
   const {
     productionRounds,
     temperatureReadings,
@@ -134,11 +142,13 @@ export default function Dashboard() {
   const totalWasteKg = wasteEvents.filter(event => event.unit.toLowerCase() === 'kg').reduce((s, event) => s + event.quantity, 0);
   const totalWasteL = wasteEvents.filter(event => event.unit.toLowerCase() === 'l').reduce((s, event) => s + event.quantity, 0);
   const intermediateSourceRoundIds = new Set(intermediateLots.map((lot) => lot.sourceBatchId));
-  const recordedFrozenStock = intermediateLots
-    .filter((lot) => lot.status !== 'consumed' && lot.currentQuantity > 0 && /freezer/i.test(lot.storageLocation))
+  const frozenFreezerLots = intermediateLots
+    .filter((lot) => lot.status !== 'consumed' && lot.currentQuantity > 0 && /freezer/i.test(lot.storageLocation));
+  const recordedFrozenStock = frozenFreezerLots
     .reduce((s, lot) => s + lot.currentQuantity, 0);
-  const legacyFrozenRoundStock = activeLotRounds
-    .filter((round) => round.status === 'frozen' && !intermediateSourceRoundIds.has(round.id))
+  const legacyFrozenRounds = activeLotRounds
+    .filter((round) => round.status === 'frozen' && !intermediateSourceRoundIds.has(round.id));
+  const legacyFrozenRoundStock = legacyFrozenRounds
     .reduce((s, round) => s + Math.max(0, round.remainingBalance ?? 0), 0);
   const frozenStock = recordedFrozenStock + legacyFrozenRoundStock;
   const unexplainedMilk = activeMilkLot
@@ -190,7 +200,7 @@ export default function Dashboard() {
       {/* Metric tiles — management priorities */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {metrics.map((metric, i) => (
-          <MetricCard key={i} metric={metric} />
+          <MetricCard key={i} metric={metric} onClick={metric.label === 'Frozen Stock' ? () => setShowFrozenStockDetails(true) : undefined} />
         ))}
       </div>
 
@@ -276,13 +286,13 @@ export default function Dashboard() {
                 <p className="text-xs text-blue-600">{readyHandoverSkus.join(', ') || 'None'}</p>
               </div>
             </div>
-            <div className="flex items-start gap-2 p-2 bg-emerald-50 rounded-lg">
+            <button type="button" onClick={() => setShowFrozenStockDetails(true)} aria-haspopup="dialog" className="flex w-full items-start gap-2 rounded-lg bg-emerald-50 p-2 text-left transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
               <Snowflake className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
               <div>
                 <p className="text-xs font-medium text-emerald-700">{frozenStock.toFixed(1)} kg frozen intermediate stock</p>
-                <p className="text-xs text-emerald-600">Awaiting downstream packing</p>
+                <p className="text-xs text-emerald-600">View freezer stock details</p>
               </div>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -358,6 +368,52 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      <Modal isOpen={showFrozenStockDetails} onClose={() => setShowFrozenStockDetails(false)} title="Freezer stock details" size="lg">
+        <div className="space-y-5">
+          <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-sm font-semibold text-indigo-900">Recorded frozen stock</p>
+              <p className="text-xl font-bold text-indigo-900">{frozenStock.toFixed(2)} kg</p>
+            </div>
+            <p className="mt-1 text-xs text-indigo-700">{frozenFreezerLots.length} freezer intermediate lot{frozenFreezerLots.length === 1 ? '' : 's'} ({recordedFrozenStock.toFixed(2)} kg){legacyFrozenRounds.length > 0 ? ` + ${legacyFrozenRounds.length} legacy frozen round${legacyFrozenRounds.length === 1 ? '' : 's'} (${legacyFrozenRoundStock.toFixed(2)} kg)` : ''}. Consumed lots and non-freezer locations are excluded.</p>
+          </div>
+
+          <section>
+            <h4 className="mb-2 text-sm font-semibold text-slate-900">Intermediate freezer lots</h4>
+            {frozenFreezerLots.length === 0 ? <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No active intermediate lots are recorded in freezer locations.</p> : (
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full min-w-[620px] text-left text-xs">
+                  <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Product / lot</th><th className="px-3 py-2">Source</th><th className="px-3 py-2">Remaining</th><th className="px-3 py-2">Location</th><th className="px-3 py-2">Status</th></tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {frozenFreezerLots.map(lot => <tr key={lot.id}>
+                      <td className="px-3 py-2"><div className="font-medium text-slate-900">{lot.productName}</div><div className="font-mono text-[10px] text-slate-500">{lot.lotCode}</div></td>
+                      <td className="px-3 py-2 text-slate-600">Milk {lot.sourceMilkLotCode} · S{lot.sourceShift}/R{lot.sourceRound}<div className="font-mono text-[10px] text-slate-400">{lot.sourceBatchCode}</div></td>
+                      <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-900">{lot.currentQuantity.toFixed(2)} {lot.uom}</td>
+                      <td className="px-3 py-2 text-slate-600">{lot.storageLocation}</td>
+                      <td className="px-3 py-2 capitalize text-slate-600">{lot.status}</td>
+                    </tr>)}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {legacyFrozenRounds.length > 0 && <section>
+            <h4 className="mb-2 text-sm font-semibold text-slate-900">Legacy frozen rounds not yet represented by an intermediate lot</h4>
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[460px] text-left text-xs">
+                <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Round</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Remaining balance</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">{legacyFrozenRounds.map(round => <tr key={round.id}>
+                  <td className="px-3 py-2 font-mono text-slate-700">{round.milkLotCode} · S{round.shiftNumber}/R{round.roundNumber}</td>
+                  <td className="px-3 py-2 text-slate-600">{round.type}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-900">{Math.max(0, round.remainingBalance ?? 0).toFixed(2)} kg</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </section>}
+        </div>
+      </Modal>
 
       {/* Active rounds table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
