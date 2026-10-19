@@ -37,6 +37,7 @@ import AmassiTab from './AmassiTab';
 import ButterTab from './ButterTab';
 import GheeTab from './GheeTab';
 import CrumbingTab, { type CrumbingBatch } from './CrumbingTab';
+import BreadsTab from './BreadsTab';
 
 const emptyPackForm = { sku: '', cases: 0, caseWeightKg: 0, loose: 0, looseWeightKg: 0, weightKg: 0, reason: '' };
 
@@ -140,7 +141,7 @@ export default function ProductionBoard() {
   const isOwner = currentRole === 'owner';
   const editableStageOptions = [...statusFlow, 'chiller_storage', 'spp_pending', 'pan111_pending', 'spoilage_pending', 'spoiled', 'cancelled'] as string[];
   
-  const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'amassi' | 'butter' | 'ghee' | 'crumbing'>('paneer');
+  const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'amassi' | 'butter' | 'ghee' | 'crumbing' | 'breads'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all', balance: 'all', workflow: 'all', query: '' });
   const [showFilters, setShowFilters] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
@@ -1767,7 +1768,7 @@ export default function ProductionBoard() {
       {/* Master Product Tabs */}
       <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-2">
         <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain" role="region" aria-label="Production product tabs" tabIndex={0}>
-        <div className="flex min-w-[720px] gap-1">
+        <div role="tablist" aria-label="Production product tabs" className="flex min-w-[840px] gap-1">
           <button
             onClick={() => setActiveTab('paneer')}
             role="tab"
@@ -1839,6 +1840,18 @@ export default function ProductionBoard() {
             }`}
           >
             🍗 Crumbing
+          </button>
+          <button
+            onClick={() => setActiveTab('breads')}
+            role="tab"
+            aria-selected={activeTab === 'breads'}
+            className={`min-w-0 flex-1 whitespace-nowrap px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'breads'
+                ? 'bg-rose-600 text-white shadow-sm'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            🫓 Breads
           </button>
         </div>
         </div>
@@ -2286,6 +2299,8 @@ export default function ProductionBoard() {
       {activeTab === 'crumbing' && (
         <CrumbingTab crumbingBatches={crumbingBatches} setCrumbingBatches={setCrumbingBatches} selectedMilkLotId={selectedMilkLotId} />
       )}
+
+      {activeTab === 'breads' && <BreadsTab />}
 
       {/* Modals - only show for paneer tab */}
       {activeTab === 'paneer' && (
