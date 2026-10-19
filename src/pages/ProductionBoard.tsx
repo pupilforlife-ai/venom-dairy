@@ -80,11 +80,11 @@ function StatusPipeline({ currentStatus }: { currentStatus: string }) {
     ? statusFlow.indexOf('cut')
     : statusFlow.indexOf(currentStatus as typeof statusFlow[number]);
   return (
-    <div className="flex items-center gap-1.5" title={statusLabels[currentStatus]}>
+    <div className="production-board-mobile-pipeline flex items-center gap-1.5" title={statusLabels[currentStatus]}>
       {statusFlow.map((step, i) => (
-        <div key={step} className="flex items-center">
-          <div className={`w-3.5 h-3.5 rounded-full ring-1 ring-white shadow-sm ${i <= currentIndex ? statusColors[step] : 'bg-slate-200'}`} title={statusLabels[step]} />
-          {i < statusFlow.length - 1 && <div className={`w-3 h-1 rounded-full ${i < currentIndex ? statusColors[step] : 'bg-slate-200'}`} />}
+        <div key={step} className="production-board-pipeline-step flex items-center">
+          <div className={`production-board-pipeline-dot w-3.5 h-3.5 rounded-full ring-1 ring-white shadow-sm ${i <= currentIndex ? statusColors[step] : 'bg-slate-200'}`} title={statusLabels[step]} />
+          {i < statusFlow.length - 1 && <div className={`production-board-pipeline-connector w-3 h-1 rounded-full ${i < currentIndex ? statusColors[step] : 'bg-slate-200'}`} />}
         </div>
       ))}
     </div>

@@ -57,6 +57,32 @@
   border-collapse: collapse;
 }
 
+/* On phones, keep all paneer pipeline marks visible within their table cell.
+   Desktop retains the existing dot and connector dimensions unchanged. */
+@media (max-width: 640px) {
+  .production-board-mobile-pipeline {
+    width: max-content;
+    min-width: max-content;
+    gap: 0.125rem;
+  }
+
+  .production-board-pipeline-step {
+    flex: none;
+  }
+
+  .production-board-pipeline-dot {
+    width: 0.625rem;
+    height: 0.625rem;
+    flex: none;
+  }
+
+  .production-board-pipeline-connector {
+    width: 0.5rem;
+    height: 0.125rem;
+    flex: none;
+  }
+}
+
 /* Keep the board itself inside the app viewport. Its wide rounds table scrolls
    inside its own container; it must not widen the page and leave a blank tail. */
 .production-board-page {
