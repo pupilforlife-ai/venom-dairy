@@ -2,6 +2,7 @@ import { createContext, useContext, ReactNode } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { supabase } from '../lib/supabase';
 import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
+import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C } from '../lib/coldChain';
 import { 
   milkLots as initialMilkLots, 
   productionRounds as initialRounds,
@@ -118,6 +119,22 @@ const temperatureProfiles: Record<string, { location: string; targetMin: number;
 };
 
 function normalizeTemperatureReading(reading: TemperatureReading): TemperatureReading {
+  if (reading.coldChainStorageReading) {
+    const hasMilkTemperature = typeof reading.milkTemperature === 'number' && Number.isFinite(reading.milkTemperature);
+    const milkTemperatureInRange = hasMilkTemperature
+      ? isRawMilkTemperatureInRange(reading.milkTemperature!)
+      : undefined;
+    return {
+      ...reading,
+      targetMin: RAW_MILK_TEMP_MIN_C,
+      targetMax: RAW_MILK_TEMP_MAX_C,
+      milkTemperatureInRange,
+      // Keep storage-only records out of the excursion count. The Cold Chain
+      // page labels the milk result as unrecorded rather than claiming OK.
+      inRange: milkTemperatureInRange ?? true,
+    };
+  }
+
   const profile = temperatureProfiles[reading.location];
   if (!profile) return reading;
 
@@ -463,8 +480,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Temperature actions
   const addTemperatureReading = (reading: Omit<TemperatureReading, 'id' | 'inRange'>) => {
-    const inRange = reading.temperature >= reading.targetMin && reading.temperature <= reading.targetMax;
-    const newReading = { ...reading, id: `t-${Date.now()}`, inRange };
+    const milkTemperatureInRange = reading.coldChainStorageReading && typeof reading.milkTemperature === 'number'
+      ? isRawMilkTemperatureInRange(reading.milkTemperature)
+      : undefined;
+    const inRange = reading.coldChainStorageReading
+      ? milkTemperatureInRange ?? true
+      : reading.temperature >= reading.targetMin && reading.temperature <= reading.targetMax;
+    const newReading = { ...reading, milkTemperatureInRange, id: `t-${Date.now()}`, inRange };
     setTemperatureReadings(currentReadings => [...currentReadings, newReading]);
   };
 

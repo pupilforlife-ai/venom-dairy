@@ -1,28 +1,25 @@
-import { useState } from 'react';
-import {
-  Thermometer,
-  AlertTriangle,
-  CheckCircle2,
-  Snowflake,
-  Clock,
-  Plus,
-} from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Clock, Plus, Snowflake, Thermometer, Truck, XCircle } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from 'recharts';
+import { useSupabaseState } from '../hooks/useSupabaseState';
+import type { TemperatureReading } from '../data/mockData';
+import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C } from '../lib/coldChain';
 
-// Temperature profiles
-const tempProfiles = [
+const requiredDailyChecks = 2;
+
+const milkStorageLocations = [
+  { location: 'Silo', kind: 'vessel' as const },
+  { location: 'BMC1', kind: 'vessel' as const },
+  { location: 'BMC2', kind: 'vessel' as const },
+  { location: 'BMC3', kind: 'vessel' as const },
+  { location: 'Truck', kind: 'transport' as const },
+  // Keep separate from the existing frozen finished-goods “Coldroom” record.
+  { location: 'Milk Coldroom', kind: 'transport' as const },
+];
+
+const legacyTempProfiles = [
   { location: 'Chiller', targetMin: 0, targetMax: 5 },
   { location: 'Dairy Container (Intermediate Freezer)', targetMin: -25, targetMax: -10 },
   { location: 'Coldroom', targetMin: -25, targetMax: -10 },
@@ -30,237 +27,241 @@ const tempProfiles = [
   { location: 'Rental Cold Storage', targetMin: -25, targetMax: -10 },
 ];
 
+type StorageStateEvent = {
+  id: string;
+  location: string;
+  status: 'milk_present' | 'empty';
+  milkLotCode?: string;
+  recordedAt: string;
+  recordedBy: string;
+};
+
+function getCurrentUserName() {
+  if (typeof window === 'undefined') return '';
+  return window.localStorage.getItem('vejoy_user_username') || window.localStorage.getItem('vejoy_user_role') || '';
+}
+
 export default function ColdChain() {
-  const { temperatureReadings, addTemperatureReading } = useApp();
+  const { temperatureReadings, addTemperatureReading, milkLots } = useApp();
   const { showToast } = useToast();
+  const [storageEvents, setStorageEvents] = useSupabaseState<StorageStateEvent[]>('vejoy_coldChainStorageEvents', []);
   const [showLogModal, setShowLogModal] = useState(false);
+  const [newReading, setNewReading] = useState({
+    location: 'Chiller',
+    temperature: '',
+    milkTemperature: '',
+    storageTemperature: '',
+    milkLotCode: '',
+    recordedBy: getCurrentUserName(),
+  });
 
-  const inRange = temperatureReadings.filter((t) => t.inRange);
-  const outOfRange = temperatureReadings.filter((t) => !t.inRange);
+  const currentStorageState = useMemo(() => {
+    const latestByLocation = new Map<string, StorageStateEvent>();
+    [...storageEvents]
+      .sort((left, right) => new Date(left.recordedAt).getTime() - new Date(right.recordedAt).getTime())
+      .forEach(event => latestByLocation.set(event.location, event));
+    return latestByLocation;
+  }, [storageEvents]);
 
-  // Get latest reading per location
+  const inRange = temperatureReadings.filter(reading => reading.coldChainStorageReading
+    ? reading.milkTemperatureInRange === true
+    : reading.inRange);
+  const outOfRange = temperatureReadings.filter(reading => reading.coldChainStorageReading
+    ? reading.milkTemperatureInRange === false
+    : !reading.inRange);
+
   const latestByLocation = temperatureReadings.reduce((acc, reading) => {
     if (!acc[reading.location] || new Date(reading.recordedAt) > new Date(acc[reading.location].recordedAt)) {
       acc[reading.location] = reading;
     }
     return acc;
-  }, {} as Record<string, typeof temperatureReadings[0]>);
+  }, {} as Record<string, TemperatureReading>);
 
-  // New reading form
-  const [newReading, setNewReading] = useState({
-    location: 'Chiller',
-    temperature: 4.0,
-    recordedBy: '',
-  });
+  const todayCount = (location: string) => temperatureReadings.filter(reading =>
+    reading.location === location && new Date(reading.recordedAt).toDateString() === new Date().toDateString()
+  ).length;
+
+  const recordStorageState = (location: string, status: StorageStateEvent['status']) => {
+    const recordedBy = getCurrentUserName();
+    if (!recordedBy) {
+      showToast('error', 'Sign in with a named user account before changing storage status');
+      return;
+    }
+    const selectedLotCode = milkLots.find(lot => lot.status === 'active')?.lotCode;
+    const event: StorageStateEvent = {
+      id: `cold-chain-state-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      location,
+      status,
+      ...(status === 'milk_present' && selectedLotCode ? { milkLotCode: selectedLotCode } : {}),
+      recordedAt: new Date().toISOString(),
+      recordedBy,
+    };
+    setStorageEvents(current => [...current, event]);
+    showToast('success', status === 'empty' ? `${location} marked empty` : `Milk presence started for ${location}`);
+  };
 
   const handleLogReading = () => {
-    if (!newReading.recordedBy) {
+    const location = milkStorageLocations.find(option => option.location === newReading.location);
+    if (!newReading.recordedBy.trim()) {
       showToast('error', 'Please enter who recorded this');
       return;
     }
-    const profile = tempProfiles.find(p => p.location === newReading.location);
-    if (!profile) return;
+    if (location && currentStorageState.get(location.location)?.status !== 'milk_present') {
+      showToast('error', `Mark ${location.location} as holding milk before logging its temperature`);
+      return;
+    }
 
-    addTemperatureReading({
-      location: newReading.location,
-      temperature: newReading.temperature,
-      targetMin: profile.targetMin,
-      targetMax: profile.targetMax,
-      recordedAt: new Date().toISOString(),
-      recordedBy: newReading.recordedBy,
-    });
-
-    const inRange = newReading.temperature >= profile.targetMin && newReading.temperature <= profile.targetMax;
-    if (inRange) {
-      showToast('success', `Temperature logged: ${newReading.temperature}°C at ${newReading.location}`);
+    if (location) {
+      const milkTemperature = newReading.milkTemperature.trim() === '' ? undefined : Number(newReading.milkTemperature);
+      const storageTemperature = newReading.storageTemperature.trim() === '' ? undefined : Number(newReading.storageTemperature);
+      if (location.kind === 'vessel' && milkTemperature === undefined) {
+        showToast('error', 'Enter the milk temperature for this vessel');
+        return;
+      }
+      if (location.kind === 'transport' && storageTemperature === undefined) {
+        showToast('error', 'Enter the truck or coldroom temperature');
+        return;
+      }
+      if ((milkTemperature !== undefined && !Number.isFinite(milkTemperature))
+        || (storageTemperature !== undefined && !Number.isFinite(storageTemperature))) {
+        showToast('error', 'Enter valid temperature values');
+        return;
+      }
+      const primaryTemperature = milkTemperature ?? storageTemperature!;
+      const milkInRange = milkTemperature === undefined ? undefined : isRawMilkTemperatureInRange(milkTemperature);
+      addTemperatureReading({
+        location: location.location,
+        temperature: primaryTemperature,
+        targetMin: RAW_MILK_TEMP_MIN_C,
+        targetMax: RAW_MILK_TEMP_MAX_C,
+        recordedAt: new Date().toISOString(),
+        recordedBy: newReading.recordedBy.trim(),
+        coldChainStorageReading: true,
+        ...(milkTemperature !== undefined ? { milkTemperature, milkTemperatureInRange: milkInRange } : {}),
+        ...(storageTemperature !== undefined ? { storageTemperature } : {}),
+        ...(newReading.milkLotCode ? { milkLotCode: newReading.milkLotCode } : {}),
+      });
+      if (milkInRange === false) {
+        showToast('error', `MILK TEMPERATURE EXCURSION: ${milkTemperature}°C at ${location.location}; required ${RAW_MILK_TEMP_MIN_C}–${RAW_MILK_TEMP_MAX_C}°C`);
+      } else {
+        showToast('success', `Cold-chain check logged for ${location.location}`);
+      }
     } else {
-      showToast('error', `⚠️ OUT OF RANGE: ${newReading.temperature}°C at ${newReading.location} (target: ${profile.targetMin}–${profile.targetMax}°C)`);
+      const profile = legacyTempProfiles.find(item => item.location === newReading.location);
+      const temperature = Number(newReading.temperature);
+      if (!profile || newReading.temperature.trim() === '' || !Number.isFinite(temperature)) {
+        showToast('error', 'Enter a valid temperature');
+        return;
+      }
+      addTemperatureReading({
+        location: profile.location,
+        temperature,
+        targetMin: profile.targetMin,
+        targetMax: profile.targetMax,
+        recordedAt: new Date().toISOString(),
+        recordedBy: newReading.recordedBy.trim(),
+      });
+      const profileInRange = temperature >= profile.targetMin && temperature <= profile.targetMax;
+      showToast(profileInRange ? 'success' : 'error', profileInRange
+        ? `Temperature logged: ${temperature}°C at ${profile.location}`
+        : `OUT OF RANGE: ${temperature}°C at ${profile.location} (target: ${profile.targetMin}–${profile.targetMax}°C)`);
     }
 
     setShowLogModal(false);
-    setNewReading({ location: 'Chiller', temperature: 4.0, recordedBy: '' });
+    setNewReading(current => ({ ...current, temperature: '', milkTemperature: '', storageTemperature: '' }));
   };
 
-  // Build chart data from readings grouped by time
-  const chartData = Object.values(
-    temperatureReadings.reduce((acc, r) => {
-      const time = r.recordedAt.split('T')[1]?.substring(0, 5) || '';
-      if (!acc[time]) acc[time] = { time };
-      acc[time][r.location] = r.temperature;
-      return acc;
-    }, {} as Record<string, any>)
-  ).sort((a, b) => a.time.localeCompare(b.time));
-
+  const selectedMilkStorageLocation = milkStorageLocations.find(location => location.location === newReading.location);
   return (
     <div className="space-y-5">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Cold Chain Monitoring</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Temperature tracking and compliance</p>
+          <p className="mt-0.5 text-sm text-slate-500">Raw milk: 2–6°C. Record at least two checks each day while milk is present.</p>
         </div>
-        <button 
-          onClick={() => setShowLogModal(true)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Log Reading
+        <button onClick={() => setShowLogModal(true)} className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700">
+          <Plus className="h-4 w-4" /> Log Reading
         </button>
       </div>
 
-      {/* Status summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
-          <CheckCircle2 className="w-6 h-6 text-emerald-600 mx-auto mb-1" />
-          <p className="text-2xl font-bold text-emerald-700">{inRange.length}</p>
-          <p className="text-xs text-emerald-600">In Range</p>
-        </div>
-        <div className={`${outOfRange.length > 0 ? 'bg-red-50 border border-red-200' : 'bg-slate-50 border border-slate-200'} rounded-xl p-4 text-center`}>
-          <AlertTriangle className={`w-6 h-6 mx-auto mb-1 ${outOfRange.length > 0 ? 'text-red-600' : 'text-slate-400'}`} />
-          <p className={`text-2xl font-bold ${outOfRange.length > 0 ? 'text-red-700' : 'text-slate-500'}`}>{outOfRange.length}</p>
-          <p className={`text-xs ${outOfRange.length > 0 ? 'text-red-600' : 'text-slate-400'}`}>Out of Range</p>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
-          <Clock className="w-6 h-6 text-blue-600 mx-auto mb-1" />
-          <p className="text-2xl font-bold text-blue-700">{temperatureReadings.length}</p>
-          <p className="text-xs text-blue-600">Total Readings</p>
-        </div>
-        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-center">
-          <Thermometer className="w-6 h-6 text-indigo-600 mx-auto mb-1" />
-          <p className="text-2xl font-bold text-indigo-700">{Object.keys(latestByLocation).length}</p>
-          <p className="text-xs text-indigo-600">Locations</p>
-        </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center"><CheckCircle2 className="mx-auto mb-1 h-6 w-6 text-emerald-600" /><p className="text-2xl font-bold text-emerald-700">{inRange.length}</p><p className="text-xs text-emerald-600">In range</p></div>
+        <div className={`${outOfRange.length ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50'} rounded-xl border p-4 text-center`}><AlertTriangle className={`mx-auto mb-1 h-6 w-6 ${outOfRange.length ? 'text-red-600' : 'text-slate-400'}`} /><p className={`text-2xl font-bold ${outOfRange.length ? 'text-red-700' : 'text-slate-500'}`}>{outOfRange.length}</p><p className={`text-xs ${outOfRange.length ? 'text-red-600' : 'text-slate-400'}`}>Out of range</p></div>
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-center"><Clock className="mx-auto mb-1 h-6 w-6 text-blue-600" /><p className="text-2xl font-bold text-blue-700">{temperatureReadings.length}</p><p className="text-xs text-blue-600">Total readings</p></div>
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center"><Thermometer className="mx-auto mb-1 h-6 w-6 text-indigo-600" /><p className="text-2xl font-bold text-indigo-700">{milkStorageLocations.filter(location => currentStorageState.get(location.location)?.status === 'milk_present').length}</p><p className="text-xs text-indigo-600">Raw-milk locations active</p></div>
       </div>
 
-      {/* Temperature chart */}
-      {chartData.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <h3 className="text-sm font-semibold text-slate-900 mb-4">Temperature History</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="time" tick={{ fontSize: 12 }} stroke="#94a3b8" />
-              <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" domain={[-27, 8]} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }} />
-              <ReferenceLine y={5} stroke="#ef4444" strokeDasharray="3 3" />
-              <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" />
-              <Line type="monotone" dataKey="Chiller" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="Dairy Container (Intermediate Freezer)" name="Dairy Container" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="Coldroom" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="Distribution Coldroom" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="Rental Cold Storage" stroke="#ec4899" strokeWidth={2} dot={{ r: 3 }} />
-            </LineChart>
-          </ResponsiveContainer>
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="mb-3">
+          <h3 className="text-sm font-semibold text-slate-900">Milk storage checks</h3>
+          <p className="mt-1 text-xs text-slate-500">Mark a location as holding milk when it is loaded. Mark it empty when it has been cleared; checks are then no longer due.</p>
         </div>
-      )}
-
-      {/* Location cards — latest readings */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {Object.values(latestByLocation).map((reading) => (
-          <div
-            key={reading.id}
-            className={`rounded-xl border p-4 ${reading.inRange ? 'bg-white border-slate-200' : 'bg-red-50 border-red-200'}`}
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  {reading.location.includes('Freezer') ? <Snowflake className="w-4 h-4 text-indigo-500" /> : <Thermometer className="w-4 h-4 text-blue-500" />}
-                  <h4 className="text-sm font-semibold text-slate-900">{reading.location}</h4>
-                </div>
-                <p className="text-xs text-slate-500 mt-1">Target: {reading.targetMin}°C to {reading.targetMax}°C</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {milkStorageLocations.map(location => {
+            const stateEvent = currentStorageState.get(location.location);
+            const active = stateEvent?.status === 'milk_present';
+            const count = todayCount(location.location);
+            const latest = latestByLocation[location.location];
+            const temperatureAlert = latest?.coldChainStorageReading && latest.milkTemperatureInRange === false;
+            return <article key={location.location} className={`rounded-xl border p-4 ${temperatureAlert ? 'border-red-300 bg-red-50' : active ? count >= requiredDailyChecks ? 'border-emerald-200 bg-emerald-50/50' : 'border-amber-200 bg-amber-50/50' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2">{location.kind === 'transport' ? <Truck className="h-4 w-4 text-sky-600" /> : <Snowflake className="h-4 w-4 text-indigo-600" />}<h4 className="font-semibold text-slate-900">{location.location}</h4></div>
+                <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${active ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'}`}>{active ? 'Milk present' : 'Empty'}</span>
               </div>
-              <div className="text-right">
-                <p className={`text-2xl font-bold ${reading.inRange ? 'text-slate-900' : 'text-red-600'}`}>{reading.temperature}°C</p>
-                <span className={`inline-flex items-center gap-1 text-xs font-medium ${reading.inRange ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {reading.inRange ? <><CheckCircle2 className="w-3 h-3" /> OK</> : <><AlertTriangle className="w-3 h-3" /> Alert</>}
-                </span>
+              {active ? <>
+                <p className={`mt-3 text-sm font-medium ${count >= requiredDailyChecks ? 'text-emerald-700' : 'text-amber-700'}`}>{count}/{requiredDailyChecks} checks recorded today {count >= requiredDailyChecks ? '· complete' : '· check due'}</p>
+                <p className={`mt-1 min-h-5 text-xs ${temperatureAlert ? 'font-semibold text-red-700' : 'text-slate-600'}`}>{stateEvent?.milkLotCode ? `Lot ${stateEvent.milkLotCode} · ` : ''}{latest ? `Latest: ${latest.milkTemperature !== undefined ? `milk ${latest.milkTemperature}°C` : `${latest.temperature}°C`}${temperatureAlert ? ' · MILK TEMP EXCURSION' : ''} at ${new Date(latest.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'No temperature recorded yet'}</p>
+              </> : <p className="mt-3 text-xs text-slate-500">No temperature checks required while empty.</p>}
+              <div className="mt-3 flex gap-2">
+                {!active && <button onClick={() => recordStorageState(location.location, 'milk_present')} className="flex-1 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Milk in</button>}
+                {active && <button onClick={() => recordStorageState(location.location, 'empty')} className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100">Mark empty</button>}
+                {active && <button onClick={() => { setNewReading(current => ({ ...current, location: location.location, milkLotCode: stateEvent?.milkLotCode || milkLots.find(lot => lot.status === 'active')?.lotCode || '' })); setShowLogModal(true); }} className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Log check</button>}
               </div>
-            </div>
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
-              <span className="text-xs text-slate-500">By: {reading.recordedBy}</span>
-              <span className="text-xs text-slate-500">{reading.recordedAt.split('T')[1]?.substring(0, 5)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* All readings table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200">
-          <h3 className="text-sm font-semibold text-slate-900">All Readings</h3>
+            </article>;
+          })}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50 text-left">
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Location</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Temp</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Target</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Status</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">By</th>
-                <th className="px-4 py-2.5 font-medium text-slate-500 text-xs uppercase tracking-wide">Time</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {[...temperatureReadings].reverse().map((reading) => (
-                <tr key={reading.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-2.5 text-slate-700">{reading.location}</td>
-                  <td className="px-4 py-2.5 font-medium text-slate-900">{reading.temperature}°C</td>
-                  <td className="px-4 py-2.5 text-slate-500 text-xs">{reading.targetMin}–{reading.targetMax}°C</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${reading.inRange ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                      {reading.inRange ? 'OK' : 'OUT OF RANGE'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-slate-500">{reading.recordedBy}</td>
-                  <td className="px-4 py-2.5 text-slate-500 text-xs">{reading.recordedAt.split('T')[1]?.substring(0, 5)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        <p className="mt-3 text-[11px] text-slate-500">Milk temperature flags below {RAW_MILK_TEMP_MIN_C}°C or above {RAW_MILK_TEMP_MAX_C}°C. Truck and Milk Coldroom storage temperatures are recorded separately; no equipment/air limit has been configured.</p>
+      </section>
 
-      {/* Log Reading Modal */}
-      <Modal isOpen={showLogModal} onClose={() => setShowLogModal(false)} title="Log Temperature Reading">
+      {temperatureReadings.length > 0 && <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">Temperature history (°C)</h3>
+        <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead><tr className="bg-slate-50 text-left text-xs uppercase text-slate-500"><th className="px-3 py-2">Location</th><th className="px-3 py-2">Milk temp</th><th className="px-3 py-2">Storage temp</th><th className="px-3 py-2">Milk range result</th><th className="px-3 py-2">Recorded at / by</th><th className="px-3 py-2">Lot</th></tr></thead><tbody className="divide-y divide-slate-100">
+          {[...temperatureReadings].sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()).map(reading => {
+            const hasMilkCheck = reading.coldChainStorageReading ? reading.milkTemperature !== undefined : true;
+            const milkTemp = reading.coldChainStorageReading ? reading.milkTemperature : undefined;
+            const result = reading.coldChainStorageReading ? reading.milkTemperatureInRange : reading.inRange;
+            return <tr key={reading.id} className={result === false ? 'bg-red-50' : ''}>
+              <td className="px-3 py-2 font-medium text-slate-900">{reading.location}</td>
+              <td className="px-3 py-2">{reading.coldChainStorageReading ? milkTemp === undefined ? '—' : `${milkTemp}°C` : `${reading.temperature}°C`}</td>
+              <td className="px-3 py-2">{reading.coldChainStorageReading ? reading.storageTemperature === undefined ? '—' : `${reading.storageTemperature}°C` : '—'}</td>
+              <td className="px-3 py-2">{hasMilkCheck ? <span className={`inline-flex items-center gap-1 font-semibold ${result ? 'text-emerald-700' : 'text-red-700'}`}>{result ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}{result ? '2–6°C OK' : 'Excursion'}</span> : <span className="text-slate-500">Milk temp not recorded</span>}</td>
+              <td className="px-3 py-2 text-xs text-slate-600">{new Date(reading.recordedAt).toLocaleString()} · {reading.recordedBy}</td>
+              <td className="px-3 py-2">{reading.milkLotCode || '—'}</td>
+            </tr>;
+          })}
+          {temperatureReadings.length === 0 && <tr><td colSpan={6} className="px-3 py-5 text-center text-slate-500">No readings recorded yet.</td></tr>}
+        </tbody></table></div>
+      </div>}
+
+      {outOfRange.length > 0 && <section className="rounded-xl border border-red-200 bg-red-50 p-4"><h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-red-800"><XCircle className="h-4 w-4" /> Temperature excursions</h3><ul className="space-y-1 text-sm text-red-800">{outOfRange.map(reading => <li key={reading.id}>{reading.location}: {reading.coldChainStorageReading ? reading.milkTemperature : reading.temperature}°C (milk limit {RAW_MILK_TEMP_MIN_C}–{RAW_MILK_TEMP_MAX_C}°C) · {new Date(reading.recordedAt).toLocaleString()} · {reading.recordedBy}</li>)}</ul></section>}
+
+      {storageEvents.length > 0 && <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="mb-2 text-sm font-semibold text-slate-900">Storage status history</h3><ul className="space-y-1 text-xs text-slate-600">{[...storageEvents].sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()).map(event => <li key={event.id}>{event.location}: <span className="font-medium">{event.status === 'empty' ? 'marked empty' : `milk present${event.milkLotCode ? ` · Lot ${event.milkLotCode}` : ''}`}</span> · {new Date(event.recordedAt).toLocaleString()} · {event.recordedBy}</li>)}</ul></section>}
+
+      <Modal isOpen={showLogModal} onClose={() => setShowLogModal(false)} title="Log Cold-Chain Reading">
         <div className="space-y-4">
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Location</label>
-            <select
-              value={newReading.location}
-              onChange={(e) => setNewReading({ ...newReading, location: e.target.value })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
-            >
-              {tempProfiles.map(p => <option key={p.location} value={p.location}>{p.location} ({p.targetMin}–{p.targetMax}°C)</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Temperature (°C)</label>
-            <input
-              type="number"
-              value={newReading.temperature}
-              onChange={(e) => setNewReading({ ...newReading, temperature: parseFloat(e.target.value) })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              step="0.1"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded By</label>
-            <input
-              type="text"
-              value={newReading.recordedBy}
-              onChange={(e) => setNewReading({ ...newReading, recordedBy: e.target.value })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              placeholder="e.g. Rajesh"
-            />
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button onClick={handleLogReading} className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors">
-              Log Reading
-            </button>
-            <button onClick={() => setShowLogModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors">
-              Cancel
-            </button>
-          </div>
+          <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Location</label><select value={newReading.location} onChange={event => setNewReading(current => ({ ...current, location: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><optgroup label="Raw milk storage">{milkStorageLocations.map(location => <option key={location.location} value={location.location}>{location.location}</option>)}</optgroup><optgroup label="Other cold storage">{legacyTempProfiles.map(profile => <option key={profile.location} value={profile.location}>{profile.location} ({profile.targetMin}–{profile.targetMax}°C)</option>)}</optgroup></select></div>
+          {selectedMilkStorageLocation ? <>
+          <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-800">Milk temperature must be {RAW_MILK_TEMP_MIN_C}–{RAW_MILK_TEMP_MAX_C}°C. Any reading below {RAW_MILK_TEMP_MIN_C}°C or above {RAW_MILK_TEMP_MAX_C}°C will be flagged.</div>
+            {selectedMilkStorageLocation.kind === 'vessel' ? <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk temperature (°C)</label><input type="number" value={newReading.milkTemperature} onChange={event => setNewReading(current => ({ ...current, milkTemperature: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" step="0.1" inputMode="decimal" placeholder="e.g. 4.2" /></div> : <>
+              <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">{selectedMilkStorageLocation.location === 'Truck' ? 'Truck temperature' : 'Coldroom temperature'} (°C)</label><input type="number" value={newReading.storageTemperature} onChange={event => setNewReading(current => ({ ...current, storageTemperature: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" step="0.1" inputMode="decimal" placeholder="e.g. 4.2" /><p className="mt-1 text-[11px] text-slate-500">Recorded separately; equipment temperature limits have not been set.</p></div>
+              <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk temperature (optional, °C)</label><input type="number" value={newReading.milkTemperature} onChange={event => setNewReading(current => ({ ...current, milkTemperature: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" step="0.1" inputMode="decimal" placeholder="e.g. 4.5" /></div>
+            </>}
+            <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Milk lot (optional)</label><select value={newReading.milkLotCode} onChange={event => setNewReading(current => ({ ...current, milkLotCode: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Not specified</option>{milkLots.map(lot => <option key={lot.id} value={lot.lotCode}>{lot.lotCode}{lot.status === 'active' ? ' · active' : ''}</option>)}</select></div>
+          </> : <>
+            <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Temperature (°C)</label><input type="number" value={newReading.temperature} onChange={event => setNewReading(current => ({ ...current, temperature: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" step="0.1" inputMode="decimal" /></div>
+          </>}
+          <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Recorded by</label><input type="text" value={newReading.recordedBy} onChange={event => setNewReading(current => ({ ...current, recordedBy: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Staff name" /></div>
+          <div className="flex gap-2 pt-2"><button onClick={handleLogReading} className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700">Log Reading</button><button onClick={() => setShowLogModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200">Cancel</button></div>
         </div>
       </Modal>
     </div>

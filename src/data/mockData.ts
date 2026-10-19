@@ -689,6 +689,12 @@ export interface TemperatureReading {
   recordedAt: string;
   recordedBy: string;
   inRange: boolean;
+  /** New raw-milk storage logs keep milk and surrounding storage readings distinct. */
+  coldChainStorageReading?: boolean;
+  milkTemperature?: number;
+  storageTemperature?: number;
+  milkTemperatureInRange?: boolean;
+  milkLotCode?: string;
 }
 
 export interface WasteEvent {
