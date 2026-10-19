@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { calculatePaneerRemainingBalance, getPaneerRoundRemainingBalance } from './paneerBalance';
+import {
+  calculatePaneerRemainingBalance,
+  getPaneerRoundRemainingBalance,
+  reconcileFrozenRoundBalances,
+} from './paneerBalance';
 
 describe('calculatePaneerRemainingBalance', () => {
   it('uses corrected block output when no packing or SPP has been recorded', () => {
@@ -27,5 +31,32 @@ describe('calculatePaneerRemainingBalance', () => {
       outputWeight: 84.168,
       remainingBalance: 12087.153,
     })).toBeCloseTo(84.168, 6);
+  });
+});
+
+describe('reconcileFrozenRoundBalances', () => {
+  it('subtracts overpacked round stock from positive frozen balances', () => {
+    expect(reconcileFrozenRoundBalances([30, -5])).toEqual({
+      positiveBalanceKg: 30,
+      overpackedKg: 5,
+      netBalanceKg: 25,
+    });
+  });
+
+  it('does not report negative stock when overpacking exceeds the positive pool', () => {
+    expect(reconcileFrozenRoundBalances([10, -14])).toEqual({
+      positiveBalanceKg: 10,
+      overpackedKg: 14,
+      netBalanceKg: 0,
+    });
+  });
+
+  it('handles empty, zero, and non-finite balances safely', () => {
+    expect(reconcileFrozenRoundBalances([]).netBalanceKg).toBe(0);
+    expect(reconcileFrozenRoundBalances([0, Number.NaN, Number.POSITIVE_INFINITY])).toEqual({
+      positiveBalanceKg: 0,
+      overpackedKg: 0,
+      netBalanceKg: 0,
+    });
   });
 });

@@ -27,7 +27,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { getMilkLotAccounting, getRoundMilkInput, statusLabels } from '../data/mockData';
 import { reconcileFinishedStock } from '../lib/finishedStock';
-import { getPaneerRoundRemainingBalance } from '../lib/paneerBalance';
+import { getPaneerRoundRemainingBalance, reconcileFrozenRoundBalances } from '../lib/paneerBalance';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { Modal } from '../components/Modal';
 
@@ -149,8 +149,14 @@ export default function Dashboard() {
     .reduce((s, lot) => s + lot.currentQuantity, 0);
   const legacyFrozenRounds = activeLotRounds
     .filter((round) => round.status === 'frozen' && !intermediateSourceRoundIds.has(round.id));
-  const legacyFrozenRoundStock = legacyFrozenRounds
-    .reduce((s, round) => s + Math.max(0, getPaneerRoundRemainingBalance(round) ?? 0), 0);
+  const legacyFrozenRoundBalances = legacyFrozenRounds.map((round) => ({
+    round,
+    balanceKg: getPaneerRoundRemainingBalance(round) ?? 0,
+  }));
+  const legacyFrozenBalanceTotals = reconcileFrozenRoundBalances(
+    legacyFrozenRoundBalances.map(({ balanceKg }) => balanceKg),
+  );
+  const legacyFrozenRoundStock = legacyFrozenBalanceTotals.netBalanceKg;
   const frozenStock = recordedFrozenStock + legacyFrozenRoundStock;
   const unexplainedMilk = activeMilkLot
     ? activeMilkLot.litresReceived - milkAccounting.consumed - milkAccounting.remaining
@@ -377,7 +383,11 @@ export default function Dashboard() {
               <p className="text-sm font-semibold text-indigo-900">Recorded frozen stock</p>
               <p className="text-xl font-bold text-indigo-900">{frozenStock.toFixed(2)} kg</p>
             </div>
-            <p className="mt-1 text-xs text-indigo-700">{frozenFreezerLots.length} freezer intermediate lot{frozenFreezerLots.length === 1 ? '' : 's'} ({recordedFrozenStock.toFixed(2)} kg){legacyFrozenRounds.length > 0 ? ` + ${legacyFrozenRounds.length} legacy frozen round${legacyFrozenRounds.length === 1 ? '' : 's'} (${legacyFrozenRoundStock.toFixed(2)} kg)` : ''}. Consumed lots and non-freezer locations are excluded.</p>
+            <div className="mt-2 space-y-1 text-xs text-indigo-700">
+              <p>{frozenFreezerLots.length} recorded freezer intermediate lot{frozenFreezerLots.length === 1 ? '' : 's'}: {recordedFrozenStock.toFixed(2)} kg.</p>
+              {legacyFrozenRounds.length > 0 && <p>Legacy round pool: max(0, positive balances {legacyFrozenBalanceTotals.positiveBalanceKg.toFixed(2)} kg − overpacked stock {legacyFrozenBalanceTotals.overpackedKg.toFixed(2)} kg) = {legacyFrozenRoundStock.toFixed(2)} kg.</p>}
+              <p>Total frozen stock: {recordedFrozenStock.toFixed(2)} kg + {legacyFrozenRoundStock.toFixed(2)} kg legacy pool = <strong>{frozenStock.toFixed(2)} kg</strong>. Consumed lots and non-freezer locations are excluded.</p>
+            </div>
           </div>
 
           <section>
@@ -405,10 +415,10 @@ export default function Dashboard() {
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full min-w-[460px] text-left text-xs">
                 <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Round</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Remaining balance</th></tr></thead>
-                <tbody className="divide-y divide-slate-100">{legacyFrozenRounds.map(round => <tr key={round.id}>
+                <tbody className="divide-y divide-slate-100">{legacyFrozenRoundBalances.map(({ round, balanceKg }) => <tr key={round.id}>
                   <td className="px-3 py-2 font-mono text-slate-700">{round.milkLotCode} · S{round.shiftNumber}/R{round.roundNumber}</td>
                   <td className="px-3 py-2 text-slate-600">{round.type}</td>
-                  <td className="px-3 py-2 font-semibold text-slate-900">{Math.max(0, getPaneerRoundRemainingBalance(round) ?? 0).toFixed(2)} kg</td>
+                  <td className={`px-3 py-2 font-semibold ${balanceKg < 0 ? 'text-rose-700' : 'text-slate-900'}`}>{balanceKg < 0 ? `Overpacked by ${Math.abs(balanceKg).toFixed(2)} kg` : `${balanceKg.toFixed(2)} kg available`}</td>
                 </tr>)}</tbody>
               </table>
             </div>

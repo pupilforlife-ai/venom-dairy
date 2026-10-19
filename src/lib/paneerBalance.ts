@@ -38,3 +38,19 @@ export function getPaneerRoundRemainingBalance(round: {
   if (round.remainingBalance === undefined && round.sppRecordedWeight === undefined && !round.packedSkus?.length) return undefined;
   return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || []);
 }
+
+/**
+ * Net the round-level frozen balances as one shared legacy stock pool. A
+ * negative round balance is overpacked stock and offsets positive balances
+ * from the other eligible rounds; it is not additional frozen stock.
+ */
+export function reconcileFrozenRoundBalances(roundBalances: number[]) {
+  const finiteBalances = roundBalances.filter(Number.isFinite);
+  const positiveBalanceKg = finiteBalances.reduce((sum, balance) => sum + Math.max(0, balance), 0);
+  const overpackedKg = finiteBalances.reduce((sum, balance) => sum + Math.max(0, -balance), 0);
+  return {
+    positiveBalanceKg,
+    overpackedKg,
+    netBalanceKg: Math.max(0, positiveBalanceKg - overpackedKg),
+  };
+}
