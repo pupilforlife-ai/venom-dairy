@@ -31,8 +31,35 @@ describe('bread production calculations', () => {
       packedPackets: 18,
       packedPieces: 56,
       packingRejectPieces: 4,
+      totalProducedPieces: 200,
+      differenceFromPackedPieces: 144,
       usableAfterManufacturing: 195,
       balancePieces: 135,
+      hasLegacyPrePackingCount: true,
+    });
+  });
+
+  it('derives new round production from packed pieces and rejects without using crate count as a conversion', () => {
+    const round: BreadProductionRound = {
+      id: 'round-new',
+      roundNumber: 1,
+      cratesSent: 4,
+      manufacturingRejectPieces: 2,
+      recordedAt: '2026-10-19T08:00:00.000Z',
+      recordedBy: 'operator',
+      packingEntries: [
+        { id: 'pack-new', sku: 'TN3', cases: 1, loosePackets: 1, rejectedPieces: 3, recordedAt: '', recordedBy: '' },
+      ],
+    };
+    expect(getBreadRoundTotals(round)).toMatchObject({
+      packedPackets: 16,
+      packedPieces: 48,
+      packingRejectPieces: 3,
+      totalProducedPieces: 53,
+      differenceFromPackedPieces: 5,
+      usableAfterManufacturing: null,
+      balancePieces: null,
+      hasLegacyPrePackingCount: false,
     });
   });
 });

@@ -30,7 +30,10 @@ export interface BreadPackingEntry {
 export interface BreadProductionRound {
   id: string;
   roundNumber: number;
-  producedPieces: number;
+  /** Number of crates handed to packing. Informational; crate capacity varies. */
+  cratesSent?: number;
+  /** Legacy pre-packing count retained for rounds entered before crate tracking. */
+  producedPieces?: number;
   manufacturingRejectPieces: number;
   recordedAt: string;
   recordedBy: string;
@@ -108,7 +111,25 @@ export function getBreadRoundTotals(round: BreadProductionRound) {
     return total + (entry.cases * definition.packetsPerCase + entry.loosePackets) * definition.piecesPerPacket;
   }, 0);
   const packingRejectPieces = round.packingEntries.reduce((total, entry) => total + entry.rejectedPieces, 0);
-  const usableAfterManufacturing = round.producedPieces - round.manufacturingRejectPieces;
-  const balancePieces = usableAfterManufacturing - packedPieces - packingRejectPieces;
-  return { packedPackets, packedPieces, packingRejectPieces, usableAfterManufacturing, balancePieces };
+  const hasLegacyPrePackingCount = Number.isFinite(round.producedPieces);
+  const totalProducedPieces = hasLegacyPrePackingCount
+    ? round.producedPieces!
+    : packedPieces + round.manufacturingRejectPieces + packingRejectPieces;
+  const usableAfterManufacturing = hasLegacyPrePackingCount
+    ? totalProducedPieces - round.manufacturingRejectPieces
+    : null;
+  const balancePieces = hasLegacyPrePackingCount && usableAfterManufacturing !== null
+    ? usableAfterManufacturing - packedPieces - packingRejectPieces
+    : null;
+  const differenceFromPackedPieces = totalProducedPieces - packedPieces;
+  return {
+    packedPackets,
+    packedPieces,
+    packingRejectPieces,
+    totalProducedPieces,
+    differenceFromPackedPieces,
+    usableAfterManufacturing,
+    balancePieces,
+    hasLegacyPrePackingCount,
+  };
 }

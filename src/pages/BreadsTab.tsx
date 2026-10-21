@@ -44,7 +44,7 @@ export default function BreadsTab() {
   const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null);
   const [batchProduct, setBatchProduct] = useState<BreadProductCode>('TBN');
   const [flourKg, setFlourKg] = useState(12.5);
-  const [roundForm, setRoundForm] = useState({ producedPieces: '', manufacturingRejectPieces: '' });
+  const [roundForm, setRoundForm] = useState({ cratesSent: '', manufacturingRejectPieces: '' });
   const [packingForm, setPackingForm] = useState({ sku: 'TN3' as BreadSkuCode, cases: '', loosePackets: '', rejectedPieces: '' });
 
   const sortedBatches = useMemo(() => [...batches].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [batches]);
@@ -53,7 +53,7 @@ export default function BreadsTab() {
 
   const openRound = (batch: BreadDoughBatch) => {
     setSelectedBatchId(batch.id);
-    setRoundForm({ producedPieces: '', manufacturingRejectPieces: '' });
+    setRoundForm({ cratesSent: '', manufacturingRejectPieces: '' });
     setShowRoundModal(true);
   };
 
@@ -109,16 +109,16 @@ export default function BreadsTab() {
   const createProductionRound = () => {
     const batch = batches.find(item => item.id === selectedBatchId);
     if (!batch) return;
-    const producedPieces = Number(roundForm.producedPieces) || 0;
+    const cratesSent = Number(roundForm.cratesSent) || 0;
     const manufacturingRejectPieces = Number(roundForm.manufacturingRejectPieces) || 0;
-    if (!Number.isInteger(producedPieces) || !Number.isInteger(manufacturingRejectPieces) || producedPieces < 0 || manufacturingRejectPieces < 0 || producedPieces + manufacturingRejectPieces <= 0) {
-      showToast('error', 'Enter whole naan-piece counts; record at least one piece made or rejected');
+    if (!Number.isInteger(cratesSent) || !Number.isInteger(manufacturingRejectPieces) || cratesSent < 0 || manufacturingRejectPieces < 0 || cratesSent + manufacturingRejectPieces <= 0) {
+      showToast('error', 'Enter whole crate and reject counts; record at least one crate or manufacturing reject');
       return;
     }
     const round: BreadProductionRound = {
       id: makeId('bread-round'),
       roundNumber: batch.rounds.reduce((highest, item) => Math.max(highest, item.roundNumber), 0) + 1,
-      producedPieces,
+      cratesSent,
       manufacturingRejectPieces,
       recordedAt: new Date().toISOString(),
       recordedBy: currentActor(),
@@ -225,15 +225,16 @@ export default function BreadsTab() {
                         <button type="button" onClick={() => openPacking(batch, round)} className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"><PackagePlus className="h-3.5 w-3.5" /> Record packing</button>
                       </div>
                       <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                        <div className="rounded bg-slate-50 p-2"><span className="block text-slate-500">Naan produced</span><strong>{round.producedPieces}</strong></div>
+                        <div className="rounded bg-slate-50 p-2"><span className="block text-slate-500">Crates sent to packing</span><strong>{round.cratesSent ?? 'Legacy record'}</strong></div>
                         <div className="rounded bg-rose-50 p-2"><span className="block text-rose-700">Manufacturing rejects</span><strong>{round.manufacturingRejectPieces}</strong></div>
-                        <div className="rounded bg-emerald-50 p-2"><span className="block text-emerald-700">Usable after manufacture</span><strong>{totals.usableAfterManufacturing}</strong></div>
+                        <div className="rounded bg-emerald-50 p-2"><span className="block text-emerald-700">Total naan pieces made</span><strong>{totals.totalProducedPieces}</strong><span className="block">Packed + both reject counts</span></div>
                         <div className="rounded bg-indigo-50 p-2"><span className="block text-indigo-700">Packed naan pieces</span><strong>{totals.packedPieces}</strong><span className="block">{totals.packedPackets} packets total</span></div>
                         <div className="rounded bg-rose-50 p-2"><span className="block text-rose-700">Packing rejects</span><strong>{totals.packingRejectPieces}</strong></div>
-                        <div className={`rounded p-2 ${totals.balancePieces < 0 ? 'bg-red-100 text-red-800' : 'bg-amber-50 text-amber-800'}`}><span className="block">Unpacked balance</span><strong>{totals.balancePieces} pieces</strong></div>
+                        <div className="rounded bg-amber-50 p-2 text-amber-800"><span className="block">Difference: total made − packed</span><strong>{totals.differenceFromPackedPieces} pieces</strong><span className="block">Manufacturing + packing rejects</span></div>
+                        {totals.hasLegacyPrePackingCount && <div className={`rounded p-2 ${totals.balancePieces! < 0 ? 'bg-red-100 text-red-800' : 'bg-slate-50 text-slate-700'}`}><span className="block">Legacy unaccounted balance</span><strong>{totals.balancePieces} pieces</strong></div>}
                       </div>
-                      {totals.balancePieces < 0 && <p className="mt-2 flex items-center gap-1 text-xs font-medium text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> Packed/rejected quantity exceeds the available round output; recorded for review, not blocked.</p>}
-                      {totals.usableAfterManufacturing < 0 && <p className="mt-2 flex items-center gap-1 text-xs font-medium text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> Manufacturing rejects exceed the pieces recorded as produced; recorded for review, not blocked.</p>}
+                      {totals.hasLegacyPrePackingCount && totals.balancePieces! < 0 && <p className="mt-2 flex items-center gap-1 text-xs font-medium text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> Packed/rejected quantity exceeds the legacy pre-packing count; recorded for review, not blocked.</p>}
+                      {totals.hasLegacyPrePackingCount && totals.usableAfterManufacturing! < 0 && <p className="mt-2 flex items-center gap-1 text-xs font-medium text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> Manufacturing rejects exceed the legacy pieces-made count; recorded for review, not blocked.</p>}
                       {round.packingEntries.length > 0 && <div className="mt-3 space-y-1 border-t border-slate-100 pt-2">
                         {round.packingEntries.map(entry => {
                           const sku = getBreadSku(entry.sku);
@@ -262,8 +263,8 @@ export default function BreadsTab() {
 
       <Modal isOpen={showRoundModal} onClose={() => setShowRoundModal(false)} title={`Record ${selectedBatch?.product || 'bread'} production round`}>
         <div className="space-y-4">
-          <p className="text-sm text-slate-500">Record whole individual naan pieces. Manufacturing rejects are recorded here before packing.</p>
-          <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Total naan pieces made (before manufacturing rejects)</span><input type="number" min="0" step="1" value={roundForm.producedPieces} onChange={event => setRoundForm(current => ({ ...current, producedPieces: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+          <p className="text-sm text-slate-500">Record how many crates are handed to packing and any rejects/losses during manufacture. The packing team records packed quantities and packing-quality rejects; total naan made is then reconciled from those counts.</p>
+          <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Crates sent to packing</span><input type="number" min="0" step="1" value={roundForm.cratesSent} onChange={event => setRoundForm(current => ({ ...current, cratesSent: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
           <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Manufacturing rejects / losses (pieces)</span><input type="number" min="0" step="1" value={roundForm.manufacturingRejectPieces} onChange={event => setRoundForm(current => ({ ...current, manufacturingRejectPieces: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
           <div className="flex gap-2"><button type="button" onClick={createProductionRound} className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">Save production round</button><button type="button" onClick={() => setShowRoundModal(false)} className="rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700">Cancel</button></div>
         </div>
@@ -271,7 +272,7 @@ export default function BreadsTab() {
 
       <Modal isOpen={showPackingModal} onClose={() => setShowPackingModal(false)} title={`Record packing · ${selectedBatch?.batchNumber || ''} / R${selectedRound?.roundNumber || ''}`}>
         <div className="space-y-4">
-          {selectedRound && <div className="rounded-lg bg-slate-50 p-3 text-sm">Available after manufacturing: <strong>{getBreadRoundTotals(selectedRound).usableAfterManufacturing}</strong> naan pieces</div>}
+          {selectedRound && <div className="rounded-lg bg-slate-50 p-3 text-sm">Crates sent to packing: <strong>{selectedRound.cratesSent ?? 'Legacy record'}</strong>. Record what the team actually packed and any quality rejects; production totals reconcile after those entries.</div>}
           <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Pack SKU</span><select value={packingForm.sku} onChange={event => setPackingForm(current => ({ ...current, sku: event.target.value as BreadSkuCode }))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">{breadSkuDefinitions.filter(definition => definition.product === selectedBatch?.product).map(definition => <option key={definition.sku} value={definition.sku}>{definition.sku} · {definition.packetsPerCase} packets/case × {definition.piecesPerPacket} pieces/packet · {definition.saleType}</option>)}</select></label>
           <div className="grid grid-cols-2 gap-3"><label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Cases (15 packets each)</span><input type="number" min="0" step="1" value={packingForm.cases} onChange={event => setPackingForm(current => ({ ...current, cases: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label><label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Loose packets</span><input type="number" min="0" step="1" value={packingForm.loosePackets} onChange={event => setPackingForm(current => ({ ...current, loosePackets: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label></div>
           <label className="block"><span className="text-xs font-medium uppercase tracking-wide text-slate-600">Rejects during packing (individual naan pieces)</span><input type="number" min="0" step="1" value={packingForm.rejectedPieces} onChange={event => setPackingForm(current => ({ ...current, rejectedPieces: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
