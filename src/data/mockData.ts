@@ -206,11 +206,15 @@ export interface HalloumiPool {
 }
 
 export type DistributionHandoverSource = 'finished_stock' | 'halloumi_pool' | 'production_round' | 'crumbing_batch' | 'manual';
+export type ProductionRemainderLocation = 'Dairy Container (Finished Stock)' | 'Chiller';
 
 export interface DistributionHandover {
   id: string;
   sourceType: DistributionHandoverSource;
   sourceId?: string;
+  recordKind?: 'handover' | 'balance_review';
+  sku?: string;
+  sourceBatchCodes?: string[];
   /** Source milk lots represented by this transfer, when traceable. */
   milkLotCodes?: string[];
   milkLotGroupLabel?: string;
@@ -218,6 +222,8 @@ export interface DistributionHandover {
   /** Untransferred remainder classified during a partial transfer. */
   partialRemainderQuantity?: number;
   partialDispositionReason?: string;
+  partialStorageLocation?: ProductionRemainderLocation;
+  partialReviewedBy?: string;
   productName: string;
   // Finished-goods label assigned at Distribution. `batchCode` remains the
   // original source/production code for backwards-compatible genealogy.
@@ -688,6 +694,7 @@ export interface FinishedStockLot {
   incorrectlyRecordedAt?: string;
   incorrectlyRecordedBy?: string;
   incorrectlyRecordedReason?: string;
+  productionRemainderReviewId?: string;
 }
 
 export interface TemperatureReading {
