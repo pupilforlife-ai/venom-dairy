@@ -158,5 +158,5 @@ export function reconcileFinishedStock(
 }
 
 export function isOnSiteFinishedStock(stock: Pick<FinishedStockLot, 'status'>) {
-  return stock.status !== 'handed_over';
+  return stock.status !== 'handed_over' && stock.status !== 'incorrectly_recorded';
 }

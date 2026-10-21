@@ -26,6 +26,7 @@ import {
 } from '../data/skuConfig';
 import { getProductionPackingEntries, reconcileFinishedStock, ReconciledFinishedStockLine } from '../lib/finishedStock';
 import { getPaneerRoundRemainingBalance } from '../lib/paneerBalance';
+import { getMilkLotLabel, getPreviouslyAccountedTransfer } from '../lib/distributionAccounting';
 import { useApp } from '../store/AppContext';
 
 type CandidateUnit = 'kg' | 'packets' | 'bottles';
@@ -50,6 +51,8 @@ interface DistributionCandidate {
   finishedGoodsBatchCode?: string;
   finishedGoodsBatchCodeMode?: FinishedGoodsBatchCodeMode;
   receiptDates?: string[];
+  milkLotCodes?: string[];
+  milkLotLabel: string;
 }
 
 interface DistributionCrumbingBatch {
@@ -76,6 +79,8 @@ interface HandoverForm {
   quantityVerified: boolean;
   extraSourceRoundId: string;
   notes: string;
+  partialTransferDisposition: '' | 'still_in_production' | 'incorrectly_recorded';
+  partialDispositionReason: string;
 }
 
 const finishedStockOrigin = 'Dairy Container (Finished Stock)';
@@ -95,6 +100,8 @@ const emptyForm: HandoverForm = {
   quantityVerified: false,
   extraSourceRoundId: '',
   notes: '',
+  partialTransferDisposition: '',
+  partialDispositionReason: '',
 };
 
 const roundProductNames: Record<string, string> = {
@@ -130,6 +137,16 @@ function roundMatchesBatchCode(round: ProductionRound, sourceBatchCode: string) 
     `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`,
   ].filter(Boolean).map(value => String(value).toLowerCase());
   return candidates.includes(source);
+}
+
+function getMilkLotCodesForSources(sourceBatchCodes: string[] | undefined, productionRounds: ProductionRound[]) {
+  const codes = new Set<string>();
+  (sourceBatchCodes || []).forEach(sourceCode => {
+    productionRounds.forEach(round => {
+      if (roundMatchesBatchCode(round, sourceCode) && round.milkLotCode) codes.add(round.milkLotCode);
+    });
+  });
+  return [...codes].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
 }
 
 function getCreamReceiptDate(round: ProductionRound, milkLots: MilkLot[], creamLots: CreamLot[]) {
@@ -191,7 +208,9 @@ export default function Distribution() {
         const caseWeight = definition?.packMode === 'weight_loose'
           ? stock.caseWeightKg ?? getDefaultPaneerCaseWeightKg(definition)
           : undefined;
-        const groupKey = caseWeight === undefined ? stock.sku : `${stock.sku}::${caseWeight.toFixed(2)}`;
+        const milkLotCodes = getMilkLotCodesForSources(stock.sourceBatchCodes, productionRounds);
+        const milkLotKey = milkLotCodes.length ? milkLotCodes.join('+') : 'unlinked';
+        const groupKey = `${stock.sku}::${caseWeight === undefined ? 'standard' : caseWeight.toFixed(2)}::${milkLotKey}`;
         const existing = finishedBySku.get(groupKey) || [];
         existing.push(stock);
         finishedBySku.set(groupKey, existing);
@@ -201,6 +220,7 @@ export default function Distribution() {
       const sku = stocks[0].sku;
       const first = stocks[0];
       const sourceBatchCodes = [...new Set(stocks.flatMap(stock => stock.sourceBatchCodes || []).filter(Boolean))];
+      const milkLotCodes = getMilkLotCodesForSources(sourceBatchCodes, productionRounds);
       const definition = getFinishedGoodsBatchCodeDefinition(sku);
       const paneerDefinition = paneerSkuByCode[sku];
       const sourceRounds = productionRounds.filter(round => sourceBatchCodes.some(code => roundMatchesBatchCode(round, code)));
@@ -232,6 +252,8 @@ export default function Distribution() {
         sourceId: first.id,
         stockLines: stocks,
         sourceBatchCodes,
+        milkLotCodes,
+        milkLotLabel: getMilkLotLabel(milkLotCodes),
         sku,
         productName: first.productName,
         batchCode: sourceBatchCodes.length === 1 ? sourceBatchCodes[0] : `${sku} · ${stocks.length} packed batches`,
@@ -269,6 +291,8 @@ export default function Distribution() {
           storageLocation: 'Chiller',
           detail: `Milk lot ${lot.lotCode} · ${pool.vacuumPacked.toFixed(2)} kg vacuumed`,
           finishedGoodsBatchCodeMode: 'manual',
+          milkLotCodes: [lot.lotCode],
+          milkLotLabel: `Milk lot ${lot.lotCode}`,
         };
       });
 
@@ -283,7 +307,9 @@ export default function Distribution() {
         const packedSkus = [...new Set((batch.packedSkus || []).map(packed => packed.sku).filter(Boolean))];
         const sku = packedSkus.length === 1 ? packedSkus[0] : undefined;
         const sourceBatchCodes = [...new Set((batch.packedSkus || []).flatMap(packed => packed.sourceBatchCodes || [batch.batchCode]))];
-        const quantity = cases * 12 + loose || batch.traysPacked;
+        const baseQuantity = cases * 12 + loose || batch.traysPacked;
+        const sourceLotCodes = batch.type === 'JP' ? [] : getMilkLotCodesForSources(sourceBatchCodes, productionRounds);
+        const quantity = Math.max(0, baseQuantity - getPreviouslyAccountedTransfer(handovers, 'crumbing_batch', batch.id));
         const productName = batch.type === 'SPP'
           ? 'Spicy Paneer Poppers'
           : batch.type === 'JP'
@@ -303,6 +329,8 @@ export default function Distribution() {
           detail: `${batch.type} finished batch · ${cases} cases · ${loose} loose${sourceBatchCodes.length > 1 ? ` · packed from ${sourceBatchCodes.length} batches` : ''}`,
           sku,
           sourceBatchCodes,
+          milkLotCodes: sourceLotCodes,
+          milkLotLabel: getMilkLotLabel(sourceLotCodes, batch.type === 'JP' ? 'Standalone JP (no milk lot)' : 'No milk lot linked'),
           finishedGoodsBatchCodeMode: 'manual',
         };
       });
@@ -329,17 +357,21 @@ export default function Distribution() {
         if (round.type === 'Amassi') {
           const bottles = (round.amassiPacked || []).reduce((sum, packed) => sum + packed.bottles, 0);
           const skuSummary = (round.amassiPacked || []).map(packed => `${packed.sku}: ${packed.bottles}`).join(' · ');
+          const baseQuantity = bottles;
+          const quantity = Math.max(0, baseQuantity - getPreviouslyAccountedTransfer(handovers, 'production_round', round.id));
           return {
             id: `round:${round.id}`,
             sourceType: 'production_round',
             sourceId: round.id,
             productName: `${roundProductNames[round.type]} ${round.amassiType || ''}`.trim(),
             batchCode,
-            quantity: bottles,
+            quantity,
             unit: 'bottles',
             storageLocation: 'Coldroom',
             detail: skuSummary || 'Bottled Amassi output',
             finishedGoodsBatchCodeMode: 'manual',
+            milkLotCodes: round.milkLotCode ? [round.milkLotCode] : [],
+            milkLotLabel: round.milkLotCode ? `Milk lot ${round.milkLotCode}` : 'No milk lot linked',
           };
         }
         const productSku = round.packedSkus?.length === 1 ? round.packedSkus[0].sku : undefined;
@@ -353,6 +385,7 @@ export default function Distribution() {
           : 0;
         const receiptDate = getReceiptDateForRound(round, productSku, milkLots, creamLots);
         const generatedFinishedCode = productSku ? buildFinishedGoodsBatchCode(productSku, receiptDate) : undefined;
+        const quantity = Math.max(0, (packedPaneerWeight > 0 ? packedPaneerWeight : round.outputWeight) - getPreviouslyAccountedTransfer(handovers, 'production_round', round.id));
         const externalCreamSource = round.sourceCreamLotId
           ? creamLots.find(cream => cream.id === round.sourceCreamLotId)
           : undefined;
@@ -362,7 +395,7 @@ export default function Distribution() {
           sourceId: round.id,
           productName: roundProductNames[round.type],
           batchCode,
-          quantity: packedPaneerWeight > 0 ? packedPaneerWeight : round.outputWeight,
+          quantity,
           unit: 'kg',
           storageLocation: round.type === 'Ghee' ? 'Coldroom' : 'Chiller',
           detail: externalCreamSource
@@ -372,11 +405,37 @@ export default function Distribution() {
           finishedGoodsBatchCode: generatedFinishedCode,
           finishedGoodsBatchCodeMode: getFinishedGoodsBatchCodeDefinition(productSku || '')?.mode || 'manual',
           receiptDates: receiptDate ? [receiptDate] : [],
+          milkLotCodes: round.milkLotCode ? [round.milkLotCode] : [],
+          milkLotLabel: round.milkLotCode ? `Milk lot ${round.milkLotCode}` : externalCreamSource ? `External cream · ${externalCreamSource.lotCode}` : 'No milk lot linked',
         };
       });
 
-    return [...finishedCandidates, ...halloumiCandidates, ...crumbingCandidates, ...productionCandidates];
-  }, [creamLots, crumbingBatches, milkLots, productionRounds, reconciledFinishedStock]);
+    return [...finishedCandidates, ...halloumiCandidates, ...crumbingCandidates, ...productionCandidates]
+      .filter(candidate => candidate.quantity > (candidate.unit === 'kg' ? 0.005 : 0));
+  }, [creamLots, crumbingBatches, handovers, milkLots, productionRounds, reconciledFinishedStock]);
+
+  const candidateGroups = useMemo(() => {
+    const groups = new Map<string, DistributionCandidate[]>();
+    candidates.forEach(candidate => groups.set(candidate.milkLotLabel, [...(groups.get(candidate.milkLotLabel) || []), candidate]));
+    return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true }));
+  }, [candidates]);
+
+  const handoverGroups = useMemo(() => {
+    const groups = new Map<string, DistributionHandover[]>();
+    handovers.forEach(record => {
+      const sourceCodes = record.milkLotCodes?.length
+        ? record.milkLotCodes
+        : getMilkLotCodesForSources([record.batchCode, ...(record.notes?.match(/Packed source batches: ([^·]+)/)?.[1].split(',').map(code => code.trim()) || [])], productionRounds);
+      const fallbackLabel = record.sourceType === 'manual'
+        ? 'Manual transfer · no milk lot linked'
+        : record.sourceType === 'crumbing_batch' && record.productName.toLowerCase().includes('jalapeno')
+          ? 'Standalone JP (no milk lot)'
+          : 'Older transfer · milk lot not linked';
+      const label = record.milkLotGroupLabel || getMilkLotLabel(sourceCodes, fallbackLabel);
+      groups.set(label, [...(groups.get(label) || []), record]);
+    });
+    return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true }));
+  }, [handovers, productionRounds]);
 
   const extraSourceRounds = useMemo(() => {
     if (selectedCandidate?.sourceType !== 'finished_stock' || !selectedCandidate.sku) return [];
@@ -410,6 +469,8 @@ export default function Distribution() {
       quantityVerified: false,
       extraSourceRoundId: '',
       notes: '',
+      partialTransferDisposition: '',
+      partialDispositionReason: '',
     });
     setShowHandoverModal(true);
   };
@@ -441,6 +502,9 @@ export default function Distribution() {
         ? getPaneerPackWeight(selectedFinishedDefinition, selectedFinishedExtraCases, selectedFinishedExtraLoose, 0, 0)
         : Math.max(0, form.quantity - selectedCandidate.quantity);
   const selectedFinishedShortfall = selectedCandidate?.sourceType === 'finished_stock'
+    ? Math.max(0, selectedCandidate.quantity - form.quantity)
+    : 0;
+  const partialTransferRemainder = selectedCandidate
     ? Math.max(0, selectedCandidate.quantity - form.quantity)
     : 0;
 
@@ -500,6 +564,15 @@ export default function Distribution() {
     const reviewedAt = new Date().toISOString();
     if (selectedCandidate && !isFinishedStockCandidate && form.quantity > selectedCandidate.quantity + 0.01) {
       showToast('error', `Only ${formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)} is available`);
+      return;
+    }
+    if (selectedCandidate && partialTransferRemainder > (selectedCandidate.unit === 'kg' ? 0.01 : 0) && !form.partialTransferDisposition) {
+      showToast('error', 'Choose whether the untransferred balance remains in production or was incorrectly recorded');
+      return;
+    }
+    if (selectedCandidate && partialTransferRemainder > (selectedCandidate.unit === 'kg' ? 0.01 : 0)
+      && form.partialTransferDisposition === 'incorrectly_recorded' && !form.partialDispositionReason.trim()) {
+      showToast('error', 'Add a reason before marking the untransferred balance incorrectly recorded');
       return;
     }
     if (isFinishedStockCandidate) {
@@ -600,7 +673,7 @@ export default function Distribution() {
           looseWeightKg?: number;
           caseWeightKg?: number;
         },
-        status: 'awaiting_handover' | 'handed_over',
+        status: 'awaiting_handover' | 'handed_over' | 'incorrectly_recorded',
       ) => {
         addFinishedStock({
           sku: stock.sku,
@@ -611,6 +684,11 @@ export default function Distribution() {
           status,
           createdAt: stock.createdAt,
           sourceBatchCodes: stock.sourceBatchCodes,
+          ...(status === 'incorrectly_recorded' ? {
+            incorrectlyRecordedAt: new Date().toISOString(),
+            incorrectlyRecordedBy: currentUsername || currentRole || 'User',
+            incorrectlyRecordedReason: form.partialDispositionReason.trim(),
+          } : {}),
           ...(status === 'handed_over' ? {
             finishedGoodsBatchCode,
             finishedGoodsBatchCodeReviewedBy: reviewedBy,
@@ -619,6 +697,17 @@ export default function Distribution() {
           } : {}),
         });
       };
+
+      const remainingStockStatus = form.partialTransferDisposition === 'incorrectly_recorded'
+        ? 'incorrectly_recorded'
+        : 'awaiting_handover';
+      const correctionMetadata = remainingStockStatus === 'incorrectly_recorded'
+        ? {
+            incorrectlyRecordedAt: new Date().toISOString(),
+            incorrectlyRecordedBy: currentUsername || currentRole || 'User',
+            incorrectlyRecordedReason: form.partialDispositionReason.trim(),
+          }
+        : {};
 
       stockLines.forEach((stock, index) => {
         const reviewedStock = {
@@ -661,9 +750,9 @@ export default function Distribution() {
             return;
           }
           if (stock.persisted) {
-            updateFinishedStock(stock.id, { ...remainingQuantities, status: 'awaiting_handover', storageLocation: stock.storageLocation });
+            updateFinishedStock(stock.id, { ...remainingQuantities, status: remainingStockStatus, storageLocation: stock.storageLocation, ...correctionMetadata });
           } else {
-            persistNewLine(stock, stock.packingRunId, remainingQuantities, 'awaiting_handover');
+            persistNewLine(stock, stock.packingRunId, remainingQuantities, remainingStockStatus);
           }
           persistNewLine(stock, `${stock.packingRunId}-handover-${splitToken}-${index}`, transferredQuantities, 'handed_over');
           return;
@@ -699,11 +788,12 @@ export default function Distribution() {
           if (stock.persisted) {
             updateFinishedStock(stock.id, {
               ...remainingQuantities,
-              status: 'awaiting_handover',
+              status: remainingStockStatus,
               storageLocation: stock.storageLocation,
+              ...correctionMetadata,
             });
           } else {
-            persistNewLine(stock, stock.packingRunId, remainingQuantities, 'awaiting_handover');
+            persistNewLine(stock, stock.packingRunId, remainingQuantities, remainingStockStatus);
           }
           persistNewLine(
             stock,
@@ -744,11 +834,12 @@ export default function Distribution() {
         if (stock.persisted) {
           updateFinishedStock(stock.id, {
             ...remainingQuantities,
-            status: 'awaiting_handover',
+            status: remainingStockStatus,
             storageLocation: stock.storageLocation,
+            ...correctionMetadata,
           });
         } else {
-          persistNewLine(stock, stock.packingRunId, remainingQuantities, 'awaiting_handover');
+          persistNewLine(stock, stock.packingRunId, remainingQuantities, remainingStockStatus);
         }
         persistNewLine(
           stock,
@@ -771,32 +862,38 @@ export default function Distribution() {
         halloumiPool: {
           ...pool,
           handedOverWeight: (pool.handedOverWeight || 0) + form.quantity,
-          availableForCrumbing: Math.max(0, available - form.quantity),
+          availableForCrumbing: Math.max(0, available - form.quantity - (
+            form.partialTransferDisposition === 'incorrectly_recorded' ? partialTransferRemainder : 0
+          )),
         },
       });
     }
 
     if (selectedCandidate?.sourceType === 'production_round') {
-      const occurredAt = new Date().toISOString();
-      recordProductionRoundActivity(selectedCandidate.sourceId, {
-        status: 'handed_over',
-        locked: true,
-        completedAt: occurredAt,
-      }, {
-        type: 'handed_over',
-        stage: 'Handed Over',
-        occurredAt,
-        details: `${form.quantity} ${form.unit} · ${form.destination}`,
-        recordedBy: form.handedOverBy || currentUsername || currentRole || 'User',
-        source: 'workflow',
-      });
+      if (partialTransferRemainder <= (selectedCandidate.unit === 'kg' ? 0.01 : 0)) {
+        const occurredAt = new Date().toISOString();
+        recordProductionRoundActivity(selectedCandidate.sourceId, {
+          status: 'handed_over',
+          locked: true,
+          completedAt: occurredAt,
+        }, {
+          type: 'handed_over',
+          stage: 'Handed Over',
+          occurredAt,
+          details: `${form.quantity} ${form.unit} · ${form.destination}`,
+          recordedBy: form.handedOverBy || currentUsername || currentRole || 'User',
+          source: 'workflow',
+        });
+      }
     }
 
     if (selectedCandidate?.sourceType === 'crumbing_batch') {
-      setCrumbingBatches(current => current.map(batch => batch.id === selectedCandidate.sourceId
-        ? { ...batch, status: 'handed_over' }
-        : batch
-      ));
+      if (partialTransferRemainder <= (selectedCandidate.unit === 'kg' ? 0.01 : 0)) {
+        setCrumbingBatches(current => current.map(batch => batch.id === selectedCandidate.sourceId
+          ? { ...batch, status: 'handed_over' }
+          : batch
+        ));
+      }
     }
 
     const now = new Date().toISOString();
@@ -818,10 +915,24 @@ export default function Distribution() {
     const varianceNote = quantityVariance !== undefined && quantityVariance < -0.01
       ? `${formatQuantity(Math.abs(quantityVariance), form.unit)} remains in finished-production stock after the partial handover`
       : '';
+    const partialDispositionNote = partialTransferRemainder > (selectedCandidate?.unit === 'kg' ? 0.01 : 0)
+      ? form.partialTransferDisposition === 'incorrectly_recorded'
+        ? `${formatQuantity(partialTransferRemainder, form.unit)} remaining quantity marked incorrectly recorded: ${form.partialDispositionReason.trim()}`
+        : `${formatQuantity(partialTransferRemainder, form.unit)} remains in production for a later transfer`
+      : '';
     const record: DistributionHandover = {
       id: `dist-${Date.now()}`,
       sourceType: selectedCandidate?.sourceType || 'manual',
       sourceId: selectedCandidate?.sourceId,
+      milkLotCodes: selectedCandidate?.milkLotCodes,
+      milkLotGroupLabel: selectedCandidate?.milkLotLabel || (selectedCandidate ? undefined : 'Manual transfer · no milk lot linked'),
+      partialTransferDisposition: partialTransferRemainder > (selectedCandidate?.unit === 'kg' ? 0.01 : 0)
+        ? form.partialTransferDisposition || undefined
+        : undefined,
+      partialRemainderQuantity: partialTransferRemainder > (selectedCandidate?.unit === 'kg' ? 0.01 : 0)
+        ? partialTransferRemainder
+        : undefined,
+      partialDispositionReason: form.partialDispositionReason.trim() || undefined,
       productName,
       finishedGoodsBatchCode,
       finishedGoodsBatchCodeReviewedBy: reviewedBy,
@@ -846,7 +957,7 @@ export default function Distribution() {
       quantityVerifiedAt: isFinishedStockCandidate ? now : undefined,
       recordedQuantityBeforeVerification: isFinishedStockCandidate ? selectedCandidate?.quantity : undefined,
       quantityVariance,
-      notes: [sourceNote, codeReviewNote, extraNote, varianceNote, form.notes.trim()].filter(Boolean).join(' · ') || undefined,
+      notes: [sourceNote, codeReviewNote, extraNote, varianceNote, partialDispositionNote, form.notes.trim()].filter(Boolean).join(' · ') || undefined,
     };
     setHandovers(current => [...current, record]);
     showToast('success', `${productName} recorded as handed over to ${record.destination}`);
@@ -880,28 +991,27 @@ export default function Distribution() {
         {candidates.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">No products are awaiting distribution handover.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead><tr className="border-b border-slate-100 text-left"><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Product / SKU</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Packed sources</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Quantity</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Current location</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Action</th></tr></thead>
-              <tbody className="divide-y divide-slate-100">
-                {candidates.map(candidate => (
-                  <tr key={candidate.id} className="hover:bg-slate-50">
-                    <td className="px-3 py-3"><div className="font-medium text-slate-900">{candidate.productName}</div>{candidate.sku && <div className="mt-1 inline-flex rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-indigo-700">{candidate.sku}</div>}<div className="mt-1 text-xs text-slate-500">{candidate.detail}</div></td>
-                    <td className="px-3 py-3"><div className="text-xs font-semibold text-emerald-700">Finished: {candidate.finishedGoodsBatchCode || 'Owner/admin code required'}</div><div className="mt-1 inline-flex items-center gap-1 text-xs text-slate-600"><GitBranch className="h-3 w-3" /><code>{candidate.batchCode}</code></div>{candidate.sourceBatchCodes && candidate.sourceBatchCodes.length > 1 && <div className="mt-1 text-[11px] text-slate-500">{candidate.sourceBatchCodes.length} source batches grouped</div>}{candidate.receiptDates && candidate.receiptDates.length > 1 && <div className="mt-1 text-[11px] text-amber-700">Multiple receipt dates — manual code required</div>}</td>
-                    <td className="px-3 py-3 font-semibold text-slate-900">{formatQuantity(candidate.quantity, candidate.unit)}{candidate.cases !== undefined && <div className="text-xs font-normal text-slate-500">{candidate.cases} cases · {candidate.looseQuantity || 0} loose</div>}</td>
-                    <td className="px-3 py-3 text-xs text-slate-600">{candidate.storageLocation || '—'}</td>
-                    <td className="px-3 py-3"><button type="button" onClick={() => openCandidate(candidate)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">Hand over <ArrowRight className="h-3 w-3" /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-4">
+            {candidateGroups.map(([milkLotLabel, group]) => <section key={milkLotLabel} className="overflow-hidden rounded-lg border border-slate-200">
+              <h4 className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-800">{milkLotLabel}</h4>
+              <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm">
+                <thead><tr className="border-b border-slate-100 text-left"><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Product / SKU</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Packed sources</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Quantity</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Current location</th><th className="px-3 py-2 text-xs uppercase tracking-wide text-slate-500">Action</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">{group.map(candidate => <tr key={candidate.id} className="hover:bg-slate-50">
+                  <td className="px-3 py-3"><div className="font-medium text-slate-900">{candidate.productName}</div>{candidate.sku && <div className="mt-1 inline-flex rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-indigo-700">{candidate.sku}</div>}<div className="mt-1 text-xs text-slate-500">{candidate.detail}</div></td>
+                  <td className="px-3 py-3"><div className="text-xs font-semibold text-emerald-700">Finished: {candidate.finishedGoodsBatchCode || 'Owner/admin code required'}</div><div className="mt-1 inline-flex items-center gap-1 text-xs text-slate-600"><GitBranch className="h-3 w-3" /><code>{candidate.batchCode}</code></div>{candidate.sourceBatchCodes && candidate.sourceBatchCodes.length > 1 && <div className="mt-1 text-[11px] text-slate-500">{candidate.sourceBatchCodes.length} source batches grouped</div>}{candidate.receiptDates && candidate.receiptDates.length > 1 && <div className="mt-1 text-[11px] text-amber-700">Multiple receipt dates — manual code required</div>}</td>
+                  <td className="px-3 py-3 font-semibold text-slate-900">{formatQuantity(candidate.quantity, candidate.unit)}{candidate.cases !== undefined && <div className="text-xs font-normal text-slate-500">{candidate.cases} cases · {candidate.looseQuantity || 0} loose</div>}</td>
+                  <td className="px-3 py-3 text-xs text-slate-600">{candidate.storageLocation || '—'}</td>
+                  <td className="px-3 py-3"><button type="button" onClick={() => openCandidate(candidate)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">Hand over <ArrowRight className="h-3 w-3" /></button></td>
+                </tr>)}</tbody>
+              </table></div>
+            </section>)}
           </div>
         )}
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3"><div><h3 className="text-sm font-semibold text-slate-900">Distribution handover history</h3><p className="mt-0.5 text-xs text-slate-500">Every new transfer is stored as a traceable record.</p></div><ClipboardCheck className="h-5 w-5 text-slate-400" /></div>
-        {handovers.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">No new distribution handovers recorded yet.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead><tr className="border-b border-slate-100 text-left"><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Product</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Finished batch / source</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Quantity</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Physical check</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Receiving location</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Recorded by</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Date</th></tr></thead><tbody className="divide-y divide-slate-100">{[...handovers].reverse().map(record => <tr key={record.id} className="hover:bg-slate-50"><td className="px-4 py-3 font-medium text-slate-900">{record.productName}</td><td className="px-4 py-3 text-xs"><div className="font-mono font-semibold text-emerald-700">{record.finishedGoodsBatchCode || '—'}</div><div className="mt-1 font-mono text-slate-500">Source: {record.batchCode}</div>{record.finishedGoodsBatchCodeReviewedBy && <div className="mt-1 text-[10px] text-indigo-700">Reviewed by {record.finishedGoodsBatchCodeReviewedBy}{record.finishedGoodsBatchCodeReviewMethod === 'owner_admin_override' ? ' · changed' : ''}</div>}</td><td className="px-4 py-3 font-semibold text-slate-900">{formatQuantity(record.quantity, record.unit)}{record.cases !== undefined && <div className="text-xs font-normal text-slate-500">{record.cases} cases · {record.looseQuantity || 0} loose</div>}</td><td className="px-4 py-3 text-xs text-slate-600">{record.quantityVerified ? <><span className="font-semibold text-emerald-700">Verified{record.quantityVerifiedBy ? ` · ${record.quantityVerifiedBy}` : ''}</span>{record.quantityVariance !== undefined && Math.abs(record.quantityVariance) > 0.01 && <div className={record.quantityVariance < 0 ? 'mt-1 font-semibold text-amber-700' : 'mt-1 font-semibold text-indigo-700'}>{record.quantityVariance > 0 ? '+' : ''}{formatQuantity(record.quantityVariance, record.unit)} variance</div>}</> : '—'}</td><td className="px-4 py-3 text-slate-700">{record.storageLocation || record.destination}</td><td className="px-4 py-3 text-slate-600">{record.handedOverBy}</td><td className="px-4 py-3 text-xs text-slate-500">{new Date(record.handedOverAt).toLocaleString()}</td></tr>)}</tbody></table></div>}
+        {handovers.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">No new distribution handovers recorded yet.</p> : <div className="space-y-4 p-3">{handoverGroups.map(([milkLotLabel, records]) => <section key={milkLotLabel} className="overflow-hidden rounded-lg border border-slate-200"><h4 className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-800">{milkLotLabel}</h4><div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead><tr className="border-b border-slate-100 text-left"><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Product</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Finished batch / source</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Quantity</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Physical check</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Partial remainder</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Receiving location</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Recorded by</th><th className="px-4 py-2.5 text-xs uppercase tracking-wide text-slate-500">Date</th></tr></thead><tbody className="divide-y divide-slate-100">{[...records].reverse().map(record => <tr key={record.id} className="hover:bg-slate-50"><td className="px-4 py-3 font-medium text-slate-900">{record.productName}</td><td className="px-4 py-3 text-xs"><div className="font-mono font-semibold text-emerald-700">{record.finishedGoodsBatchCode || '—'}</div><div className="mt-1 font-mono text-slate-500">Source: {record.batchCode}</div>{record.finishedGoodsBatchCodeReviewedBy && <div className="mt-1 text-[10px] text-indigo-700">Reviewed by {record.finishedGoodsBatchCodeReviewedBy}{record.finishedGoodsBatchCodeReviewMethod === 'owner_admin_override' ? ' · changed' : ''}</div>}</td><td className="px-4 py-3 font-semibold text-slate-900">{formatQuantity(record.quantity, record.unit)}{record.cases !== undefined && <div className="text-xs font-normal text-slate-500">{record.cases} cases · {record.looseQuantity || 0} loose</div>}</td><td className="px-4 py-3 text-xs text-slate-600">{record.quantityVerified ? <><span className="font-semibold text-emerald-700">Verified{record.quantityVerifiedBy ? ` · ${record.quantityVerifiedBy}` : ''}</span>{record.quantityVariance !== undefined && Math.abs(record.quantityVariance) > 0.01 && <div className={record.quantityVariance < 0 ? 'mt-1 font-semibold text-amber-700' : 'mt-1 font-semibold text-indigo-700'}>{record.quantityVariance > 0 ? '+' : ''}{formatQuantity(record.quantityVariance, record.unit)} variance</div>}</> : '—'}</td><td className="px-4 py-3 text-xs">{record.partialTransferDisposition === 'still_in_production' ? <span className="font-semibold text-amber-700">{formatQuantity(record.partialRemainderQuantity || 0, record.unit)} · remains in production</span> : record.partialTransferDisposition === 'incorrectly_recorded' ? <span className="font-semibold text-red-700">{formatQuantity(record.partialRemainderQuantity || 0, record.unit)} · incorrect record{record.partialDispositionReason ? <span className="block font-normal">{record.partialDispositionReason}</span> : null}</span> : '—'}</td><td className="px-4 py-3 text-slate-700">{record.storageLocation || record.destination}</td><td className="px-4 py-3 text-slate-600">{record.handedOverBy}</td><td className="px-4 py-3 text-xs text-slate-500">{new Date(record.handedOverAt).toLocaleString()}</td></tr>)}</tbody></table></div></section>)}</div>}
       </div>
 
       <Modal isOpen={showHandoverModal} onClose={closeModal} title={selectedCandidate ? `Hand over ${selectedCandidate.productName}` : 'Record product handover'}>
@@ -918,7 +1028,8 @@ export default function Distribution() {
             {!canAssignManualBatchCode && <p className="mt-2 text-xs font-semibold text-amber-800">Owner/admin review is required before this handover can be confirmed.</p>}
           </div>
           {selectedCandidate?.sourceType === 'finished_stock' && selectedFinishedDefinition?.packMode === 'weight_loose' ? <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Physical packed quantity</p><p className="mt-1 text-xs text-indigo-700">Verify cases and any loose kilograms separately. Recorded case size: {selectedCandidate.caseWeightKg?.toFixed(2)} kg per case.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified cases</label><input type="number" min="0" step="1" value={form.verifiedCases || ''} onChange={event => updateVerifiedPackedCounts({ verifiedCases: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified loose weight (kg)</label><input type="number" min="0" step="0.01" value={form.verifiedLooseWeightKg || ''} onChange={event => updateVerifiedPackedCounts({ verifiedLooseWeightKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div></div><div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-sm text-slate-700"><span className="font-semibold">Verified total:</span> {form.quantity.toFixed(2)} kg · {form.verifiedCases} cases × {(selectedCandidate.caseWeightKg || 0).toFixed(2)} kg + {form.verifiedLooseWeightKg.toFixed(2)} kg loose</div></div> : selectedCandidate?.sourceType === 'finished_stock' && selectedFinishedDefinition?.packMode === 'units' ? <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Physical packed quantity</p><p className="mt-1 text-xs text-indigo-700">Check the actual cases and loose packets. Any surplus will be attributed to a production round balance below.</p><div className="mt-3 grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified cases</label><input type="number" min="0" step="1" value={form.verifiedCases || ''} onChange={event => updateVerifiedPackedCounts({ verifiedCases: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Verified loose packets</label><input type="number" min="0" step="1" value={form.verifiedLoose || ''} onChange={event => updateVerifiedPackedCounts({ verifiedLoose: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm" /></div></div><div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-sm text-slate-700"><span className="font-semibold">Verified total:</span> {form.quantity} packets ({getPaneerPackWeight(selectedFinishedDefinition, form.verifiedCases, form.verifiedLoose, 0, 0).toFixed(2)} kg) · {form.verifiedCases} cases + {form.verifiedLoose} loose packets</div></div> : <div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">{selectedCandidate?.sourceType === 'finished_stock' ? 'Verified quantity' : 'Quantity'}</label><input type="number" min="0" step={form.unit === 'kg' ? '0.01' : '1'} max={selectedCandidate && selectedCandidate.sourceType !== 'finished_stock' ? selectedCandidate.quantity : undefined} value={form.quantity || ''} onChange={event => setForm({ ...form, quantity: Number(event.target.value) || 0, quantityVerified: false })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />{selectedCandidate && <p className="mt-1 text-[11px] text-slate-500">Recorded: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}</p>}</div><div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Unit</label><select value={form.unit} disabled={Boolean(selectedCandidate)} onChange={event => setForm({ ...form, unit: event.target.value as CandidateUnit })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50"><option value="kg">kg</option><option value="packets">packets</option><option value="bottles">bottles</option></select></div></div>}
-          {selectedCandidate?.sourceType === 'finished_stock' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Handover quantity check</p><div className="mt-1 space-y-1 text-xs text-amber-800"><p>Recorded on board: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}{selectedCandidate.cases !== undefined && ` · ${selectedCandidate.cases} cases${selectedCandidate.caseWeightKg ? ` × ${selectedCandidate.caseWeightKg} kg` : ''}${selectedFinishedDefinition?.packMode === 'weight_loose' ? ` + ${(selectedCandidate.looseWeightKg || 0).toFixed(2)} kg loose` : ` + ${selectedCandidate.looseQuantity || 0} loose`}`}</p><p>Physical count: {formatQuantity(form.quantity, form.unit)}{selectedFinishedDefinition?.packMode === 'units' && ` · ${form.verifiedCases} cases + ${form.verifiedLoose} loose`}{selectedFinishedDefinition?.packMode === 'weight_loose' && ` · ${form.verifiedCases} cases + ${form.verifiedLooseWeightKg.toFixed(2)} kg loose`}</p>{selectedFinishedExtraWeight > 0 && <p className="font-semibold">Extra to record against a production balance: {selectedFinishedExtraWeight.toFixed(2)} kg</p>}{selectedFinishedShortfall > 0.01 && <p className="font-semibold">Partial handover: {formatQuantity(selectedFinishedShortfall, form.unit)} will remain in finished-production stock for a later transfer or investigation.</p>}</div>{selectedFinishedExtraWeight > 0 && <div className="mt-3"><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Source round for extra quantity</label><select value={form.extraSourceRoundId} onChange={event => setForm({ ...form, extraSourceRoundId: event.target.value })} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"><option value="">Select a round with remaining balance</option>{extraSourceRounds.map(round => <option key={round.id} value={round.id}>{round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber} · {(getPaneerRoundRemainingBalance(round) ?? round.intermediateBalance ?? 0).toFixed(2)} kg balance</option>)}</select><p className="mt-1 text-[11px] text-amber-700">This adds the surplus packing entry to that round and reduces its remaining paneer balance.</p></div>}<label className="mt-3 flex items-start gap-2 text-xs text-amber-900"><input type="checkbox" checked={form.quantityVerified} onChange={event => setForm({ ...form, quantityVerified: event.target.checked })} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-emerald-600" /><span>I physically verified the packed quantity and confirm it is ready for transfer.</span></label></div>}
+          {selectedCandidate && partialTransferRemainder > (selectedCandidate.unit === 'kg' ? 0.01 : 0) && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Untransferred remainder: {formatQuantity(partialTransferRemainder, selectedCandidate.unit)}</p><label className="mt-2 block text-xs font-medium text-slate-700">Classify this remainder<select value={form.partialTransferDisposition} onChange={event => setForm({ ...form, partialTransferDisposition: event.target.value as HandoverForm['partialTransferDisposition'] })} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"><option value="">Choose one</option><option value="still_in_production">Still in production / transfer later</option><option value="incorrectly_recorded">Incorrectly recorded — remove from active stock</option></select></label>{form.partialTransferDisposition === 'incorrectly_recorded' && <label className="mt-2 block text-xs font-medium text-slate-700">Correction reason<textarea value={form.partialDispositionReason} onChange={event => setForm({ ...form, partialDispositionReason: event.target.value })} rows={2} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" placeholder="Explain why this remaining quantity is not real stock" /></label>}<p className="mt-2 text-[11px] text-amber-800">“Still in production” keeps the quantity available for a later transfer. “Incorrectly recorded” removes it from active distribution stock and keeps the correction in the audit record.</p></div>}
+          {selectedCandidate?.sourceType === 'finished_stock' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">Handover quantity check</p><div className="mt-1 space-y-1 text-xs text-amber-800"><p>Recorded on board: {formatQuantity(selectedCandidate.quantity, selectedCandidate.unit)}{selectedCandidate.cases !== undefined && ` · ${selectedCandidate.cases} cases${selectedCandidate.caseWeightKg ? ` × ${selectedCandidate.caseWeightKg} kg` : ''}${selectedFinishedDefinition?.packMode === 'weight_loose' ? ` + ${(selectedCandidate.looseWeightKg || 0).toFixed(2)} kg loose` : ` + ${selectedCandidate.looseQuantity || 0} loose`}`}</p><p>Physical count: {formatQuantity(form.quantity, form.unit)}{selectedFinishedDefinition?.packMode === 'units' && ` · ${form.verifiedCases} cases + ${form.verifiedLoose} loose`}{selectedFinishedDefinition?.packMode === 'weight_loose' && ` · ${form.verifiedCases} cases + ${form.verifiedLooseWeightKg.toFixed(2)} kg loose`}</p>{selectedFinishedExtraWeight > 0 && <p className="font-semibold">Extra to record against a production balance: {selectedFinishedExtraWeight.toFixed(2)} kg</p>}{selectedFinishedShortfall > 0.01 && <p className="font-semibold">Partial handover: {formatQuantity(selectedFinishedShortfall, form.unit)} is classified above.</p>}</div>{selectedFinishedExtraWeight > 0 && <div className="mt-3"><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Source round for extra quantity</label><select value={form.extraSourceRoundId} onChange={event => setForm({ ...form, extraSourceRoundId: event.target.value })} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"><option value="">Select a round with remaining balance</option>{extraSourceRounds.map(round => <option key={round.id} value={round.id}>{round.milkLotCode}/S{round.shiftNumber}/R{round.roundNumber} · {(getPaneerRoundRemainingBalance(round) ?? round.intermediateBalance ?? 0).toFixed(2)} kg balance</option>)}</select><p className="mt-1 text-[11px] text-amber-700">This adds the surplus packing entry to that round and reduces its remaining paneer balance.</p></div>}<label className="mt-3 flex items-start gap-2 text-xs text-amber-900"><input type="checkbox" checked={form.quantityVerified} onChange={event => setForm({ ...form, quantityVerified: event.target.checked })} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-emerald-600" /><span>I physically verified the packed quantity and confirm it is ready for transfer.</span></label></div>}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Receiving storage location</label><select value={form.destination} onChange={event => setForm({ ...form, destination: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select receiving location</option>{distributionStorageLocations.map(location => <option key={location} value={location}>{location}</option>)}</select></div>
             <div><label className="text-xs font-medium uppercase tracking-wide text-slate-600">Handed over by</label><input value={form.handedOverBy} onChange={event => setForm({ ...form, handedOverBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Staff name" /></div>

@@ -211,6 +211,13 @@ export interface DistributionHandover {
   id: string;
   sourceType: DistributionHandoverSource;
   sourceId?: string;
+  /** Source milk lots represented by this transfer, when traceable. */
+  milkLotCodes?: string[];
+  milkLotGroupLabel?: string;
+  partialTransferDisposition?: 'still_in_production' | 'incorrectly_recorded';
+  /** Untransferred remainder classified during a partial transfer. */
+  partialRemainderQuantity?: number;
+  partialDispositionReason?: string;
   productName: string;
   // Finished-goods label assigned at Distribution. `batchCode` remains the
   // original source/production code for backwards-compatible genealogy.
@@ -667,7 +674,7 @@ export interface FinishedStockLot {
   loosePackets: number;
   totalPackets: number;
   storageLocation: string;
-  status: 'awaiting_handover' | 'handed_over' | 'returned';
+  status: 'awaiting_handover' | 'handed_over' | 'returned' | 'incorrectly_recorded';
   createdAt: string;
   sourceBatchCodes: string[]; // genealogy: which rounds fed this
   finishedGoodsBatchCode?: string;
@@ -678,6 +685,9 @@ export interface FinishedStockLot {
   /** Actual mass of one case for weight-based packed SKUs. */
   caseWeightKg?: number;
   looseWeightKg?: number;
+  incorrectlyRecordedAt?: string;
+  incorrectlyRecordedBy?: string;
+  incorrectlyRecordedReason?: string;
 }
 
 export interface TemperatureReading {
