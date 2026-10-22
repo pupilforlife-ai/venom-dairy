@@ -119,6 +119,8 @@ const temperatureProfiles: Record<string, { location: string; targetMin: number;
 };
 
 function normalizeTemperatureReading(reading: TemperatureReading): TemperatureReading {
+  if (reading.rangeNotConfigured) return { ...reading, inRange: true };
+  if (reading.upperLimitOnly) return { ...reading, inRange: Number.isFinite(reading.temperature) && reading.temperature <= reading.targetMax };
   if (reading.coldChainStorageReading) {
     const hasMilkTemperature = typeof reading.milkTemperature === 'number' && Number.isFinite(reading.milkTemperature);
     const milkTemperatureInRange = hasMilkTemperature
@@ -483,10 +485,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const milkTemperatureInRange = reading.coldChainStorageReading && typeof reading.milkTemperature === 'number'
       ? isRawMilkTemperatureInRange(reading.milkTemperature)
       : undefined;
-    const inRange = reading.coldChainStorageReading
+    const inRange = reading.rangeNotConfigured ? true : reading.upperLimitOnly ? reading.temperature <= reading.targetMax : reading.coldChainStorageReading
       ? milkTemperatureInRange ?? true
       : reading.temperature >= reading.targetMin && reading.temperature <= reading.targetMax;
-    const newReading = { ...reading, milkTemperatureInRange, id: `t-${Date.now()}`, inRange };
+    const newReading = { ...reading, milkTemperatureInRange, id: `t-${crypto.randomUUID()}`, inRange };
     setTemperatureReadings(currentReadings => [...currentReadings, newReading]);
   };
 

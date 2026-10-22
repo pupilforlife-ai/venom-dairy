@@ -712,6 +712,9 @@ export interface TemperatureReading {
   storageTemperature?: number;
   milkTemperatureInRange?: boolean;
   milkLotCode?: string;
+  rangeNotConfigured?: boolean;
+  upperLimitOnly?: boolean;
+  factoryChecklistId?: string;
 }
 
 export interface WasteEvent {

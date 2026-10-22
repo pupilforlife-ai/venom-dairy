@@ -30,6 +30,8 @@ import { reconcileFinishedStock } from '../lib/finishedStock';
 import { getPaneerRoundRemainingBalance, isPaneerIntermediateLot, reconcileFrozenRoundBalances } from '../lib/paneerBalance';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { Modal } from '../components/Modal';
+import { FactoryChecklist } from '../components/FactoryChecklist';
+import { temperatureTargetLabel } from '../lib/coldChain';
 
 interface DashboardCrumbingBatch {
   id: string;
@@ -114,7 +116,7 @@ export default function Dashboard() {
     .sort((left, right) => new Date(right.recordedAt).getTime() - new Date(left.recordedAt).getTime())
     .filter((reading, index, readings) => readings.findIndex(candidate => candidate.location === reading.location) === index);
   const temperatureHasRangeResult = (reading: typeof temperatureReadings[number]) =>
-    reading.coldChainStorageReading ? reading.milkTemperatureInRange !== undefined : true;
+    !reading.rangeNotConfigured && (reading.coldChainStorageReading ? reading.milkTemperatureInRange !== undefined : true);
   const temperatureIsInRange = (reading: typeof temperatureReadings[number]) =>
     reading.coldChainStorageReading ? reading.milkTemperatureInRange === true : reading.inRange;
   const rangeCheckedTemperatureReadings = latestTemperatureReadings.filter(temperatureHasRangeResult);
@@ -300,15 +302,15 @@ export default function Dashboard() {
         </div>;
       case 'cold-chain':
         return <div className="space-y-3"><p className="text-sm text-slate-600">Latest reading per location: {inRangeTemperatureReadings.length} in range, {outOfRangeTemps.length} out of range; milk-temperature checks without a milk reading are not scored.</p>
-          <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[720px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Location</th><th className="px-3 py-2">Milk temperature</th><th className="px-3 py-2">Storage temperature</th><th className="px-3 py-2">Target / result</th><th className="px-3 py-2">Recorded at</th><th className="px-3 py-2">By</th></tr></thead><tbody className="divide-y divide-slate-100">{latestTemperatureReadings.map(reading => {
-            const hasMilkCheck = reading.coldChainStorageReading ? reading.milkTemperatureInRange !== undefined : true;
+          <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[720px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Location</th><th className="px-3 py-2">Temperature / milk</th><th className="px-3 py-2">Storage temperature</th><th className="px-3 py-2">Target / result</th><th className="px-3 py-2">Recorded at</th><th className="px-3 py-2">By</th></tr></thead><tbody className="divide-y divide-slate-100">{latestTemperatureReadings.map(reading => {
+            const hasMilkCheck = temperatureHasRangeResult(reading);
             const isInRange = temperatureIsInRange(reading);
-            return <tr key={reading.id}><td className="px-3 py-2 font-medium">{reading.location}</td><td className="px-3 py-2">{reading.coldChainStorageReading ? reading.milkTemperature === undefined ? '—' : `${reading.milkTemperature}°C` : `${reading.temperature}°C`}</td><td className="px-3 py-2">{reading.coldChainStorageReading ? reading.storageTemperature === undefined ? '—' : `${reading.storageTemperature}°C` : '—'}</td><td className={`px-3 py-2 font-semibold ${!hasMilkCheck ? 'text-slate-500' : isInRange ? 'text-emerald-700' : 'text-red-700'}`}>{hasMilkCheck ? `${isInRange ? 'In range' : 'Excursion'} · ${reading.targetMin}–${reading.targetMax}°C` : 'Milk temp not recorded'}</td><td className="px-3 py-2">{new Date(reading.recordedAt).toLocaleString()}</td><td className="px-3 py-2">{reading.recordedBy}</td></tr>;
+            return <tr key={reading.id}><td className="px-3 py-2 font-medium">{reading.location}</td><td className="px-3 py-2">{reading.coldChainStorageReading ? reading.milkTemperature === undefined ? '—' : `${reading.milkTemperature}°C` : `${reading.temperature}°C`}</td><td className="px-3 py-2">{reading.coldChainStorageReading ? reading.storageTemperature === undefined ? '—' : `${reading.storageTemperature}°C` : '—'}</td><td className={`px-3 py-2 font-semibold ${!hasMilkCheck ? 'text-slate-500' : isInRange ? 'text-emerald-700' : 'text-red-700'}`}>{hasMilkCheck ? `${isInRange ? 'In range' : 'Excursion'} · ${temperatureTargetLabel(reading)}` : reading.rangeNotConfigured ? 'Limits not configured' : 'Milk temp not recorded'}</td><td className="px-3 py-2">{new Date(reading.recordedAt).toLocaleString()}</td><td className="px-3 py-2">{reading.recordedBy}</td></tr>;
           })}{latestTemperatureReadings.length === 0 && <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-500">No temperature readings recorded.</td></tr>}</tbody></table></div>
         </div>;
       case 'alerts':
         return <div className="space-y-4">
-          <section><h4 className="mb-2 text-sm font-semibold text-slate-900">Temperature excursions</h4>{outOfRangeTemps.length ? <ul className="space-y-2">{outOfRangeTemps.map(reading => <li key={reading.id} className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-800">{reading.location}: {reading.coldChainStorageReading ? reading.milkTemperature : reading.temperature}°C (milk target {reading.targetMin}–{reading.targetMax}°C) · {new Date(reading.recordedAt).toLocaleString()} · {reading.recordedBy}</li>)}</ul> : <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">No current temperature excursions.</p>}</section>
+          <section><h4 className="mb-2 text-sm font-semibold text-slate-900">Temperature excursions</h4>{outOfRangeTemps.length ? <ul className="space-y-2">{outOfRangeTemps.map(reading => <li key={reading.id} className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-800">{reading.location}: {reading.coldChainStorageReading ? reading.milkTemperature : reading.temperature}°C (target {temperatureTargetLabel(reading)}) · {new Date(reading.recordedAt).toLocaleString()} · {reading.recordedBy}</li>)}</ul> : <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">No current temperature excursions.</p>}</section>
           <section><h4 className="mb-2 text-sm font-semibold text-slate-900">Rounds in progress · Lot {activeMilkLot?.lotCode || '—'}</h4>{activeRounds.length ? <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[520px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-500"><tr><th className="px-3 py-2">Round</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Stage</th></tr></thead><tbody className="divide-y divide-slate-100">{activeRounds.map(round => <tr key={round.id}><td className="px-3 py-2 font-mono">S{round.shiftNumber}/R{round.roundNumber}</td><td className="px-3 py-2">{round.type}</td><td className="px-3 py-2">{statusLabels[round.status] || round.status}</td></tr>)}</tbody></table></div> : <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No rounds currently in progress.</p>}</section>
           <section><h4 className="mb-2 text-sm font-semibold text-slate-900">Awaiting handover</h4><p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{totalCases + otherRoundCases + crumbingCases} cases across {readyHandoverSkus.join(', ') || 'no SKUs'}.</p></section>
         </div>;
@@ -321,6 +323,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      <FactoryChecklist />
       {/* Metric tiles — management priorities */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {metrics.map((metric, i) => (
@@ -393,7 +396,7 @@ export default function Dashboard() {
                 <Thermometer className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
                 <div>
                   <p className="text-xs font-medium text-red-700">Temperature Excursion</p>
-                  <p className="text-xs text-red-600">{outOfRangeTemps[0].location}: {outOfRangeTemps[0].coldChainStorageReading ? outOfRangeTemps[0].milkTemperature : outOfRangeTemps[0].temperature}°C (milk target {outOfRangeTemps[0].targetMin}–{outOfRangeTemps[0].targetMax}°C)</p>
+                  <p className="text-xs text-red-600">{outOfRangeTemps[0].location}: {outOfRangeTemps[0].coldChainStorageReading ? outOfRangeTemps[0].milkTemperature : outOfRangeTemps[0].temperature}°C (target {temperatureTargetLabel(outOfRangeTemps[0])})</p>
                 </div>
               </div>
             )}
