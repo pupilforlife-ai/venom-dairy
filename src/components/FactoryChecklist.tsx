@@ -7,7 +7,7 @@ import { useApp } from '../store/AppContext';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { supabase } from '../lib/supabase';
 import {
-  FACTORY_CHECKLIST_START_DATE, corridorNightShiftReasons, factoryCheckDates, factoryDate,
+  FACTORY_CHECKLIST_START_DATE, corridorNightShiftReasons, factoryCheckDates, factoryDate, formatFactoryRecordedAt,
   factoryLockPoints, factoryReadingValue, factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureTarget, factoryTemperatureProgress, latestFactoryChecks,
   missedFactoryCheckReasons, validateFactoryCheck, markAllMilkStorageEmpty,
   type FactoryCheckPayload, type FactoryCheckRecord, type FactoryLockAnswer,
@@ -15,8 +15,12 @@ import {
 } from '../lib/factoryChecklist';
 
 const fieldClass = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm';
-const displayTime = (date: string) => new Date(date).toLocaleString('en-GB', { timeZone: 'Africa/Johannesburg' });
+const displayTime = formatFactoryRecordedAt;
 const displayDate = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { dateStyle: 'full' });
+
+function ChecklistRecordedStamp({ record }: { record: FactoryCheckRecord }) {
+  return <span className="mt-1 block text-xs text-slate-600">Recorded at: <time dateTime={record.recorded_at}>{displayTime(record.recorded_at)}</time><br />Recorded by: {record.recorded_by_name}</span>;
+}
 
 export function FactoryChecklist() {
   const role = localStorage.getItem('vejoy_user_role');
@@ -46,6 +50,8 @@ function ManagerFactoryChecklist() {
   const todayRecord = latest.get(today);
   const temperatureProgress = factoryTemperatureProgress(today, temperatureReadings, storageEvents);
   const temperaturesComplete = temperatureProgress.every(row => row.complete);
+  const todayTemperatureChecks = records.filter(record => record.check_date === today && record.status === 'completed' && record.payload.scope !== 'locks')
+    .sort((a, b) => Date.parse(a.recorded_at) - Date.parse(b.recorded_at));
 
   const reload = useCallback(async () => {
     try {
@@ -135,7 +141,7 @@ function ManagerFactoryChecklist() {
     </div>
     {loading ? <p className="mt-3 text-sm text-slate-500">Checking saved sign-offs…</p> : loadError ? <div className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">Cannot verify checklist history: {loadError} <button onClick={() => void reload()} className="underline">Retry</button></div> : <>
       <div className={`mt-4 rounded-lg p-3 text-sm ${todayRecord?.status === 'completed' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
-        {todayRecord ? <><p className="font-semibold">{todayRecord.status === 'completed' ? 'Locks and lights signed off' : `Not inspected: ${todayRecord.payload.missedReason}`}</p><p className="mt-1">{todayRecord.recorded_by_name} · {displayTime(todayRecord.recorded_at)}</p><button className="mt-1 underline" onClick={() => setReview(todayRecord)}>View recorded form</button></> : <p className="font-semibold">Today’s locks and lights have not been checked.</p>}
+        {todayRecord ? <><p className="font-semibold">{todayRecord.status === 'completed' ? 'Locks and lights signed off' : `Not inspected: ${todayRecord.payload.missedReason}`}</p><ChecklistRecordedStamp record={todayRecord} /><button className="mt-1 underline" onClick={() => setReview(todayRecord)}>View recorded form</button></> : <p className="font-semibold">Today’s locks and lights have not been checked.</p>}
       </div>
       <div className="mt-3 flex flex-wrap gap-2"><button className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700" onClick={() => open(today, 'completed', 'locks')}>{todayRecord ? 'Recheck locks and lights' : 'Check locks and lights'}</button><button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onClick={() => open(today, 'not_completed')}>Record closure / missed-check reason</button></div>
       <div className={`mt-4 rounded-lg border p-3 ${temperaturesComplete ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
@@ -144,13 +150,14 @@ function ManagerFactoryChecklist() {
         <div className="my-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{temperatureProgress.map(row => <div key={row.point.id} className="flex items-center justify-between gap-2 rounded border border-white bg-white/80 px-2 py-2 text-xs"><span>{row.point.label}</span><span className={row.complete ? 'font-semibold text-emerald-700' : 'font-semibold text-amber-800'}>{row.activity === 'empty' ? 'Empty / not in use' : row.activity === undefined ? 'Confirm status' : `${row.count}/2 readings`}</span></div>)}</div>
         <p className={`mb-2 text-sm font-semibold ${temperaturesComplete ? 'text-emerald-800' : 'text-amber-900'}`}>{temperaturesComplete ? 'Both temperature checks recorded for all locations in use.' : 'Temperature checks outstanding.'}</p>
         <button className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700" onClick={() => open(today, 'completed', 'temperatures')}>Record temperature check</button>
+        {todayTemperatureChecks.length > 0 && <div className="mt-3 space-y-2"><h4 className="text-xs font-semibold text-slate-800">Temperature submissions today</h4>{todayTemperatureChecks.map((record, index) => <button key={record.id} onClick={() => setReview(record)} className="block w-full rounded-lg border border-slate-200 bg-white p-3 text-left text-sm"><span className="font-medium text-indigo-700">View temperature submission {index + 1}</span><ChecklistRecordedStamp record={record} /></button>)}</div>}
       </div>
       {missing.filter(date => date < today).length > 0 && <div className="mt-3 rounded-lg border border-amber-200 p-3 text-sm text-amber-900"><p className="mb-2 flex items-center gap-1 font-semibold"><AlertTriangle className="h-4 w-4" /> Missing daily checks — record a reason</p><div className="flex flex-wrap gap-2">{(allDays ? missing : missing.slice(0, 8)).filter(date => date < today).map(date => <button key={date} className="rounded border border-amber-300 px-2 py-1" onClick={() => open(date, 'not_completed')}>{date}</button>)}</div>{missing.length > 8 && <button className="mt-2 underline" onClick={() => setAllDays(!allDays)}>{allDays ? 'Show fewer' : 'Show all missing days'}</button>}</div>}
     </>}
 
     <Modal isOpen={editing} onClose={() => { if (!busy) setEditing(false); }} title={`${payload.scope === 'temperatures' ? 'Temperature check' : payload.scope === 'locks' ? 'Locks and lights' : 'Daily factory checklist'} · ${checkDate}`} size="lg">
       <form className="space-y-5" onSubmit={event => { event.preventDefault(); void save(); }}>
-        <p className="text-sm text-slate-600">Factory time: South Africa. Your account name and submission time are recorded. Earlier submissions remain in history.</p>
+        <p className="text-sm text-slate-600">Your account name and recording timestamp are set automatically when saved (South African time / SAST), not when this form is opened. Earlier submissions remain in history.</p>
         {status === 'not_completed' ? <>
           <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">This records why an inspection was missed or the factory was closed. It does not mark checks as passed.</p>
           <label className="block text-sm font-medium">Reason<select className={`${fieldClass} mt-1`} value={payload.missedReason || ''} onChange={event => setPayload(current => ({ ...current, missedReason: event.target.value }))}><option value="">Select reason</option>{missedFactoryCheckReasons.map(reason => <option key={reason}>{reason}</option>)}</select></label>
@@ -189,18 +196,18 @@ function ManagerFactoryChecklist() {
       <div className="space-y-3"><p className="text-sm text-slate-500">Tracking starts {FACTORY_CHECKLIST_START_DATE}. Locks and lights are checked once daily; temperatures need two distinct observations per in-use location. All submissions are retained.</p>{factoryCheckDates(today).map(date => {
         const dayRecords = records.filter(record => record.check_date === date).sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
         const dailyTemperatures = factoryTemperatureProgress(date, temperatureReadings, storageEvents);
-        return <div key={date} className="rounded-lg border border-slate-200 p-3"><p className="mb-2 font-semibold">{displayDate(date)}</p><p className="mb-2 text-xs text-slate-600">Temperature readings: {dailyTemperatures.filter(row => row.activity === 'active').map(row => `${row.point.label} ${row.count}/2`).join(' · ') || 'No active locations confirmed'}</p>{dayRecords.length ? dayRecords.map(record => <button key={record.id} className="my-1 block w-full rounded-lg bg-slate-50 p-2 text-left text-sm hover:bg-slate-100" onClick={() => { setHistory(false); setReview(record); }}>{record.status === 'completed' ? record.payload.scope === 'temperatures' ? 'Temperature check' : record.payload.scope === 'locks' ? 'Locks and lights check' : 'Locks and temperature inspection' : `Not inspected · ${record.payload.missedReason}`}<br /><span className="text-xs text-slate-500">{record.recorded_by_name} · {displayTime(record.recorded_at)}</span></button>) : <button className="text-sm text-amber-800 underline" onClick={() => { setHistory(false); open(date, 'not_completed'); }}>Missing — record reason</button>}</div>;
+        return <div key={date} className="rounded-lg border border-slate-200 p-3"><p className="mb-2 font-semibold">{displayDate(date)}</p><p className="mb-2 text-xs text-slate-600">Temperature readings: {dailyTemperatures.filter(row => row.activity === 'active').map(row => `${row.point.label} ${row.count}/2`).join(' · ') || 'No active locations confirmed'}</p>{dayRecords.length ? dayRecords.map(record => <button key={record.id} className="my-1 block w-full rounded-lg bg-slate-50 p-2 text-left text-sm hover:bg-slate-100" onClick={() => { setHistory(false); setReview(record); }}>{record.status === 'completed' ? record.payload.scope === 'temperatures' ? 'Temperature check' : record.payload.scope === 'locks' ? 'Locks and lights check' : 'Locks and temperature inspection' : `Not inspected · ${record.payload.missedReason}`}<br /><ChecklistRecordedStamp record={record} /></button>) : <button className="text-sm text-amber-800 underline" onClick={() => { setHistory(false); open(date, 'not_completed'); }}>Missing — record reason</button>}</div>;
       })}</div>
     </Modal>
     <Modal isOpen={!!review} onClose={() => setReview(null)} title={`Recorded checklist · ${review?.check_date || ''}`} size="lg">
-      {review && <div className="space-y-4"><p className="rounded-lg bg-slate-50 p-3 text-sm">{review.status === 'completed' ? review.payload.scope === 'temperatures' ? 'Temperature check saved' : review.payload.scope === 'locks' ? 'Locks and lights signed off' : 'Locks and temperature inspection signed off' : 'Not inspected'} · {review.recorded_by_name}<br />{displayTime(review.recorded_at)}<br /><span className="break-all text-xs text-slate-500">Record: {review.id}</span></p>
+      {review && <div className="space-y-4"><p className="rounded-lg bg-slate-50 p-3 text-sm">{review.status === 'completed' ? review.payload.scope === 'temperatures' ? 'Temperature check saved' : review.payload.scope === 'locks' ? 'Locks and lights signed off' : 'Locks and temperature inspection signed off' : 'Not inspected'}<ChecklistRecordedStamp record={review} /><br /><span className="break-all text-xs text-slate-500">Record: {review.id}</span></p>
         {review.status === 'not_completed' ? <p>{review.payload.missedReason}</p> : <>
           {review.payload.scope !== 'temperatures' && <><h4 className="font-bold">Locks and lights</h4><dl className="divide-y divide-slate-100">{factoryLockPoints.map(point => <div className="flex justify-between gap-3 py-2 text-sm" key={point.id}><dt>{point.label}</dt><dd className="text-right font-medium">{review.payload.locks[point.id] === 'night_shift' ? point.kind === 'lock' ? 'Left open — night shift' : 'On — night shift' : review.payload.locks[point.id] === 'locked' ? 'Locked' : 'Off'}</dd></div>)}</dl>
           {review.payload.locks.corridor_lights === 'night_shift' && <p className="text-sm">Corridor lights: {review.payload.corridorReasons.join(', ')}</p>}
           </>}
           {review.payload.scope !== 'locks' && <><h4 className="font-bold">Temperatures — linked Cold Chain observations</h4>{factoryTemperaturePoints.map(point => {
             const answer = review.payload.temperatures[point.id];
-            return <div key={point.id} className="rounded-lg border border-slate-200 p-3 text-sm"><p className="font-semibold">{point.label}: {answer?.status === 'empty' ? 'Empty / not in use' : `${answer?.temperature ?? '—'}°C`}</p>{answer?.status === 'active' && <><p className={answer.inRange === false ? 'font-semibold text-red-700' : 'text-slate-600'}>{`${answer.inRange === undefined ? '' : answer.inRange ? 'In range · ' : 'OUT OF RANGE · '}${answer.targetLabel || factoryTemperatureTarget(point)}`}</p><p className="text-xs text-slate-500">{answer.observedAt ? displayTime(answer.observedAt) : 'Time unavailable'} · {answer.recordedBy || 'Name unavailable'}{answer.milkLotCode ? ` · Lot ${answer.milkLotCode}` : ''}</p>{answer.readingId && <p className="break-all text-xs text-slate-400">Reading: {answer.readingId}</p>}</>}</div>;
+            return <div key={point.id} className="rounded-lg border border-slate-200 p-3 text-sm"><p className="font-semibold">{point.label}: {answer?.status === 'empty' ? 'Empty / not in use' : `${answer?.temperature ?? '—'}°C`}</p>{answer?.status === 'active' && <><p className={answer.inRange === false ? 'font-semibold text-red-700' : 'text-slate-600'}>{`${answer.inRange === undefined ? '' : answer.inRange ? 'In range · ' : 'OUT OF RANGE · '}${answer.targetLabel || factoryTemperatureTarget(point)}`}</p><p className="text-xs text-slate-500">Observed at: {answer.observedAt ? displayTime(answer.observedAt) : 'Time unavailable'} · Recorded by: {answer.recordedBy || 'Name unavailable'}{answer.milkLotCode ? ` · Lot ${answer.milkLotCode}` : ''}</p>{answer.readingId && <p className="break-all text-xs text-slate-400">Reading: {answer.readingId}</p>}</>}</div>;
           })}</>}
         </>}
         {review.payload.notes && <p className="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm">Notes: {review.payload.notes}</p>}

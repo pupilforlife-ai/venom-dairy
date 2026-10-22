@@ -92,6 +92,15 @@ export function factoryDate(value: Date | string = new Date()) {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+export function formatFactoryRecordedAt(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'Timestamp unavailable';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Johannesburg', day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(date) + ' SAST';
+}
+
 export function factoryCheckDates(today: string, start = FACTORY_CHECKLIST_START_DATE) {
   const result: string[] = [];
   for (let date = new Date(`${start}T12:00:00Z`); date.toISOString().slice(0, 10) <= today; date.setUTCDate(date.getUTCDate() + 1)) {

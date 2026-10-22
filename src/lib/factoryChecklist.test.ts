@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { factoryCheckDates, factoryDate, factoryLockPoints, factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureProgress, latestFactoryChecks, validateFactoryCheck, markAllMilkStorageEmpty, type FactoryCheckPayload, type FactoryCheckRecord } from './factoryChecklist';
+import { factoryCheckDates, factoryDate, formatFactoryRecordedAt, factoryLockPoints, factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureProgress, latestFactoryChecks, validateFactoryCheck, markAllMilkStorageEmpty, type FactoryCheckPayload, type FactoryCheckRecord } from './factoryChecklist';
 import type { TemperatureReading } from '../data/mockData';
 
 function validPayload(): FactoryCheckPayload {
@@ -11,6 +11,11 @@ function validPayload(): FactoryCheckPayload {
 }
 
 describe('daily factory checklist', () => {
+  it('displays the stored recording timestamp with seconds and explicit SAST, independent of device timezone', () => {
+    expect(formatFactoryRecordedAt('2026-10-22T17:14:32Z')).toBe('22 Oct 2026, 19:14:32 SAST');
+    expect(formatFactoryRecordedAt('2026-10-22T22:30:05Z')).toBe('23 Oct 2026, 00:30:05 SAST');
+    expect(formatFactoryRecordedAt('invalid')).toBe('Timestamp unavailable');
+  });
   it('marks all six milk-storage points empty without altering fridge readings, cooling tanks or locks', () => {
     const payload = validPayload();
     for (const point of factoryTemperaturePoints.filter(point => point.section === 'milk')) {
