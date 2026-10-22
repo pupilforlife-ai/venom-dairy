@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { factoryCheckDates, factoryDate, factoryLockPoints, factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureProgress, latestFactoryChecks, validateFactoryCheck, type FactoryCheckPayload, type FactoryCheckRecord } from './factoryChecklist';
+import { factoryCheckDates, factoryDate, factoryLockPoints, factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureProgress, latestFactoryChecks, validateFactoryCheck, markAllMilkStorageEmpty, type FactoryCheckPayload, type FactoryCheckRecord } from './factoryChecklist';
 import type { TemperatureReading } from '../data/mockData';
 
 function validPayload(): FactoryCheckPayload {
@@ -11,6 +11,22 @@ function validPayload(): FactoryCheckPayload {
 }
 
 describe('daily factory checklist', () => {
+  it('marks all six milk-storage points empty without altering fridge readings, cooling tanks or locks', () => {
+    const payload = validPayload();
+    for (const point of factoryTemperaturePoints.filter(point => point.section === 'milk')) {
+      payload.temperatures[point.id] = { status: 'active', temperature: 4, existingReadingId: 'old-reading', milkLotCode: '111026' };
+    }
+    payload.temperatures.silo_cooling_tank = { status: 'active', temperature: 3 };
+    payload.temperatures.paneer_cooling_tank = { status: 'active', temperature: 5 };
+    const updated = markAllMilkStorageEmpty(payload);
+    expect(factoryTemperaturePoints.filter(point => point.section === 'milk')).toHaveLength(6);
+    for (const point of factoryTemperaturePoints) {
+      expect(updated.temperatures[point.id]).toEqual(point.section === 'milk' ? { status: 'empty' } : payload.temperatures[point.id]);
+    }
+    expect(updated.locks).toEqual(payload.locks);
+    expect(payload.temperatures.silo.status).toBe('active');
+    expect(validateFactoryCheck(updated, 'completed')).toBeNull();
+  });
   it('uses South African calendar dates across UTC midnight and enumerates missing days without inventing closures', () => {
     expect(factoryDate('2026-10-22T22:30:00Z')).toBe('2026-10-23');
     expect(factoryDate('malformed legacy timestamp')).toBe('');

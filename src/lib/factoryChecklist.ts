@@ -58,6 +58,14 @@ export interface FactoryCheckPayload {
   missedReason?: string;
   notes?: string;
 }
+
+export function markAllMilkStorageEmpty(payload: FactoryCheckPayload): FactoryCheckPayload {
+  const temperatures = { ...payload.temperatures };
+  for (const point of factoryTemperaturePoints) {
+    if (point.section === 'milk') temperatures[point.id] = { status: 'empty' };
+  }
+  return { ...payload, temperatures };
+}
 export interface FactoryCheckRecord {
   id: string;
   check_date: string;

@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase';
 import {
   FACTORY_CHECKLIST_START_DATE, corridorNightShiftReasons, factoryCheckDates, factoryDate,
   factoryLockPoints, factoryReadingValue, factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureTarget, factoryTemperatureProgress, latestFactoryChecks,
-  missedFactoryCheckReasons, validateFactoryCheck,
+  missedFactoryCheckReasons, validateFactoryCheck, markAllMilkStorageEmpty,
   type FactoryCheckPayload, type FactoryCheckRecord, type FactoryLockAnswer,
   type FactoryTemperatureAnswer, type MilkStorageStateEvent,
 } from '../lib/factoryChecklist';
@@ -160,6 +160,7 @@ function ManagerFactoryChecklist() {
             {payload.locks.corridor_lights === 'night_shift' && <div className="rounded-lg bg-amber-50 p-3"><p className="mb-2 text-sm font-semibold">Why are the corridor lights on?</p>{corridorNightShiftReasons.map(reason => <label className="mr-4 inline-flex items-center gap-2 py-1 text-sm" key={reason}><input type="checkbox" checked={payload.corridorReasons.includes(reason)} onChange={event => setPayload(current => ({ ...current, corridorReasons: event.target.checked ? [...current.corridorReasons, reason] : current.corridorReasons.filter(item => item !== reason) }))} />{reason}</label>)}</div>}
           </fieldset>}
           {payload.scope !== 'locks' && (['cold', 'milk', 'cooling'] as const).map(section => <fieldset key={section} className="space-y-3"><legend className="mb-3 font-bold text-slate-900">{section === 'cold' ? '2. Cold-chain temperatures' : section === 'milk' ? '3. Milk temperatures — only where milk is present' : 'Cooling tanks — only while in use'}</legend>
+            {section === 'milk' && <div className="rounded-lg border border-blue-200 bg-blue-50 p-3"><button type="button" disabled={busy} onClick={() => setPayload(markAllMilkStorageEmpty)} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-800 disabled:opacity-50">No milk in any storage</button><p className="mt-2 text-xs text-blue-900">Sets Silo, BMC 1, BMC 2, BMC 3, Truck and milk Coldroom to empty in this form. Save the temperature check to update Cold Chain. Refrigerated storage and cooling tanks are unchanged.</p></div>}
             {factoryTemperaturePoints.filter(point => point.section === section).map(point => {
               const answer = payload.temperatures[point.id];
               const recent = [...temperatureReadings].filter(reading => reading.location === point.location && factoryDate(reading.recordedAt) === today && Number.isFinite(factoryReadingValue(point, reading))).sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0];
