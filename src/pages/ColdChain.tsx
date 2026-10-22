@@ -6,7 +6,7 @@ import { Modal } from '../components/Modal';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import type { TemperatureReading } from '../data/mockData';
 import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C, temperatureTargetLabel } from '../lib/coldChain';
-import { factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureTarget } from '../lib/factoryChecklist';
+import { factoryDate, factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureTarget, factoryTemperatureProgress, type MilkStorageStateEvent } from '../lib/factoryChecklist';
 
 const requiredDailyChecks = 2;
 const coolingTanks = factoryTemperaturePoints.filter(point => point.section === 'cooling');
@@ -29,14 +29,7 @@ const legacyTempProfiles = [
   { location: 'Rental Cold Storage', targetMin: -25, targetMax: -10 },
 ];
 
-type StorageStateEvent = {
-  id: string;
-  location: string;
-  status: 'milk_present' | 'empty';
-  milkLotCode?: string;
-  recordedAt: string;
-  recordedBy: string;
-};
+type StorageStateEvent = MilkStorageStateEvent;
 
 function getCurrentUserName() {
   if (typeof window === 'undefined') return '';
@@ -79,9 +72,8 @@ export default function ColdChain() {
     return acc;
   }, {} as Record<string, TemperatureReading>);
 
-  const todayCount = (location: string) => temperatureReadings.filter(reading =>
-    reading.location === location && new Date(reading.recordedAt).toDateString() === new Date().toDateString()
-  ).length;
+  const dailyProgress = factoryTemperatureProgress(factoryDate(), temperatureReadings, storageEvents);
+  const todayCount = (location: string) => dailyProgress.find(row => row.point.location === location)?.count || 0;
 
   const recordStorageState = (location: string, status: StorageStateEvent['status']) => {
     const recordedBy = getCurrentUserName();
@@ -99,7 +91,7 @@ export default function ColdChain() {
       recordedBy,
     };
     setStorageEvents(current => [...current, event]);
-    showToast('success', status === 'empty' ? `${location} marked empty` : `Milk presence started for ${location}`);
+    showToast('success', status === 'empty' ? `${location} marked empty` : status === 'in_use' ? `${location} marked in use` : `Milk presence started for ${location}`);
   };
 
   const handleLogReading = () => {
@@ -181,7 +173,7 @@ export default function ColdChain() {
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Cold Chain Monitoring</h2>
-          <p className="mt-0.5 text-sm text-slate-500">Raw milk: 2–6°C. Record at least two checks each day while milk is present.</p>
+          <p className="mt-0.5 text-sm text-slate-500">Record at least two temperature checks daily for each location in use. Raw milk: 2–6°C.</p>
         </div>
         <button onClick={() => setShowLogModal(true)} className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700">
           <Plus className="h-4 w-4" /> Log Reading
@@ -194,6 +186,12 @@ export default function ColdChain() {
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-center"><Clock className="mx-auto mb-1 h-6 w-6 text-blue-600" /><p className="text-2xl font-bold text-blue-700">{temperatureReadings.length}</p><p className="text-xs text-blue-600">Total readings</p></div>
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center"><Thermometer className="mx-auto mb-1 h-6 w-6 text-indigo-600" /><p className="text-2xl font-bold text-indigo-700">{milkStorageLocations.filter(location => currentStorageState.get(location.location)?.status === 'milk_present').length}</p><p className="text-xs text-indigo-600">Raw-milk locations active</p></div>
       </div>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <h3 className="text-sm font-semibold text-slate-900">Twice-daily temperature checks</h3>
+        <p className="mt-1 text-xs text-slate-500">Shared with the Dashboard checklist. Two distinct readings per location per South African calendar day; empty vessels / unused tanks are exempt.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{dailyProgress.map(row => <div key={row.point.id} className="flex justify-between gap-2 rounded-lg border border-slate-200 p-3 text-xs"><span>{row.point.label}</span><span className={row.complete ? 'font-semibold text-emerald-700' : 'font-semibold text-amber-800'}>{row.activity === 'empty' ? 'Empty / not in use' : row.activity === undefined ? 'Confirm status' : `${row.count}/2 readings`}</span></div>)}</div>
+      </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-3">
@@ -227,7 +225,11 @@ export default function ColdChain() {
         <p className="mt-3 text-[11px] text-slate-500">Milk temperature flags below {RAW_MILK_TEMP_MIN_C}°C or above {RAW_MILK_TEMP_MAX_C}°C. Truck and Milk Coldroom storage temperatures are recorded separately; no equipment/air limit has been configured.</p>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="font-semibold text-slate-900">Cooling tanks</h3><p className="mt-1 text-xs text-slate-500">Shared with the daily factory checklist. Each tank uses its own temperature limit.</p><div className="mt-3 grid gap-3 sm:grid-cols-2">{coolingTanks.map(tank => <div key={tank.id} className="rounded-lg border border-slate-200 p-3"><p className="text-sm font-semibold">{tank.label}</p><p className="mt-1 text-xs text-slate-500">{factoryTemperatureTarget(tank)}</p><p className="my-2 text-sm text-slate-600">{latestByLocation[tank.location] ? `${latestByLocation[tank.location].temperature}°C · ${new Date(latestByLocation[tank.location].recordedAt).toLocaleString()}` : 'No reading recorded'}</p><button className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" onClick={() => { setNewReading(current => ({ ...current, location: tank.location })); setShowLogModal(true); }}>Log check</button></div>)}</div></section>
+      <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="font-semibold text-slate-900">Cooling tanks</h3><p className="mt-1 text-xs text-slate-500">Shared with the daily factory checklist. Mark tanks in use / empty; record two readings daily while in use.</p><div className="mt-3 grid gap-3 sm:grid-cols-2">{coolingTanks.map(tank => {
+        const state = currentStorageState.get(tank.location);
+        const active = dailyProgress.find(row => row.point.id === tank.id)?.activity === 'active';
+        return <div key={tank.id} className="rounded-lg border border-slate-200 p-3"><p className="text-sm font-semibold">{tank.label} · {active ? 'In use' : state?.status === 'empty' ? 'Empty / not in use' : 'Status not confirmed'}</p><p className="mt-1 text-xs text-slate-500">{factoryTemperatureTarget(tank)}</p><p className="my-2 text-sm text-slate-600">{latestByLocation[tank.location] ? `${latestByLocation[tank.location].temperature}°C · ${new Date(latestByLocation[tank.location].recordedAt).toLocaleString()}` : 'No reading recorded'}</p><div className="flex flex-wrap gap-2"><button className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => recordStorageState(tank.location, active ? 'empty' : 'in_use')}>{active ? 'Mark empty / not in use' : 'Mark in use'}</button>{!active && <button className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold" onClick={() => recordStorageState(tank.location, 'empty')}>Confirm empty</button>}<button className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" onClick={() => { setNewReading(current => ({ ...current, location: tank.location })); setShowLogModal(true); }}>Log check</button></div></div>;
+      })}</div></section>
 
       {temperatureReadings.length > 0 && <div className="rounded-xl border border-slate-200 bg-white p-4">
         <h3 className="mb-3 text-sm font-semibold text-slate-900">Temperature history (°C)</h3>
@@ -251,7 +253,7 @@ export default function ColdChain() {
 
       {outOfRange.length > 0 && <section className="rounded-xl border border-red-200 bg-red-50 p-4"><h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-red-800"><XCircle className="h-4 w-4" /> Temperature excursions</h3><ul className="space-y-1 text-sm text-red-800">{outOfRange.map(reading => <li key={reading.id}>{reading.location}: {reading.coldChainStorageReading ? reading.milkTemperature : reading.temperature}°C (target {temperatureTargetLabel(reading)}) · {new Date(reading.recordedAt).toLocaleString()} · {reading.recordedBy}</li>)}</ul></section>}
 
-      {storageEvents.length > 0 && <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="mb-2 text-sm font-semibold text-slate-900">Storage status history</h3><ul className="space-y-1 text-xs text-slate-600">{[...storageEvents].sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()).map(event => <li key={event.id}>{event.location}: <span className="font-medium">{event.status === 'empty' ? 'marked empty' : `milk present${event.milkLotCode ? ` · Lot ${event.milkLotCode}` : ''}`}</span> · {new Date(event.recordedAt).toLocaleString()} · {event.recordedBy}</li>)}</ul></section>}
+      {storageEvents.length > 0 && <section className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="mb-2 text-sm font-semibold text-slate-900">Storage status history</h3><ul className="space-y-1 text-xs text-slate-600">{[...storageEvents].sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()).map(event => <li key={event.id}>{event.location}: <span className="font-medium">{event.status === 'empty' ? 'marked empty' : event.status === 'in_use' ? 'in use' : `milk present${event.milkLotCode ? ` · Lot ${event.milkLotCode}` : ''}`}</span> · {new Date(event.recordedAt).toLocaleString()} · {event.recordedBy}</li>)}</ul></section>}
 
       <Modal isOpen={showLogModal} onClose={() => setShowLogModal(false)} title="Log Cold-Chain Reading">
         <div className="space-y-4">

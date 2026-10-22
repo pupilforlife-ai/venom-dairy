@@ -51,6 +51,7 @@ export interface FactoryTemperatureAnswer {
   milkLotCode?: string;
 }
 export interface FactoryCheckPayload {
+  scope?: 'all' | 'locks' | 'temperatures';
   locks: Record<string, FactoryLockAnswer | ''>;
   corridorReasons: string[];
   temperatures: Record<string, FactoryTemperatureAnswer>;
@@ -69,7 +70,7 @@ export interface FactoryCheckRecord {
 export interface MilkStorageStateEvent {
   id: string;
   location: string;
-  status: 'milk_present' | 'empty';
+  status: 'milk_present' | 'in_use' | 'empty';
   milkLotCode?: string;
   recordedAt: string;
   recordedBy: string;
@@ -93,8 +94,24 @@ export function factoryCheckDates(today: string, start = FACTORY_CHECKLIST_START
 
 export function latestFactoryChecks(records: FactoryCheckRecord[]) {
   const byDate = new Map<string, FactoryCheckRecord>();
-  [...records].sort((a, b) => a.recorded_at.localeCompare(b.recorded_at)).forEach(record => byDate.set(record.check_date, record));
+  records.filter(record => record.payload.scope !== 'temperatures').sort((a, b) => a.recorded_at.localeCompare(b.recorded_at)).forEach(record => byDate.set(record.check_date, record));
   return byDate;
+}
+
+// Count actual distinct Cold Chain observations, not the number of sign-offs.
+// Linking one observation in two forms still counts as one temperature check.
+export function factoryTemperatureProgress(date: string, readings: TemperatureReading[], events: MilkStorageStateEvent[]) {
+  return factoryTemperaturePoints.map(point => {
+    const observations = readings.filter(reading => reading.location === point.location
+      && factoryDate(reading.recordedAt) === date && Number.isFinite(factoryReadingValue(point, reading)));
+    const count = new Set(observations.map(reading => reading.id)).size;
+    const latestEvent = events.filter(event => event.location === point.location && factoryDate(event.recordedAt) <= date)
+      .sort((a, b) => Date.parse(b.recordedAt) - Date.parse(a.recordedAt))[0];
+    const activity: 'active' | 'empty' | undefined = point.section === 'cold' ? 'active' : latestEvent
+      ? latestEvent.status === 'empty' ? 'empty' : 'active'
+      : point.section === 'cooling' && count > 0 ? 'active' : undefined;
+    return { point, count, activity, complete: activity === 'empty' || activity === 'active' && count >= 2 };
+  });
 }
 
 export function factoryReadingValue(point: FactoryTemperaturePoint, reading: TemperatureReading) {
@@ -107,11 +124,15 @@ export function validateFactoryCheck(payload: FactoryCheckPayload, status: Facto
     if (['Other', 'Checklist not completed'].includes(payload.missedReason!) && !payload.notes?.trim()) return 'Explain why the checklist was not completed.';
     return null;
   }
-  for (const point of factoryLockPoints) {
-    if (![(point.kind === 'lock' ? 'locked' : 'off'), 'night_shift'].includes(payload.locks[point.id])) return `Select a status for ${point.label}.`;
+  if (payload.scope && !['all', 'locks', 'temperatures'].includes(payload.scope)) return 'Choose a valid checklist section.';
+  if (payload.scope !== 'temperatures') {
+    for (const point of factoryLockPoints) {
+      if (![(point.kind === 'lock' ? 'locked' : 'off'), 'night_shift'].includes(payload.locks[point.id])) return `Select a status for ${point.label}.`;
+    }
+    if (payload.locks.corridor_lights === 'night_shift'
+      && !payload.corridorReasons.some(reason => corridorNightShiftReasons.some(option => option === reason))) return 'Select why the factory corridor lights were left on.';
   }
-  if (payload.locks.corridor_lights === 'night_shift'
-    && !payload.corridorReasons.some(reason => corridorNightShiftReasons.some(option => option === reason))) return 'Select why the factory corridor lights were left on.';
+  if (payload.scope === 'locks') return null;
   for (const point of factoryTemperaturePoints) {
     const answer = payload.temperatures[point.id];
     if (!answer || !['active', 'empty'].includes(answer.status) || (point.section === 'cold' && answer.status !== 'active')) return `Confirm whether ${point.label} is in use.`;

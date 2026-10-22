@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { factoryCheckDates, factoryDate, factoryLockPoints, factoryTemperaturePoints, factoryTemperatureInRange, latestFactoryChecks, validateFactoryCheck, type FactoryCheckPayload, type FactoryCheckRecord } from './factoryChecklist';
+import { factoryCheckDates, factoryDate, factoryLockPoints, factoryTemperaturePoints, factoryTemperatureInRange, factoryTemperatureProgress, latestFactoryChecks, validateFactoryCheck, type FactoryCheckPayload, type FactoryCheckRecord } from './factoryChecklist';
+import type { TemperatureReading } from '../data/mockData';
 
 function validPayload(): FactoryCheckPayload {
   return {
@@ -70,5 +71,50 @@ describe('daily factory checklist', () => {
     const records = [corrected, base];
     expect(latestFactoryChecks(records).get(base.check_date)?.id).toBe('b');
     expect(records).toHaveLength(2);
+  });
+
+  it('allows independent temperature rounds without asking for locks again and independent lock checks without temperatures', () => {
+    const temperatureCheck = { ...validPayload(), scope: 'temperatures' as const, locks: {} };
+    expect(validateFactoryCheck(temperatureCheck, 'completed')).toBeNull();
+    const lockCheck = { ...validPayload(), scope: 'locks' as const, temperatures: {} };
+    expect(validateFactoryCheck(lockCheck, 'completed')).toBeNull();
+  });
+
+  it('requires two distinct observations per location, including valid zero temperatures, and ignores earlier dates', () => {
+    const reading: TemperatureReading = { id: 'one', location: 'Chiller', temperature: 0, targetMin: 0, targetMax: 5, recordedAt: '2026-10-22T06:00:00Z', recordedBy: 'Admin', inRange: true };
+    const progress = (readings: TemperatureReading[]) => factoryTemperatureProgress('2026-10-22', readings, []).find(row => row.point.id === 'chiller')!;
+    expect(progress([]).count).toBe(0);
+    expect(progress([reading]).complete).toBe(false);
+    expect(progress([reading, reading]).count).toBe(1);
+    expect(progress([reading, { ...reading, id: 'yesterday', recordedAt: '2026-10-21T12:00:00Z' }]).count).toBe(1);
+    expect(progress([reading, { ...reading, id: 'two', recordedAt: '2026-10-22T16:00:00Z' }]).complete).toBe(true);
+  });
+
+  it('keeps counts per vessel, excludes air-only checks from milk counts, and exempts vessels explicitly emptied', () => {
+    const reading: TemperatureReading = { id: 'milk-one', location: 'Truck', temperature: 4, targetMin: 2, targetMax: 6, coldChainStorageReading: true, storageTemperature: 4, recordedAt: '2026-10-22T08:00:00Z', recordedBy: 'Admin', inRange: true };
+    const events = [{ id: 'event', location: 'Truck', status: 'milk_present' as const, recordedAt: '2026-10-22T06:00:00Z', recordedBy: 'Admin' }];
+    expect(factoryTemperatureProgress('2026-10-22', [reading], events).find(row => row.point.id === 'truck')?.count).toBe(0);
+    const milkReading = { ...reading, milkTemperature: 4 };
+    const result = factoryTemperatureProgress('2026-10-22', [milkReading], events);
+    expect(result.find(row => row.point.id === 'truck')?.count).toBe(1);
+    expect(result.find(row => row.point.id === 'bmc1')?.count).toBe(0);
+    expect(result.find(row => row.point.id === 'truck')?.complete).toBe(false);
+    expect(factoryTemperatureProgress('2026-10-22', [milkReading], [...events, { ...events[0], id: 'empty', status: 'empty', recordedAt: '2026-10-22T10:00:00Z' }]).find(row => row.point.id === 'truck')?.complete).toBe(true);
+  });
+
+  it('temperature-only submissions do not replace the daily locks sign-off', () => {
+    const base = { id: 'locks', check_date: '2026-10-22', status: 'completed', payload: { ...validPayload(), scope: 'locks' }, recorded_at: '2026-10-22T16:00:00Z', recorded_by: 'admin-id', recorded_by_name: 'Admin' } as FactoryCheckRecord;
+    const temperatures = { ...base, id: 'temperatures', payload: { ...validPayload(), scope: 'temperatures' }, recorded_at: '2026-10-22T17:00:00Z' } as FactoryCheckRecord;
+    expect(latestFactoryChecks([base, temperatures]).get(base.check_date)?.id).toBe('locks');
+  });
+
+  it('uses shared cooling-tank usage state, retaining a legacy-reading fallback until a tank is explicitly emptied', () => {
+    const reading: TemperatureReading = { id: 'tank-one', location: 'Silo Cooling Tank', temperature: 4, targetMin: 0, targetMax: 5, upperLimitOnly: true, recordedAt: '2026-10-22T08:00:00Z', recordedBy: 'Admin', inRange: true };
+    const progress = factoryTemperatureProgress('2026-10-22', [reading], []).find(row => row.point.id === 'silo_cooling_tank')!;
+    expect(progress.activity).toBe('active');
+    expect(progress.complete).toBe(false);
+    const events = [{ id: 'empty-tank', location: reading.location, status: 'empty' as const, recordedAt: '2026-10-22T09:00:00Z', recordedBy: 'Admin' }];
+    expect(factoryTemperatureProgress('2026-10-22', [reading], events).find(row => row.point.id === 'silo_cooling_tank')?.complete).toBe(true);
+    expect(factoryTemperatureProgress('2026-10-21', [reading], events).find(row => row.point.id === 'silo_cooling_tank')?.activity).toBeUndefined();
   });
 });

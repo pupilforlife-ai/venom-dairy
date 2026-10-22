@@ -49,7 +49,16 @@ begin
   begin perform public.submit_factory_daily_check(today,'completed',draft); exception when raise_exception then rejected:=true; end;
   if not rejected then raise exception 'Invalid reading reference accepted'; end if;
   if not exists(select 1 from public.factory_daily_checks where id=(saved->>'id')::uuid) or not exists(select 1 from public.factory_daily_checks where id=(second_saved->>'id')::uuid) then raise exception 'Prior inspection overwritten'; end if;
+  -- One daily locks check does not require temperatures or write Cold Chain.
+  second_saved := public.submit_factory_daily_check(today,'completed',jsonb_build_object('scope','locks','locks',saved->'payload'->'locks','corridorReasons',saved->'payload'->'corridorReasons'));
+  if second_saved->'payload'->>'scope'<>'locks' or second_saved->'payload' ? 'temperatures' then raise exception 'Locks-only check scope not preserved'; end if;
+  if (select jsonb_array_length(value) from public.app_state where key='vejoy_temperatureReadings')<>reading_count+6 then raise exception 'Locks check created temperatures'; end if;
+  -- A second actual temperature round can be entered without redoing locks.
+  second_saved := public.submit_factory_daily_check(today,'completed',jsonb_build_object('scope','temperatures','temperatures',saved->'payload'->'temperatures'));
+  if second_saved->'payload'->>'scope'<>'temperatures' or second_saved->'payload' ? 'locks' then raise exception 'Temperature-only scope not preserved'; end if;
+  if (select jsonb_array_length(value) from public.app_state where key='vejoy_temperatureReadings')<>reading_count+12 then raise exception 'Second temperature observations not appended'; end if;
+  if not exists(select 1 from public.app_state,jsonb_array_elements(value) r where key='vejoy_coldChainStorageEvents' and r->>'factoryChecklistId'=second_saved->>'id' and r->>'location'='Silo Cooling Tank' and r->>'status'='in_use') then raise exception 'Cooling tank usage state not shared'; end if;
 end $$;
 rollback;
-select 'PASS: manager authentication, staff denial, required fields, zero reading, milk excursion, cooling limits, linked readings, no duplication, append-only signoffs; ALL TEST DATA ROLLED BACK' as verification;
+select 'PASS: permissions, limits, unique linked observations, independent daily locks and twice-daily temperature rounds, shared tank usage, preserved history; ALL TEST DATA ROLLED BACK' as verification;
 
