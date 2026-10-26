@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { ClipboardCheck, AlertTriangle, History } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Modal } from './Modal';
+import { FactoryChecklistDownload } from './FactoryChecklistDownload';
+import { factoryChecklistObservations } from '../lib/factoryChecklistReport';
 import { useToast } from './Toast';
 import { useApp } from '../store/AppContext';
 import { useSupabaseState } from '../hooks/useSupabaseState';
@@ -200,15 +202,12 @@ function ManagerFactoryChecklist() {
       })}</div>
     </Modal>
     <Modal isOpen={!!review} onClose={() => setReview(null)} title={`Recorded checklist · ${review?.check_date || ''}`} size="lg">
-      {review && <div className="space-y-4"><p className="rounded-lg bg-slate-50 p-3 text-sm">{review.status === 'completed' ? review.payload.scope === 'temperatures' ? 'Temperature check saved' : review.payload.scope === 'locks' ? 'Locks and lights signed off' : 'Locks and temperature inspection signed off' : 'Not inspected'}<ChecklistRecordedStamp record={review} /><br /><span className="break-all text-xs text-slate-500">Record: {review.id}</span></p>
+      {review && <div className="space-y-4"><FactoryChecklistDownload key={review.id} record={review} /><p className="rounded-lg bg-slate-50 p-3 text-sm">{review.status === 'completed' ? review.payload.scope === 'temperatures' ? 'Temperature check saved' : review.payload.scope === 'locks' ? 'Locks and lights signed off' : 'Locks and temperature inspection signed off' : 'Not inspected'}<ChecklistRecordedStamp record={review} /><br /><span className="break-all text-xs text-slate-500">Record: {review.id}</span></p>
         {review.status === 'not_completed' ? <p>{review.payload.missedReason}</p> : <>
           {review.payload.scope !== 'temperatures' && <><h4 className="font-bold">Locks and lights</h4><dl className="divide-y divide-slate-100">{factoryLockPoints.map(point => <div className="flex justify-between gap-3 py-2 text-sm" key={point.id}><dt>{point.label}</dt><dd className="text-right font-medium">{review.payload.locks[point.id] === 'night_shift' ? point.kind === 'lock' ? 'Left open — night shift' : 'On — night shift' : review.payload.locks[point.id] === 'locked' ? 'Locked' : 'Off'}</dd></div>)}</dl>
           {review.payload.locks.corridor_lights === 'night_shift' && <p className="text-sm">Corridor lights: {review.payload.corridorReasons.join(', ')}</p>}
           </>}
-          {review.payload.scope !== 'locks' && <><h4 className="font-bold">Temperatures — linked Cold Chain observations</h4>{factoryTemperaturePoints.map(point => {
-            const answer = review.payload.temperatures[point.id];
-            return <div key={point.id} className="rounded-lg border border-slate-200 p-3 text-sm"><p className="font-semibold">{point.label}: {answer?.status === 'empty' ? 'Empty / not in use' : `${answer?.temperature ?? '—'}°C`}</p>{answer?.status === 'active' && <><p className={answer.inRange === false ? 'font-semibold text-red-700' : 'text-slate-600'}>{`${answer.inRange === undefined ? '' : answer.inRange ? 'In range · ' : 'OUT OF RANGE · '}${answer.targetLabel || factoryTemperatureTarget(point)}`}</p><p className="text-xs text-slate-500">Observed at: {answer.observedAt ? displayTime(answer.observedAt) : 'Time unavailable'} · Recorded by: {answer.recordedBy || 'Name unavailable'}{answer.milkLotCode ? ` · Lot ${answer.milkLotCode}` : ''}</p>{answer.readingId && <p className="break-all text-xs text-slate-400">Reading: {answer.readingId}</p>}</>}</div>;
-          })}</>}
+          {review.payload.scope !== 'locks' && <><h4 className="font-bold">Temperatures — linked Cold Chain observations</h4>{factoryChecklistObservations(review).map(row => <div key={row.label} className="rounded-lg border border-slate-200 p-3 text-sm"><p className="font-semibold">{row.label}: {row.value}</p>{row.result && <p className={row.excursion ? 'font-semibold text-red-700' : 'text-slate-600'}>{row.result} · {row.target}</p>}{row.observedAt && <p className="text-xs text-slate-500">Observed at: {row.observedAt} · Recorded by: {row.recordedBy}{row.milkLotCode ? ` · Lot ${row.milkLotCode}` : ''}</p>}{row.readingId && <p className="break-all text-xs text-slate-400">Reading: {row.readingId}</p>}</div>)}</>}
         </>}
         {review.payload.notes && <p className="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm">Notes: {review.payload.notes}</p>}
         <p className="text-xs text-slate-500">Read-only audit record. Corrections are recorded as a new inspection, not an overwrite.</p>
