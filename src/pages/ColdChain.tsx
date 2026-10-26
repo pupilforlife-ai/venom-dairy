@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Clock, Plus, Snowflake, Thermometer, Truck
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
+import { ColdChainReport } from '../components/ColdChainReport';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import type { TemperatureReading } from '../data/mockData';
 import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C, temperatureTargetLabel } from '../lib/coldChain';
@@ -175,9 +176,12 @@ export default function ColdChain() {
           <h2 className="text-lg font-bold text-slate-900">Cold Chain Monitoring</h2>
           <p className="mt-0.5 text-sm text-slate-500">Record at least two temperature checks daily for each location in use. Raw milk: 2–6°C.</p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        <ColdChainReport readings={temperatureReadings} events={storageEvents} />
         <button onClick={() => setShowLogModal(true)} className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700">
           <Plus className="h-4 w-4" /> Log Reading
         </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
