@@ -4,8 +4,10 @@ import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getCreamBatchCode, getGheeBatchCode, getHalloumiBatchCode, getMilkLotAccounting, getMilkLotProductionReconciliation, milkStorageVessels } from '../data/mockData';
-import { getPaneerPackWeight, normalizeFinishedGoodsSku, paneerSkuByCode } from '../data/skuConfig';
-import { getProductionPackingEntries } from '../lib/finishedStock';
+import { buildMilkLotPackedSummary } from '../lib/milkLotPackedSummary';
+import { MilkLotPackedSummary } from '../components/MilkLotPackedSummary';
+import { useSupabaseState } from '../hooks/useSupabaseState';
+import type { CrumbingBatch } from './CrumbingTab';
 import { dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { exportMilkReceivingWorkbook } from '../lib/operationalExports';
 import { getMilkLotVesselBalances, getMilkSaleSourceAvailability, getMilkSaleVesselSource, planMilkSaleAllocations } from '../lib/milkVesselAllocation';
@@ -15,6 +17,8 @@ import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 export default function MilkReceiving() {
   const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
   const { showToast } = useToast();
+  // Read-only subscription: this page never writes crumbing records.
+  const [crumbingBatches, , crumbingLoaded] = useSupabaseState<CrumbingBatch[]>('vejoy_crumbingBatches', []);
   const isExportOwner = typeof window !== 'undefined'
     && window.localStorage.getItem('vejoy_user_role')?.toLowerCase() === 'owner';
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
@@ -151,39 +155,8 @@ export default function MilkReceiving() {
   };
 
   const packedSkuSummary = useMemo(() => {
-    if (!displayedLot) return [];
-    const boardEntries = getProductionPackingEntries(productionRounds)
-      .filter(({ round }) => round.milkLotId === displayedLot.id || round.milkLotCode === displayedLot.lotCode)
-      .map(({ pack }) => pack);
-    const entries = boardEntries.length > 0 ? boardEntries : (displayedLot.packedSkus || []);
-    const summary = new Map<string, { sku: string; cases: number; loose: number; looseWeightKg: number; weightKg: number; caseWeights: Record<string, number> }>();
-    entries.forEach((entry) => {
-      const sku = normalizeFinishedGoodsSku(entry.sku);
-      const definition = paneerSkuByCode[sku];
-      const entryWeightKg = definition
-        ? getPaneerPackWeight(
-          definition,
-          entry.cases || 0,
-          entry.loose || 0,
-          entry.looseWeightKg || 0,
-          entry.weightKg || 0,
-          entry.caseWeightKg,
-        )
-        : Math.max(0, entry.weightKg || entry.looseWeightKg || 0);
-      const existing = summary.get(sku) || { sku, cases: 0, loose: 0, looseWeightKg: 0, weightKg: 0, caseWeights: {} };
-      existing.cases += entry.cases || 0;
-      if (definition?.packMode === 'weight_loose' && (entry.cases || 0) > 0) {
-        const caseWeight = entry.caseWeightKg ?? (definition.unitsPerCase || 0) * definition.unitWeightKg;
-        const key = caseWeight.toFixed(2);
-        existing.caseWeights[key] = (existing.caseWeights[key] || 0) + (entry.cases || 0);
-      }
-      existing.loose += entry.loose || 0;
-      existing.looseWeightKg += entry.looseWeightKg || 0;
-      existing.weightKg += entryWeightKg;
-      summary.set(sku, existing);
-    });
-    return [...summary.values()];
-  }, [displayedLot, productionRounds]);
+    return displayedLot ? buildMilkLotPackedSummary(displayedLot, productionRounds, crumbingBatches) : null;
+  }, [displayedLot, productionRounds, crumbingBatches]);
 
   const totals = displayedLot ? {
     received: displayedLot.litresReceived,
@@ -708,39 +681,7 @@ export default function MilkReceiving() {
                                 <h3 className="text-sm font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200">
                                   SKU Packed on Board
                                 </h3>
-                                <p className="mb-3 text-xs text-slate-500">
-                                  Weight is calculated from each SKU&apos;s configured pack size and the cases and loose quantity recorded on the Production Board.
-                                </p>
-                                {packedSkuSummary.length > 0 ? (
-                                  <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                      <thead>
-                                        <tr className="border-b border-slate-200">
-                                          <th className="px-2 py-2 text-left text-[10px] uppercase tracking-wider text-slate-500">SKU</th>
-                                          <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Quantity in cases</th>
-                                          <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Loose</th>
-                                          <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider text-slate-500">Weight</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-100">
-                                        {packedSkuSummary.map((sku) => (
-                                          <tr key={sku.sku}>
-                                            <td className="px-2 py-3 font-mono font-semibold text-slate-900">{sku.sku}</td>
-                                            <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.cases.toLocaleString()}{Object.keys(sku.caseWeights).length > 0 && <div className="mt-1 text-[10px] font-normal text-slate-500">{Object.entries(sku.caseWeights).map(([kg, count]) => `${count} × ${kg} kg`).join(' · ')}</div>}</td>
-                                            <td className="px-2 py-3 text-right font-bold text-slate-900">
-                                              {paneerSkuByCode[sku.sku]?.packMode === 'weight_loose'
-                                                ? `${sku.looseWeightKg.toFixed(2)} kg`
-                                                : sku.loose.toLocaleString()}
-                                            </td>
-                                            <td className="px-2 py-3 text-right font-bold text-slate-900">{sku.weightKg.toFixed(2)} kg</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                ) : (
-                                  <p className="text-sm text-slate-400 text-center py-8">No SKUs packed yet</p>
-                                )}
+                                {packedSkuSummary && <MilkLotPackedSummary summary={packedSkuSummary} loading={!crumbingLoaded} />}
                               </div>
                             </div>
 
