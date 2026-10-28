@@ -2,6 +2,7 @@ import { createContext, useContext, ReactNode } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { returnHcpBalanceToPool, reconcileHcpChillerReturns } from '../lib/hcpCrumbing';
 import type { CrumbingBatch } from '../pages/CrumbingTab';
+import { recordPaneerIngredientAllocation } from '../lib/paneerRecipe';
 import { supabase } from '../lib/supabase';
 import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
 import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C } from '../lib/coldChain';
@@ -342,7 +343,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // start, but a zero planned input would make the milk ledger silently
       // under-account the round.
       if (isMilkProductionRound(nextRound) && nextRound.plannedInput <= 0) return round;
-      return nextRound;
+      return round.paneerIngredientIssues?.length
+        ? recordPaneerIngredientAllocation(nextRound, new Date().toISOString(),
+          typeof window === 'undefined' ? 'System' : window.localStorage.getItem('vejoy_user_username') || 'User',
+          'Round milk quantity or type corrected; standard allocation reconciled')
+        : nextRound;
     }));
   };
 
@@ -360,7 +365,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }],
       };
       if (isMilkProductionRound(nextRound) && nextRound.plannedInput <= 0) return round;
-      return nextRound;
+      return recordPaneerIngredientAllocation(nextRound, occurredAt, event.recordedBy || 'User',
+        updates.status === 'in_production' ? 'Ingredients issued when vat selection and production start were confirmed' : event.details,
+        round.status === 'scheduled' && updates.status === 'in_production' && Boolean(updates.vat));
     }));
   };
 
@@ -436,6 +443,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       if (!data) throw new Error('The server returned no reviewed round');
       applyCommittedProductionRounds(current => current.map(item => item.id === id ? data as ProductionRound : item));
+      if (decision === 'approve' && (data as ProductionRound).paneerIngredientIssues?.length) {
+        const reviewed = data as ProductionRound;
+        setProductionRounds(current => current.map(item => item.id === id
+          ? recordPaneerIngredientAllocation(item, reviewed.typeChangeRequest?.decidedAt || new Date().toISOString(),
+            reviewed.typeChangeRequest?.decidedBy || 'Admin', 'Approved paneer type correction; standard allocation reconciled')
+          : item));
+      }
       return true;
     }
 
@@ -449,7 +463,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true;
     }
 
-    setProductionRounds(current => current.map(item => item.id === id ? {
+    setProductionRounds(current => current.map(item => item.id === id ? recordPaneerIngredientAllocation({
       ...item,
       type: request.to,
       typeChangeRequest: { ...request, status: 'approved', decidedAt: now, decidedBy, decisionReason: decisionReason.trim() || undefined },
@@ -457,7 +471,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...(item.typeChangeHistory || []),
         { from: request.from, to: request.to, changedAt: now, changedBy: decidedBy, reason: request.reason, requestedBy: request.requestedBy, requestedAt: request.requestedAt, decision: 'approved' },
       ],
-    } : item));
+    }, now, decidedBy, 'Approved paneer type correction; standard allocation reconciled') : item));
     return true;
   };
 

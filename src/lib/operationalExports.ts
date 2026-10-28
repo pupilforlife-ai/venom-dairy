@@ -26,6 +26,7 @@ import { getProductionPackingEntries } from './finishedStock';
 import { excelDate, ExcelCellValue, ExcelSheet, ExcelWorkbookExport, exportDateStamp, exportExcelWorkbook } from './excelExport';
 import { getMilkLotVesselBalances, getMilkSaleVesselSource } from './milkVesselAllocation';
 import { comparePaneerBlockToPackedWeight } from './paneerWeightReconciliation';
+import { latestPaneerIngredientIssue } from './paneerRecipe';
 
 interface CrumbingBatchExportRecord {
   id: string;
@@ -797,6 +798,15 @@ function paneerWorkbookSheet(
     { key: 'type', header: 'Type', width: 10 },
     { key: 'status', header: 'Stage', width: 18 },
     { key: 'milkInputL', header: 'Milk Input L', width: 15, numberFormat: '0.00' },
+    { key: 'calciumChlorideG', header: 'Allocated Calcium Chloride g', width: 28, numberFormat: '0.000' },
+    { key: 'gdlG', header: 'Allocated GDL g', width: 18, numberFormat: '0.000' },
+    { key: 'potassiumSorbateG', header: 'Allocated Potassium Sorbate g', width: 29, numberFormat: '0.000' },
+    { key: 'fisG', header: 'Allocated FIS g', width: 18, numberFormat: '0.000' },
+    { key: 'afOilKg', header: 'Allocated AF Oil kg', width: 21, numberFormat: '0.000' },
+    { key: 'recipeVersion', header: 'Paneer Recipe Version', width: 26 },
+    { key: 'ingredientIssueAt', header: 'Initial Ingredient Issue At', width: 26 },
+    { key: 'allocationUpdatedAt', header: 'Allocation Last Recorded At', width: 27 },
+    { key: 'allocationRecordedBy', header: 'Allocation Recorded By', width: 25 },
     { key: 'outputKg', header: 'Paneer Output kg', width: 18, numberFormat: '0.00' },
     { key: 'creamKg', header: 'Cream Recovered kg', width: 20, numberFormat: '0.00' },
     { key: 'creamBuckets', header: 'Cream Bucket Weights kg', width: 30 },
@@ -816,13 +826,20 @@ function paneerWorkbookSheet(
     { key: 'completed', header: 'Completed At', width: 21 },
     { key: 'team', header: 'Team', width: 24 },
   ];
-  const summaryRows = paneerRounds.map(round => ({
+  const summaryRows = paneerRounds.map(round => {
+    const issue = latestPaneerIngredientIssue(round);
+    const quantity = (id: string) => issue ? issue.lines.find(line => line.id === id)?.quantity ?? 0 : '';
+    return ({
     shift: round.shiftNumber,
     round: round.roundNumber,
     batch: productionBatchCode(round),
     type: round.type,
     status: round.status,
     milkInputL: getRoundMilkInput(round),
+    calciumChlorideG: quantity('calcium_chloride'), gdlG: quantity('gdl'), potassiumSorbateG: quantity('potassium_sorbate'),
+    fisG: quantity('fis'), afOilKg: quantity('af_oil'), recipeVersion: issue?.version || '',
+    ingredientIssueAt: excelDate(round.paneerIngredientIssues?.[0]?.recordedAt),
+    allocationUpdatedAt: excelDate(issue?.recordedAt), allocationRecordedBy: issue?.recordedBy || '',
     outputKg: round.outputWeight || 0,
     creamKg: round.creamRecovered || 0,
     creamBuckets: (round.creamBucketWeights || []).map(weight => weight.toFixed(2)).join(', '),
@@ -841,7 +858,8 @@ function paneerWorkbookSheet(
     started: excelDate(round.startTime),
     completed: excelDate(round.completedAt),
     team: (round.team || []).join(', '),
-  }));
+    });
+  });
   const detailColumns = [
     { key: 'shift', header: 'Shift', width: 9, numberFormat: '0' },
     { key: 'round', header: 'Round', width: 9, numberFormat: '0' },

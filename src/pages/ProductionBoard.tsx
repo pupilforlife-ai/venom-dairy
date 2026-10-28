@@ -23,6 +23,7 @@ import {
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
+import { PaneerRecipePanel } from '../components/PaneerRecipePanel';
 import { statusFlow, statusLabels, statusColors, CipRecord, PackedSku, ProductionRound } from '../data/mockData';
 import { CipChecklistStep, dailyCipChecklist, dailyCipSteps, weeklyAcidCipChecklist, weeklyAcidCipSteps } from '../data/cip';
 import { getAllowedPaneerSkus, getDefaultPaneerCaseWeightKg, getPaneerPackWeight, paneerSkuByCode } from '../data/skuConfig';
@@ -392,6 +393,11 @@ export default function ProductionBoard() {
 
     const round = productionRounds.find(r => r.id === selectedRound);
     if (!round) return;
+
+    if (round.status !== 'scheduled') {
+      showToast('error', 'This round has already started. Review its current record instead of starting it again.');
+      return;
+    }
 
     const occurredAt = new Date().toISOString();
     recordProductionRoundActivity(selectedRound, {
@@ -2827,6 +2833,7 @@ export default function ProductionBoard() {
       {/* Temperature Modal */}
       <Modal isOpen={showTemperatureModal} onClose={() => { setShowTemperatureModal(false); setStartingTemperature(null); setSelectedVat(null); }} title="Record Starting Temperature">
         <div className="space-y-4">
+          {selectedRound && (() => { const round = productionRounds.find(item => item.id === selectedRound); return round ? <PaneerRecipePanel round={round} preview /> : null; })()}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <p className="text-sm text-blue-800">
               <strong>Vat:</strong> {selectedVat === 'vat2' ? 'Vat 2' : 'Vat 3'}
@@ -2891,6 +2898,7 @@ export default function ProductionBoard() {
                 <p className="text-xs text-slate-500 mt-1">Team: {round.team.join(', ')}</p>
               </div>
               <div className="space-y-2">
+                <PaneerRecipePanel round={round} />
                 {history.map((item) => (
                   <div key={item.key} className="flex gap-3 pb-3 border-b border-slate-100 last:border-0">
                     <div className="flex-shrink-0 w-2 h-2 rounded-full bg-indigo-500 mt-1.5"></div>

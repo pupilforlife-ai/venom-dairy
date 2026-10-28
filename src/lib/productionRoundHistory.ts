@@ -70,6 +70,8 @@ export function buildProductionRoundHistory(round: ProductionRound): RoundHistor
     addLegacy('in-production-legacy', 'In Production', `${round.vat === 'vat2' ? 'Vat 2' : 'Vat 3'} · Starting temp: ${round.startingTemperature ?? 'N/A'}°C`);
   }
 
+  addExactEvents(['paneer_ingredients_issued', 'paneer_recipe_adjusted']);
+
   addExactEvents(['coagulation']);
 
   if (round.pressingStartedAt || laterPaneerStatuses.has(round.status)) {

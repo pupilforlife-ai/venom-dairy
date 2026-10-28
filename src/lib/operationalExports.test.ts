@@ -4,6 +4,7 @@ import writeXlsxFile from 'write-excel-file/node';
 import { MilkLot, ProductionRound, ProductionShift } from '../data/mockData';
 import { buildExcelFileSheets, excelAutoFilterFeature } from './excelExport';
 import { buildMilkReceivingWorkbook, buildProductionBoardWorkbook } from './operationalExports';
+import { recordPaneerIngredientAllocation } from './paneerRecipe';
 
 const lot: MilkLot = {
   id: 'lot-011026',
@@ -259,7 +260,7 @@ describe('Production Board Excel export', () => {
     expect(workbookXml.match(/<sheet /g)).toHaveLength(6);
     expect(workbookXml).toContain('name="Paneer"');
     expect(workbookXml).toContain('name="Crumbing"');
-    expect(strFromU8(archive['xl/worksheets/sheet1.xml'])).toContain('<autoFilter ref="A7:X9"/>');
+    expect(strFromU8(archive['xl/worksheets/sheet1.xml'])).toContain('<autoFilter ref="A7:AG9"/>');
   });
 
   it('does not export rounds belonging to another milk lot', () => {
@@ -275,9 +276,20 @@ describe('Production Board Excel export', () => {
 
     expect(workbook.sheets[0].name).toBe('Paneer');
     expect(workbook.sheets[0].rows).toHaveLength(1);
+    expect(workbook.sheets[0].rows[0]).toMatchObject({ calciumChlorideG: '', fisG: '', afOilKg: '', allocationRecordedBy: '' });
     const gheeSheet = workbook.sheets.find(sheet => sheet.name === 'Ghee')!;
     expect(gheeSheet.metadata).toContainEqual(['Record status', 'No ghee production recorded for milk lot 011026']);
     expect(gheeSheet.rows[0]).toMatchObject({ date: 'No ghee production recorded for milk lot 011026' });
+  });
+
+  it('exports only the latest ingredient allocation, not a sum of issue and correction snapshots', () => {
+    const original = recordPaneerIngredientAllocation(productionRound({ type: 'C/S', status: 'in_production', vat: 'vat3' }),
+      '2026-10-28T08:00:00Z', 'test-operator', 'Start', true);
+    const corrected = recordPaneerIngredientAllocation({ ...original, actualInput: 250, plannedInput: 250 },
+      '2026-10-28T09:00:00Z', 'test-owner', 'Correct milk');
+    const workbook = buildProductionBoardWorkbook({ lot, shifts: [shift], rounds: [corrected], cipRecords: [] });
+    expect(workbook.sheets[0].rows[0]).toMatchObject({ calciumChlorideG: 200, gdlG: 925, potassiumSorbateG: 125,
+      fisG: 417.5, afOilKg: 10, recipeVersion: 'paneer-2026-10-28-v1', allocationRecordedBy: 'test-owner' });
   });
 });
 

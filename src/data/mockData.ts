@@ -502,6 +502,9 @@ export interface ProductionShift {
 }
 
 export interface ProductionRound {
+  // Append-only standard ingredient issue and correction snapshots. Only the
+  // latest snapshot is the current total; never sum snapshots as new issues.
+  paneerIngredientIssues?: import('../lib/paneerRecipe').PaneerIngredientIssue[];
   id: string;
   milkLotId: string;
   milkLotCode: string;
