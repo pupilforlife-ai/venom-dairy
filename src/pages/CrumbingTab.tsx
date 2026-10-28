@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { crumbingSkuDefinitions, crumbingSkuByCode, getCrumbingPackWeight } from '../data/skuConfig';
 import { allocateTraysFifo, getCombinedPackingEligibleBatches, type FifoTrayAllocation } from '../lib/crumbingPacking';
+import { initialHcpCrumbingState, getHcpCrumbingForm, hcpRecipeReady, buildHcpDraftUpdates, buildHcpCompletionUpdates, type HcpCrumbingForm, type HcpBalanceDisposition } from '../lib/hcpCrumbing';
 
 type CrumbingStatus = 
   | 'scheduled'
@@ -72,6 +73,10 @@ export interface CrumbingBatch {
   pan111SourcePending?: boolean;
   pan111SourceLinkedAt?: string;
   hcpRecipeRequired?: boolean;
+  // Final tray count stays a draft until crumbing has actually finished.
+  hcpCrumbingDraft?: { traysCrumbed: number; balanceWeightKg?: number; balanceRecorded?: boolean; wastageKg?: number; balanceDisposition?: HcpBalanceDisposition } | null;
+  hcpBalanceDisposition?: HcpBalanceDisposition;
+  hcpCompletedBy?: string;
   status: CrumbingStatus;
   traysCrumbed: number;
   traysFried: number;
@@ -198,10 +203,11 @@ interface CrumbingTabProps {
 }
 
 export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selectedMilkLotId }: CrumbingTabProps) {
-  const { productionRounds, milkLots, intermediateLots, updateMilkLot, updateIntermediateLot } = useApp();
+  const { productionRounds, milkLots, intermediateLots, updateMilkLot, updateIntermediateLot, recordHcpChillerReturn } = useApp();
   const { showToast } = useToast();
 
   const [showNewBatchModal, setShowNewBatchModal] = useState(false);
+  const [showHcpCompletionModal, setShowHcpCompletionModal] = useState(false);
   const [showTrayModal, setShowTrayModal] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
   const [showClubSppModal, setShowClubSppModal] = useState(false);
@@ -219,7 +225,6 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     manualPaneerWeightKg: 0,
     manualOrigin: '',
     halloumiWeightKg: 0,
-    traysCrumbed: 0,
     crumbingTeam: '',
   });
 
@@ -280,12 +285,16 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     batterMultiplier: 0,
     breadingMultiplier: 0,
   });
-  const [hcpCrumbingForm, setHcpCrumbingForm] = useState({
+  const [hcpCrumbingForm, setHcpCrumbingForm] = useState<HcpCrumbingForm>({
     traysCrumbed: 0,
     crumbedBy: '',
     predustMultiplier: 0,
     batterMultiplier: 0,
     breadingMultiplier: 0,
+    balanceWeightKg: 0,
+    balanceRecorded: false,
+    wastageKg: 0,
+    balanceDisposition: '',
   });
 
   const [recipeForm, setRecipeForm] = useState({
@@ -362,13 +371,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
   const openHcpCrumbingWorkflow = (batch: CrumbingBatch) => {
     if (batch.type !== 'HCP') return;
     setSelectedBatch(batch.id);
-    setHcpCrumbingForm({
-      traysCrumbed: batch.traysCrumbed || 0,
-      crumbedBy: batch.crumbingTeam || '',
-      predustMultiplier: batch.recipe?.flavourMultiplier || 0,
-      batterMultiplier: batch.recipe?.batterMultiplier || 0,
-      breadingMultiplier: batch.recipe?.breadingMultiplier || 0,
-    });
+    setHcpCrumbingForm(getHcpCrumbingForm(batch));
   };
 
   const getJpCreamCheeseCarryoverAvailable = (sourceBatch: CrumbingBatch, forBatchId?: string) => {
@@ -607,12 +610,8 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
       showToast('error', 'Enter the paneer weight available for SPP');
       return;
     }
-    if (newBatchForm.type === 'HCP' && newBatchForm.halloumiWeightKg <= 0) {
+    if (newBatchForm.type === 'HCP' && (!Number.isFinite(newBatchForm.halloumiWeightKg) || newBatchForm.halloumiWeightKg <= 0)) {
       showToast('error', 'Enter the Halloumi weight being allocated to HCP crumbing');
-      return;
-    }
-    if (newBatchForm.type === 'HCP' && newBatchForm.traysCrumbed <= 0) {
-      showToast('error', 'Enter the number of trays crumbed');
       return;
     }
 
@@ -697,13 +696,14 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
       pan111SourcePending: isPendingJp,
       hcpRecipeRequired: newBatchForm.type === 'HCP',
       status: newBatchForm.type === 'SPP' ? 'scheduled' : newBatchForm.type === 'JP' ? 'jp_prepping' : 'crumbing',
-      traysCrumbed: newBatchForm.type === 'HCP' ? newBatchForm.traysCrumbed : 0,
+      traysCrumbed: 0,
       traysFried: 0,
-      traysRemaining: newBatchForm.type === 'HCP' ? newBatchForm.traysCrumbed : 0,
+      traysRemaining: 0,
       traysPacked: 0,
       sourceWeightKg,
       crumbingTeam: newBatchForm.crumbingTeam,
       createdAt: new Date().toISOString(),
+      ...(newBatchForm.type === 'HCP' ? initialHcpCrumbingState() : {}),
     };
 
     setCrumbingBatches(current => [...current, newBatch]);
@@ -726,15 +726,9 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
       setJpPrepForm({ ...emptyJpPrepForm(), preparedBy: newBatchForm.crumbingTeam.trim() });
     } else if (newBatchForm.type === 'HCP') {
       setSelectedBatch(newBatch.id);
-      setHcpCrumbingForm({
-        traysCrumbed: newBatchForm.traysCrumbed,
-        crumbedBy: newBatchForm.crumbingTeam.trim(),
-        predustMultiplier: 0,
-        batterMultiplier: 0,
-        breadingMultiplier: 0,
-      });
+      setHcpCrumbingForm(getHcpCrumbingForm(newBatch));
     }
-    setNewBatchForm({ type: 'SPP', sourceBatchId: '', manualPaneerWeightKg: 0, manualOrigin: '', halloumiWeightKg: 0, traysCrumbed: 0, crumbingTeam: '' });
+    setNewBatchForm({ type: 'SPP', sourceBatchId: '', manualPaneerWeightKg: 0, manualOrigin: '', halloumiWeightKg: 0, crumbingTeam: '' });
   };
 
   const getClubEligibleSppBatches = () => crumbingBatches
@@ -1317,57 +1311,22 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
 
   const updateHcpCrumbingDraft = (batch: CrumbingBatch, changes: Partial<typeof hcpCrumbingForm>) => {
     const nextForm = { ...hcpCrumbingForm, ...changes };
-    setHcpCrumbingForm(nextForm);
-    const traysCrumbed = Math.max(0, Math.trunc(nextForm.traysCrumbed || 0));
-    updateCrumbingBatch(batch.id, {
-      traysCrumbed,
-      traysRemaining: Math.max(0, traysCrumbed - batch.traysFried),
-      crumbingTeam: nextForm.crumbedBy,
-      recipe: {
-        flavourMultiplier: nextForm.predustMultiplier,
-        batterMultiplier: nextForm.batterMultiplier,
-        breadingMultiplier: nextForm.breadingMultiplier,
-        flavourIyababKg: 0,
-        flavourPredustKg: nextForm.predustMultiplier,
-        batterIyababaKg: nextForm.batterMultiplier,
-        batterWaterL: nextForm.batterMultiplier * 2.5,
-        breadingAdajioKg: nextForm.breadingMultiplier,
-      },
-      recipeAutosavedAt: new Date().toISOString(),
-    });
+    try {
+      const updates = buildHcpDraftUpdates(batch, nextForm, new Date().toISOString());
+      setHcpCrumbingForm(nextForm);
+      updateCrumbingBatch(batch.id, updates);
+    } catch (error) { showToast('error', error instanceof Error ? error.message : 'Could not record HCP details'); }
   };
 
   const handleCompleteHcpCrumbing = (batch: CrumbingBatch) => {
-    const { traysCrumbed, crumbedBy, predustMultiplier, batterMultiplier, breadingMultiplier } = hcpCrumbingForm;
-    if (!Number.isInteger(traysCrumbed) || traysCrumbed <= 0 || !crumbedBy.trim()) {
-      showToast('error', 'Enter the HCP crumbed tray count and responsible staff');
-      return;
-    }
-    if (predustMultiplier <= 0 || batterMultiplier <= 0 || breadingMultiplier <= 0) {
-      showToast('error', 'Record at least one addition for Predust, batter, and Adajio');
-      return;
-    }
-    const now = new Date().toISOString();
-    updateCrumbingBatch(batch.id, {
-      status: 'crumbing',
-      traysCrumbed,
-      traysRemaining: traysCrumbed,
-      crumbingTeam: crumbedBy.trim(),
-      recipe: {
-        flavourMultiplier: predustMultiplier,
-        batterMultiplier,
-        breadingMultiplier,
-        flavourIyababKg: 0,
-        flavourPredustKg: predustMultiplier,
-        batterIyababaKg: batterMultiplier,
-        batterWaterL: batterMultiplier * 2.5,
-        breadingAdajioKg: breadingMultiplier,
-      },
-      recipeRecordedAt: now,
-      recipeAutosavedAt: now,
-      productionCompletedAt: now,
-    });
-    showToast('success', `HCP crumbing completed · ${traysCrumbed} trays ready to freeze`);
+    try {
+      const updates = buildHcpCompletionUpdates(batch, hcpCrumbingForm, new Date().toISOString(), window.localStorage.getItem('vejoy_user_username') || hcpCrumbingForm.crumbedBy.trim());
+      if (updates.hcpBalanceDisposition === 'chiller' && !milkLots.find(lot => lot.id === batch.sourceBatchId)?.halloumiPool) throw new Error('The source Halloumi pool is missing; review it before returning the balance to the chiller.');
+      updateCrumbingBatch(batch.id, updates);
+      if (updates.hcpBalanceDisposition === 'chiller') recordHcpChillerReturn({ ...batch, ...updates });
+      setShowHcpCompletionModal(false);
+      showToast('success', `HCP crumbing completed · ${hcpCrumbingForm.traysCrumbed} trays ready to freeze`);
+    } catch (error) { showToast('error', error instanceof Error ? error.message : 'Could not complete HCP crumbing'); }
   };
 
   const handleFreeze = (batchId: string) => {
@@ -1879,20 +1838,25 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
           <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 text-sm text-slate-700">
             <div className="font-bold text-emerald-800">Crumbing completed · {new Date(batch.productionCompletedAt as string).toLocaleString()}</div>
             <div className="mt-2">{batch.traysCrumbed} trays · Predust {(recipe?.flavourPredustKg || 0).toFixed(2)} kg · batter {(recipe?.batterIyababaKg || 0).toFixed(2)} kg + {(recipe?.batterWaterL || 0).toFixed(2)} L water · Adajio {(recipe?.breadingAdajioKg || 0).toFixed(2)} kg · by {batch.crumbingTeam}</div>
+            {batch.balanceWeightKg !== undefined && <div className="mt-2">Halloumi crumbed: {(batch.weightCrumbedKg || 0).toFixed(2)} kg · Wastage: {(batch.wastageKg || 0).toFixed(2)} kg · Balance: {batch.balanceWeightKg.toFixed(2)} kg{batch.balanceWeightKg > 0 && <> → {batch.hcpBalanceDisposition === 'disposed' ? 'Disposed of' : batch.hcpBalanceDisposition === 'chiller' ? 'Stored in chiller — available for sale / future crumbing' : batch.hcpBalanceDisposition || 'Destination not recorded'}</>}</div>}
+            {batch.hcpBalanceDisposition === 'chiller' && (batch.balanceWeightKg || 0) > 0 && !milkLots.find(lot => lot.id === batch.sourceBatchId)?.halloumiPool?.hcpChillerReturns?.[batch.id] && <div className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">Chiller stock return is not yet reflected in the source pool. <button type="button" onClick={() => recordHcpChillerReturn(batch)} className="font-semibold underline">Retry recording chiller return</button></div>}
+            {batch.hcpCompletedBy && <div className="mt-2 text-xs text-slate-500">Completion recorded by {batch.hcpCompletedBy}</div>}
             <div className="mt-2 text-xs text-blue-800">Next: Freeze → Fry → Pack → Hand Over.</div>
           </div>
         ) : (
           <>
+            <p className="mt-3 text-sm font-semibold text-orange-900">1. During crumbing — record ingredients as they are taken</p>
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><div className="text-xs font-semibold uppercase text-amber-900">Flavour coat · Predust</div><div className="mt-1 text-sm">1 kg per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {hcpCrumbingForm.predustMultiplier}</strong><button type="button" onClick={() => updateHcpCrumbingDraft(batch, { predustMultiplier: hcpCrumbingForm.predustMultiplier + 1 })} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">Total {hcpCrumbingForm.predustMultiplier.toFixed(2)} kg</div></div>
               <div className="rounded-lg border border-blue-200 bg-blue-50 p-3"><div className="text-xs font-semibold uppercase text-blue-900">Batter coat</div><div className="mt-1 text-sm">1 kg batter + 2.5 L water per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {hcpCrumbingForm.batterMultiplier}</strong><button type="button" onClick={() => updateHcpCrumbingDraft(batch, { batterMultiplier: hcpCrumbingForm.batterMultiplier + 1 })} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">{hcpCrumbingForm.batterMultiplier.toFixed(2)} kg + {(hcpCrumbingForm.batterMultiplier * 2.5).toFixed(2)} L water</div></div>
               <div className="rounded-lg border border-purple-200 bg-purple-50 p-3"><div className="text-xs font-semibold uppercase text-purple-900">Breader coat · Adajio</div><div className="mt-1 text-sm">1 kg per +1</div><div className="mt-3 flex items-center justify-between"><strong>× {hcpCrumbingForm.breadingMultiplier}</strong><button type="button" onClick={() => updateHcpCrumbingDraft(batch, { breadingMultiplier: hcpCrumbingForm.breadingMultiplier + 1 })} className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white">+1</button></div><div className="mt-2 text-xs">Total {hcpCrumbingForm.breadingMultiplier.toFixed(2)} kg</div></div>
             </div>
-            <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-2">
-              <label className="text-xs font-medium text-slate-600">Crumbed trays<input type="number" min="1" step="1" value={hcpCrumbingForm.traysCrumbed || ''} onChange={(event) => updateHcpCrumbingDraft(batch, { traysCrumbed: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
-              <label className="text-xs font-medium text-slate-600">Crumbed by<input type="text" value={hcpCrumbingForm.crumbedBy} onChange={(event) => updateHcpCrumbingDraft(batch, { crumbedBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+            <div className="mt-3 rounded-lg border border-orange-200 bg-white p-3">
+              <p className="text-sm font-semibold text-orange-900">2. After crumbing — count and record the final trays</p>
+              <p className="mt-1 text-xs text-slate-600">Keep using +1 while producing. Only finish this batch once crumbing is over; the final tray count is recorded in the next form.</p>
+              {!hcpRecipeReady(hcpCrumbingForm) && <p className="mt-2 text-xs text-orange-800">Record Predust, batter and Adajio usage before finishing.</p>}
+              <button type="button" disabled={!hcpRecipeReady(hcpCrumbingForm)} onClick={() => setShowHcpCompletionModal(true)} className="mt-3 rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50">Crumbing finished — record trays</button>
             </div>
-            <div className="mt-3 flex justify-end"><button type="button" onClick={() => handleCompleteHcpCrumbing(batch)} className="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700">Complete HCP crumbing → Freeze</button></div>
           </>
         )}
       </div>
@@ -1950,7 +1914,6 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
                     manualPaneerWeightKg: 0,
                     manualOrigin: '',
                     halloumiWeightKg: 0,
-                    traysCrumbed: 0,
                   });
                   setShowNewBatchModal(true);
                 }}
@@ -2012,6 +1975,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
                       ) : batch.type === 'HCP' && batch.hcpRecipeRequired ? (
                         <div className="space-y-1">
                           {batch.recipe ? <><div className="font-medium text-slate-800">Predust {batch.recipe.flavourMultiplier} · Batter {batch.recipe.batterMultiplier} · Adajio {batch.recipe.breadingMultiplier}</div><div>{batch.productionCompletedAt ? 'Recipe completed' : 'Recipe in progress'}</div></> : <div>Crumbing recipe required</div>}
+                          {batch.balanceWeightKg !== undefined && <div>Crumbed: {(batch.weightCrumbedKg || 0).toFixed(2)} kg · Wastage: {(batch.wastageKg || 0).toFixed(2)} kg · Balance: {batch.balanceWeightKg.toFixed(2)} kg {batch.balanceWeightKg > 0 ? `→ ${batch.hcpBalanceDisposition || 'Destination not recorded'}` : ''}</div>}
                           <button onClick={() => openHcpCrumbingWorkflow(batch)} className="mt-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-100">View crumbing record</button>
                         </div>
                       ) : '—'}
@@ -2022,7 +1986,9 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600 text-xs">
-                      {batch.status === 'clubbed' ? '—' : `${batch.traysCrumbed} trays`}
+                      {batch.status === 'clubbed' ? '—' : batch.type === 'HCP' && batch.hcpRecipeRequired && !batch.productionCompletedAt
+                        ? batch.traysCrumbed > 0 ? `${batch.traysCrumbed} trays (unconfirmed)` : 'Awaiting final tray count'
+                        : `${batch.traysCrumbed} trays`}
                       {batch.crumbingTeam && (
                         <div className="text-slate-400">by {batch.crumbingTeam}</div>
                       )}
@@ -2109,6 +2075,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     { type: 'JP', label: 'JP', icon: '🌶️', batches: jpBatches },
     { type: 'HCP', label: 'HCP', icon: '🧀', batches: hcpBatches },
   ];
+  const hcpCompletionBatch = crumbingBatches.find(batch => batch.id === selectedBatch && batch.type === 'HCP' && batch.status === 'crumbing' && !batch.productionCompletedAt);
 
   return (
     <div className="space-y-4">
@@ -2278,6 +2245,20 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
         </div>
       </Modal>
 
+      <Modal isOpen={showHcpCompletionModal} onClose={() => setShowHcpCompletionModal(false)} title="HCP crumbing finished — final trays">
+        {hcpCompletionBatch ? <div className="space-y-4">
+          <p className="text-sm text-slate-700"><strong>{hcpCompletionBatch.batchCode}</strong><br />Enter the tray count now that crumbing is over. Ingredients already recorded remain saved. Freezing is the next, separate step.</p>
+          <p className="rounded-lg bg-orange-50 p-3 text-xs text-orange-900">Predust {hcpCrumbingForm.predustMultiplier} kg · batter {hcpCrumbingForm.batterMultiplier} kg + {(hcpCrumbingForm.batterMultiplier * 2.5).toFixed(2)} L water · Adajio {hcpCrumbingForm.breadingMultiplier} kg</p>
+          <label className="block text-sm font-medium text-slate-700">Final crumbed trays<input type="number" min="1" step="1" value={hcpCrumbingForm.traysCrumbed || ''} onChange={event => updateHcpCrumbingDraft(hcpCompletionBatch, { traysCrumbed: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+          <label className="block text-sm font-medium text-slate-700">Leftover Halloumi balance (kg)<input type="number" min="0" step="0.01" value={hcpCrumbingForm.balanceRecorded ? hcpCrumbingForm.balanceWeightKg : ''} placeholder="Enter weighed balance, including 0" onChange={event => updateHcpCrumbingDraft(hcpCompletionBatch, { balanceWeightKg: Number(event.target.value) || 0, balanceRecorded: event.target.value !== '' })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+          {hcpCrumbingForm.balanceWeightKg > 0 && <label className="block text-sm font-medium text-slate-700">What happened to the balance?<select value={hcpCrumbingForm.balanceDisposition} onChange={event => updateHcpCrumbingDraft(hcpCompletionBatch, { balanceDisposition: event.target.value as HcpBalanceDisposition })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Select destination</option><option value="HAL111">Went to HAL111</option><option value="disposed">Disposed of</option><option value="chiller">Stored in chiller — available for sale or future crumbing</option></select></label>}
+          <label className="block text-sm font-medium text-slate-700">Wastage during crumbing (kg)<input type="number" min="0" step="0.01" value={hcpCrumbingForm.wastageKg} onChange={event => updateHcpCrumbingDraft(hcpCompletionBatch, { wastageKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /><span className="mt-1 block text-xs font-normal text-slate-500">Do not include leftover balance disposed of here as well.</span></label>
+          <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-700">Halloumi issued: {(hcpCompletionBatch.sourceWeightKg || 0).toFixed(2)} kg − balance: {hcpCrumbingForm.balanceWeightKg.toFixed(2)} kg − wastage: {hcpCrumbingForm.wastageKg.toFixed(2)} kg = Halloumi crumbed: {((hcpCompletionBatch.sourceWeightKg || 0) - hcpCrumbingForm.balanceWeightKg - hcpCrumbingForm.wastageKg).toFixed(2)} kg (before coatings). Only balance stored in the chiller returns to available Halloumi stock. HAL111 and disposed balance stay separate and are not counted as packed HCP.</p>
+          <label className="block text-sm font-medium text-slate-700">Crumbed by<input type="text" value={hcpCrumbingForm.crumbedBy} onChange={event => updateHcpCrumbingDraft(hcpCompletionBatch, { crumbedBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
+          <div className="flex flex-wrap gap-2"><button type="button" onClick={() => handleCompleteHcpCrumbing(hcpCompletionBatch)} className="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-700">Save final trays — ready to freeze</button><button type="button" onClick={() => setShowHcpCompletionModal(false)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">Back to crumbing</button></div>
+        </div> : <p className="text-sm text-slate-600">This HCP batch is no longer open for completion. Close this form and review its current record.</p>}
+      </Modal>
+
       {/* New Batch Modal */}
       <Modal isOpen={showNewBatchModal} onClose={() => setShowNewBatchModal(false)} title={`Create New ${activeType} Batch`}>
         <div className="space-y-4">
@@ -2348,19 +2329,9 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
             />
             <p className="mt-1 text-xs text-amber-700">Production can continue now. Link the actual PAN111 lot from the JP batch record once it has been entered.</p>
           </div>}
-          {activeType === 'HCP' && <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Trays Crumbed</label>
-            <input
-              type="number"
-              value={newBatchForm.traysCrumbed}
-              onChange={(e) => setNewBatchForm({ ...newBatchForm, traysCrumbed: parseInt(e.target.value) })}
-              className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              min="0"
-            />
-          </div>}
           {activeType === 'SPP' && <div className="rounded-lg border border-pink-200 bg-pink-50 p-3 text-xs text-pink-900">After the batch is created, the recipe details open directly under the batch and autosave as they are entered.</div>}
           {activeType === 'JP' && <div className="rounded-lg border border-lime-200 bg-lime-50 p-3 text-xs text-lime-900">This creates the JP record and opens Phase 1. Jalapeño bucket weights, piece inspection, PAN111 input, proportional cream-cheese recipe, filling, both freezes, and crumbing are recorded in sequence.</div>}
-          {activeType === 'HCP' && <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-xs text-orange-900">After creation, record each Predust, batter, and Adajio addition. HCP cannot move to Freeze until the crumbing recipe is completed.</div>}
+          {activeType === 'HCP' && <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-xs text-orange-900">Create the batch before crumbing starts. Record Predust, batter and Adajio with +1 during production. When crumbing is over, choose “Crumbing finished — record trays” and enter the final count. No tray count is needed to start.</div>}
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">{activeType === 'JP' ? 'Prepping Team' : 'Crumbing Team'}</label>
             <input

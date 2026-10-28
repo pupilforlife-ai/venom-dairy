@@ -1,5 +1,7 @@
 import { createContext, useContext, ReactNode } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
+import { returnHcpBalanceToPool, reconcileHcpChillerReturns } from '../lib/hcpCrumbing';
+import type { CrumbingBatch } from '../pages/CrumbingTab';
 import { supabase } from '../lib/supabase';
 import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
 import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C } from '../lib/coldChain';
@@ -49,6 +51,7 @@ interface AppContextType extends AppState {
   // Milk lot actions
   addMilkLot: (lot: Omit<MilkLot, 'id'>) => void;
   updateMilkLot: (id: string, updates: Partial<MilkLot>) => void;
+  recordHcpChillerReturn: (batch: CrumbingBatch) => void;
   addCreamLot: (lot: Omit<CreamLot, 'id'>) => void;
   updateCreamLot: (id: string, updates: Partial<CreamLot>) => void;
   
@@ -157,6 +160,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const milkLots = storedMilkLots.map(lot => ({
     ...lot,
     creamPool: getMilkLotCreamPool(lot, productionRounds),
+    halloumiPool: lot.halloumiPool ? reconcileHcpChillerReturns(lot.halloumiPool) : undefined,
   }));
   const [storedIntermediateLots, setIntermediateLots] = useSupabaseState<IntermediateLot[]>('vejoy_intermediateLots', initialIntermediate);
   const intermediateLots = storedIntermediateLots.map(lot => lot.storageLocation === 'Intermediate Freezer'
@@ -199,6 +203,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateMilkLot = (id: string, updates: Partial<MilkLot>) => {
     setMilkLots(currentLots => currentLots.map(lot => lot.id === id ? { ...lot, ...updates } : lot));
+  };
+
+  const recordHcpChillerReturn = (batch: CrumbingBatch) => {
+    setMilkLots(currentLots => currentLots.map(lot => {
+      if (lot.id !== batch.sourceBatchId || !lot.halloumiPool) return lot;
+      const pool = returnHcpBalanceToPool(lot.halloumiPool, batch);
+      return pool === lot.halloumiPool ? lot : { ...lot, halloumiPool: pool };
+    }));
   };
 
   const addCreamLot = (lot: Omit<CreamLot, 'id'>) => {
@@ -636,6 +648,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     butterLotClosures,
     addMilkLot,
     updateMilkLot,
+    recordHcpChillerReturn,
     addCreamLot,
     updateCreamLot,
     addProductionShift,

@@ -202,6 +202,9 @@ export interface HalloumiPool {
   handedOverWeight?: number;
   // Unallocated vacuumed stock that can still be sold or used in crumbing.
   availableForCrumbing: number;
+  // Idempotent receipts for unused Halloumi returned from completed HCP batches.
+  hcpChillerReturns?: Record<string, { weightKg: number; recordedAt: string; recordedBy: string }>;
+  hcpChillerReturnsAppliedKg?: number;
   roundsContributed: string[];
 }
 

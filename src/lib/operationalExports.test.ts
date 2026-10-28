@@ -176,6 +176,13 @@ describe('Production Board Excel export', () => {
           type: 'HCP',
           sourceBatchId: lot.id,
           sourceBatchCode: 'HAL-011026',
+          sourceWeightKg: 20,
+          weightCrumbedKg: 17.5,
+          balanceWeightKg: 2,
+          wastageKg: 0.5,
+          hcpBalanceDisposition: 'HAL111',
+          hcpCompletedBy: 'test-recorder',
+          balanceRecordedAt: '2026-10-01T11:30:00.000Z',
           status: 'packed',
           traysCrumbed: 6,
           traysFried: 6,
@@ -242,7 +249,8 @@ describe('Production Board Excel export', () => {
     expect(sheet('Amassi').rows[0]).toMatchObject({ bottles18: 20, bottles2: 10, totalBottles: 30 });
     expect(sheet('Crumbing').rows[0]).toMatchObject({ batch: 'SPP-1', packedCases: 2 });
     expect(sheet('Crumbing').sections?.[0].rows[0]).toMatchObject({ batch: 'JP-1', packedCases: 3 });
-    expect(sheet('Crumbing').sections?.[2].rows[0]).toMatchObject({ batch: 'HCP-1', packedCases: 1 });
+    expect(sheet('Crumbing').sections?.[2].rows[0]).toMatchObject({ batch: 'HCP-1', packedCases: 1,
+      sourceKg: 20, crumbedKg: 17.5, balanceKg: 2, wastageKg: 0.5, balanceDestination: 'HAL111', completionRecordedBy: 'test-recorder' });
 
     const file = await (writeXlsxFile as any)(buildExcelFileSheets(workbook), { features: [excelAutoFilterFeature] }).toBuffer();
     expect(file.byteLength).toBeGreaterThan(1_000);

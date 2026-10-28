@@ -39,6 +39,9 @@ interface CrumbingBatchExportRecord {
   balanceWeightKg?: number;
   weightCrumbedKg?: number;
   wastageKg?: number;
+  hcpBalanceDisposition?: string;
+  hcpCompletedBy?: string;
+  balanceRecordedAt?: string;
   traysCrumbed: number;
   traysFried: number;
   traysRemaining: number;
@@ -1142,6 +1145,9 @@ function crumbingBatchSheet(
       { key: 'sourceKg', header: 'Source kg', width: 13, numberFormat: '0.00' },
       { key: 'crumbedKg', header: 'Crumbed kg', width: 14, numberFormat: '0.00' },
       { key: 'balanceKg', header: 'Balance kg', width: 14, numberFormat: '0.00' },
+      { key: 'balanceDestination', header: 'Halloumi Balance Destination', width: 28 },
+      { key: 'balanceRecordedAt', header: 'Balance Recorded At', width: 22 },
+      { key: 'completionRecordedBy', header: 'HCP Completion Recorded By', width: 26 },
       { key: 'wastageKg', header: 'Wastage kg', width: 14, numberFormat: '0.00' },
       { key: 'traysCrumbed', header: 'Trays Crumbed', width: 15, numberFormat: '0' },
       { key: 'traysFried', header: 'Trays Fried', width: 13, numberFormat: '0' },
@@ -1183,6 +1189,9 @@ function crumbingBatchSheet(
         sourceKg: batch.sourceWeightKg ?? '',
         crumbedKg: batch.weightCrumbedKg ?? '',
         balanceKg: batch.balanceWeightKg ?? '',
+        balanceDestination: batch.hcpBalanceDisposition || '',
+        balanceRecordedAt: excelDate(batch.balanceRecordedAt),
+        completionRecordedBy: batch.hcpCompletedBy || '',
         wastageKg: batch.wastageKg ?? '',
         traysCrumbed: batch.traysCrumbed,
         traysFried: batch.traysFried,
