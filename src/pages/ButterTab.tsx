@@ -8,6 +8,8 @@ import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 import { normalizeExternalCreamBalance } from '../lib/externalCreamBalance';
 import { calculateYieldPercent } from '../lib/yieldCalculations';
 import { calculateButterBlendRecipe } from '../lib/butterBlendRecipe';
+import { getAllowedButterPackingSkus } from '../lib/butterPacking';
+import { ButterPackingActions } from '../components/ButterPackingActions';
 
 type ButterStatus = 
   | 'scheduled'
@@ -629,13 +631,8 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     const pool = [...availableDirectPools, ...availableBlendedPools].find(candidate => candidate.id === selectedPoolId);
     if (!pool) return;
     const directButterOutput = pool.kind === 'direct';
-    const blendedButterPool = pool.kind === 'blended';
-    if (directButterOutput && packingForm.sku !== 'PUBB') {
-      showToast('error', 'Direct butter output can only be packed into PUBB');
-      return;
-    }
-    if (blendedButterPool && packingForm.sku !== pool.poolSku && !(pool.poolSku === 'PSBBB' && packingForm.sku === 'BB05')) {
-      showToast('error', 'Blended butter must be packed from its blended pool SKU');
+    if (!getAllowedButterPackingSkus(pool.kind, pool.poolSku).some(sku => sku === packingForm.sku)) {
+      showToast('error', directButterOutput ? 'Direct butter output can only be packed into PUBB' : 'Select a packing format allowed for this butter pool');
       return;
     }
     if (pool.availableBalance <= 0) {
@@ -885,9 +882,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                       <div className="mt-1 text-xs text-slate-500">{isDirect ? 'Butter pool' : `${poolSku} blended pool`} · <span className="font-semibold text-slate-700">{pool.availableBalance.toFixed(2)} kg available</span></div>
                       <div className="mt-1 text-[11px] text-emerald-700">{pool.origin === 'mixed' ? 'Mixed internal + purchased-cream butter' : pool.origin === 'internal' ? 'Internal cream → butter' : 'Purchased cream → butter'} · {pool.rounds.length} source round{pool.rounds.length !== 1 ? 's' : ''}</div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button onClick={() => openPacking(pool, poolSku)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700"><Package className="h-3 w-3" />Pack as {poolSku}</button>
-                      {poolSku === 'PSBBB' && <button onClick={() => { pool.rounds.forEach(round => updateProductionRound(round.id, { pool: 'BB05', status: 'bb05_pool' })); showToast('success', 'Converted to BB05 bricks'); }} className="rounded-lg bg-rose-500 px-3 py-2 text-xs font-medium text-white hover:bg-rose-600">Make Bricks → BB05</button>}
+                    <div>
+                      <ButterPackingActions kind={pool.kind} poolSku={poolSku} onPack={sku => openPacking(pool, sku)} />
+                      {pool.kind === 'blended' && (poolSku === 'PSBBB' || poolSku === 'BB05') && <p className="mt-2 max-w-sm text-[11px] text-emerald-700">BB05 bricks and PSBBB balls share this balance. Pack either format, including soft butter left over from the extruder.</p>}
                     </div>
                   </div>
                 );
