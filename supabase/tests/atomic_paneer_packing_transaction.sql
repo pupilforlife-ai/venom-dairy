@@ -12,6 +12,7 @@ end;
 $$;
 create trigger test_stock_failure before update on _atomic_packing_probe for each row execute function pg_temp.reject_test_stock();
 create trigger test_snapshot_guard before update on _atomic_packing_probe for each row execute function public.guard_atomic_paneer_packing();
+create trigger test_protect_state before update on _atomic_packing_probe for each row execute function public.protect_app_state_update();
 do $install_test_copy$
 begin
   execute replace(replace(pg_get_functiondef('public.commit_paneer_packing(jsonb)'::regprocedure),
@@ -53,6 +54,8 @@ begin
   perform set_config('request.jwt.claim.sub',owner_id::text,true);
   saved:=pg_temp.commit_paneer_packing(request||jsonb_build_object('operationId','owner-zero','packIndex',0,'expectedPack',previous,'cases',0));
   if (saved#>>'{round,remainingBalance}')::numeric<>70.097 or saved#>>'{stock,cases}'<>'0' then raise exception 'Owner correction failed'; end if;
+  saved:=pg_temp.commit_paneer_packing(request||jsonb_build_object('operationId','owner-same-quantity','packIndex',0,'expectedPack',saved#>'{round,packedSkus,0}','cases',0));
+  if (saved#>>'{round,remainingBalance}')::numeric<>70.097 then raise exception 'Same-quantity correction failed'; end if;
   perform set_config('request.jwt.claim.sub','',true);
   begin
     perform pg_temp.commit_paneer_packing(request);

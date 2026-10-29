@@ -163,9 +163,13 @@ begin
     if exists(select 1 from jsonb_array_elements(stocks) x where x->>'id'=s->>'id') then
       stocks:=(select jsonb_agg(case when x->>'id'=s->>'id' then s else x end order by ord) from jsonb_array_elements(stocks) with ordinality t(x,ord));
     else stocks:=stocks||jsonb_build_array(s); end if;
-    update public.app_state set value=stocks where key='vejoy_finishedStock';
-    get diagnostics n=row_count;
-    if n<>1 then raise exception 'Stock save was not confirmed'; end if;
+    -- An owner may correct audit/reason details without changing stock mass.
+    -- Existing safety triggers intentionally suppress unchanged writes.
+    if stocks is distinct from (select value from public.app_state where key='vejoy_finishedStock') then
+      update public.app_state set value=stocks where key='vejoy_finishedStock';
+      get diagnostics n=row_count;
+      if n<>1 then raise exception 'Stock save was not confirmed'; end if;
+    end if;
   end if;
   perform set_config('app.atomic_paneer_packing','off',true);
   return result;
