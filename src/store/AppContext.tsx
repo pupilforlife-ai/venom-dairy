@@ -4,6 +4,7 @@ import { returnHcpBalanceToPool, reconcileHcpChillerReturns } from '../lib/hcpCr
 import type { CrumbingBatch } from '../pages/CrumbingTab';
 import { recordPaneerIngredientAllocation } from '../lib/paneerRecipe';
 import { supabase } from '../lib/supabase';
+import { persistPaneerPacking, PaneerPackingRequest } from '../lib/atomicPaneerPacking';
 import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
 import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C } from '../lib/coldChain';
 import { 
@@ -67,6 +68,7 @@ interface AppContextType extends AppState {
   removeProductionRound: (id: string) => boolean;
   cancelProductionRound: (id: string, reason?: string) => boolean;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
+  commitPaneerPacking: (request: PaneerPackingRequest) => Promise<ProductionRound | null>;
   recordProductionRoundActivity: (
     id: string,
     updates: Partial<ProductionRound>,
@@ -167,7 +169,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const intermediateLots = storedIntermediateLots.map(lot => lot.storageLocation === 'Intermediate Freezer'
     ? { ...lot, storageLocation: 'Dairy Container (Intermediate Freezer)' }
     : lot);
-  const [storedFinishedStock, setFinishedStock] = useSupabaseState<FinishedStockLot[]>('vejoy_finishedStock', initialFinished);
+  const [storedFinishedStock, setFinishedStock, , applyCommittedFinishedStock] = useSupabaseState<FinishedStockLot[]>('vejoy_finishedStock', initialFinished);
   const finishedStock = storedFinishedStock.map(stock => {
     // Packed finished goods are staged in the dairy container until a
     // Distribution handover assigns the receiving cold store. Keep older
@@ -332,6 +334,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ? current.map(item => item.id === committedRound.id ? committedRound : item)
       : [...current, committedRound]);
     return committedRound;
+  };
+
+  const commitPaneerPacking = async (request: PaneerPackingRequest) => {
+    if (!supabase) return null; // Existing browser-only demo behavior is retained.
+    const saved = await persistPaneerPacking(supabase, request);
+    applyCommittedProductionRounds(current => current.map(round => round.id === saved.round.id ? saved.round : round));
+    if (saved.stock) {
+      const stock = saved.stock;
+      applyCommittedFinishedStock(current => current.some(item => item.id === stock.id)
+        ? current.map(item => item.id === stock.id ? stock : item) : [...current, stock]);
+    }
+    return saved.round;
   };
 
   const updateProductionRound = (id: string, updates: Partial<ProductionRound>) => {
@@ -673,6 +687,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeProductionRound,
     cancelProductionRound,
     updateProductionRound,
+    commitPaneerPacking,
     recordProductionRoundActivity,
     requestProductionRoundTypeChange,
     reviewProductionRoundTypeChange,

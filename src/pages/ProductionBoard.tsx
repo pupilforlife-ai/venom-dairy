@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, useEffect } from 'react';
+import { Fragment, useMemo, useState, useEffect, useRef } from 'react';
 import {
   Filter,
   Plus,
@@ -120,7 +120,7 @@ export default function ProductionBoard() {
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots, finishedStock,
     cipRecords,
-    advanceRoundStatus, updateProductionRound, recordProductionRoundActivity, addProductionRound, createProductionRound,
+    advanceRoundStatus, updateProductionRound, recordProductionRoundActivity, commitPaneerPacking, addProductionRound, createProductionRound,
     addProductionShift, updateProductionShift, addIntermediateLot, updateIntermediateLot,
     cancelProductionRound, addWasteEvent, requestProductionRoundTypeChange, reviewProductionRoundTypeChange,
     addFinishedStock, updateFinishedStock, addCipRecord, updateCipRecord
@@ -158,6 +158,9 @@ export default function ProductionBoard() {
   const [selectedCipRecordId, setSelectedCipRecordId] = useState<string | null>(null);
   const [showCutModal, setShowCutModal] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
+  const [isSavingPacking, setIsSavingPacking] = useState(false);
+  const packingInFlight = useRef(false);
+  const packingAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const [showPan111Modal, setShowPan111Modal] = useState(false);
   const [showCreamModal, setShowCreamModal] = useState(false);
   const [showCreamDetailsModal, setShowCreamDetailsModal] = useState(false);
@@ -733,7 +736,8 @@ export default function ProductionBoard() {
     showToast('success', 'Restaurant blocks stored in chiller');
   };
 
-  const handlePack = (roundId: string) => {
+  const handlePack = async (roundId: string) => {
+    if (packingInFlight.current) return;
     const round = productionRounds.find(r => r.id === roundId);
     if (!round) return;
     const definition = paneerSkuByCode[packForm.sku];
@@ -792,6 +796,25 @@ export default function ProductionBoard() {
       showToast('success', `PAN111 request submitted: ${totalWeightPacked.toFixed(2)} kg. Awaiting owner/admin approval.`);
       return;
     }
+
+    const fingerprint = JSON.stringify({ roundId, packIndex: editingPackIndex, packForm, expectedPack: previousPack || null });
+    if (packingAttempt.current?.fingerprint !== fingerprint) {
+      packingAttempt.current = { fingerprint, id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` };
+    }
+    packingInFlight.current = true;
+    setIsSavingPacking(true);
+    try {
+      const committed = await commitPaneerPacking({ ...packForm, operationId: packingAttempt.current.id,
+        roundId, packIndex: editingPackIndex, expectedPack: previousPack || null });
+      if (committed) {
+        packingAttempt.current = null;
+        setShowPackModal(false);
+        setPackForm(emptyPackForm);
+        setEditingPackIndex(null);
+        showToast('success', `Packing confirmed by server. Remaining balance: ${(committed.remainingBalance || 0).toFixed(2)} kg`);
+        return;
+      }
+      // Only disconnected/browser-demo mode uses the original local writes.
 
     const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
     const previousPackingRunId = previousPack?.packingRunId;
@@ -881,6 +904,13 @@ export default function ProductionBoard() {
     setShowPackModal(false);
     setPackForm(emptyPackForm);
     setEditingPackIndex(null);
+    packingAttempt.current = null;
+    } catch (error) {
+      showToast('error', error instanceof Error ? error.message : 'Packing was not confirmed. Keep this form open and retry.');
+    } finally {
+      packingInFlight.current = false;
+      setIsSavingPacking(false);
+    }
   };
 
   const openPackingCorrection = (round: ProductionRound, packIndex: number) => {
@@ -2604,7 +2634,7 @@ export default function ProductionBoard() {
       </Modal>
 
       {/* Pack Modal */}
-      <Modal isOpen={showPackModal} onClose={() => { setShowPackModal(false); setEditingPackIndex(null); }} title={editingPackIndex !== null ? "Correct Packing" : selectedRound && productionRounds.find(r => r.id === selectedRound)?.packedSkus?.length ? "+Add Packing" : "Record Packing"}>
+      <Modal isOpen={showPackModal} onClose={() => { if (!packingInFlight.current) { setShowPackModal(false); setEditingPackIndex(null); } }} title={editingPackIndex !== null ? "Correct Packing" : selectedRound && productionRounds.find(r => r.id === selectedRound)?.packedSkus?.length ? "+Add Packing" : "Record Packing"}>
         <div className="space-y-4">
           {selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
@@ -2699,8 +2729,8 @@ export default function ProductionBoard() {
             );
           })()}
           <div className="flex gap-2 pt-2">
-            <button onClick={() => selectedRound && handlePack(selectedRound)} className="flex-1 px-4 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600">Save Packing</button>
-            <button onClick={() => setShowPackModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+            <button disabled={isSavingPacking} onClick={() => selectedRound && handlePack(selectedRound)} className="flex-1 px-4 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 disabled:opacity-50">{isSavingPacking ? 'Saving…' : 'Save Packing'}</button>
+            <button disabled={isSavingPacking} onClick={() => setShowPackModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium disabled:opacity-50">Cancel</button>
           </div>
         </div>
       </Modal>
