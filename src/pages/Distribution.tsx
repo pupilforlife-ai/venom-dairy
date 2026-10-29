@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { DistributionRecords, DistributionRecordGroups } from '../components/DistributionRecords';
+import { DistributionTab, DistributionTabs } from '../components/DistributionTabs';
 import { useToast } from '../components/Toast';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { hasDistributionPackingRecord } from '../lib/crumbingPacking';
@@ -194,6 +195,7 @@ export default function Distribution() {
   const [handovers, setHandovers] = useSupabaseState<DistributionHandover[]>('vejoy_distributionHandovers', []);
   const [crumbingBatches, setCrumbingBatches] = useSupabaseState<DistributionCrumbingBatch[]>('vejoy_crumbingBatches', []);
   const [showHandoverModal, setShowHandoverModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<DistributionTab>('ready');
   const [selectedCandidate, setSelectedCandidate] = useState<DistributionCandidate | null>(null);
   const [reviewOnly, setReviewOnly] = useState(false);
   const [form, setForm] = useState<HandoverForm>(emptyForm);
@@ -1065,22 +1067,24 @@ export default function Distribution() {
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center"><CheckCircle2 className="mx-auto mb-1 h-5 w-5 text-emerald-600" /><p className="text-2xl font-bold text-emerald-700">{actualHandovers.length}</p><p className="text-xs text-emerald-700">recorded transfers</p></div>
       </div>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="Ready for distribution">
+      <DistributionTabs activeTab={activeTab} onChange={setActiveTab}>{ {
+        ready: <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="Ready for distribution">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div><h3 className="text-sm font-semibold text-slate-900">Ready for distribution</h3><p className="mt-0.5 text-xs text-slate-500">Packed products awaiting handover, grouped by milk lot with the latest first.</p></div>
           <Truck className="h-5 w-5 text-slate-400" />
         </div>
-        {readyCandidates.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">No new products awaiting handover. Reviewed balances are listed below.</p> : <div className="space-y-4">{renderCandidateGroups(candidateGroups)}</div>}
-      </section>
+        {readyCandidates.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">No new products awaiting handover. Reviewed balances are in the Still in Production tab.</p> : <div className="space-y-4">{renderCandidateGroups(candidateGroups)}</div>}
+      </section>,
+        history: <DistributionRecords groups={handoverGroups} />,
 
-      <section className="rounded-xl border border-amber-200 bg-white p-4" aria-label="Still in production">
+        production: <section className="rounded-xl border border-amber-200 bg-white p-4" aria-label="Still in production">
         <h3 className="text-sm font-semibold text-slate-900">Still in production</h3>
         <p className="mb-3 mt-0.5 text-xs text-slate-500">Current untransferred balances, including loose stock, with their batch codes and physical location. Quantities reduce as later handovers are recorded.</p>
         {productionRemainderGroups.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">No balances are currently marked still in production.</p> : <div className="space-y-4">{renderCandidateGroups(productionRemainderGroups)}</div>}
-      </section>
+      </section>,
+      } }</DistributionTabs>
 
       <DistributionRecords groups={discrepancyGroups} discrepancy />
-      <DistributionRecords groups={handoverGroups} />
 
       <Modal isOpen={showHandoverModal} onClose={closeModal} title={selectedCandidate ? `${reviewOnly ? 'Review balance' : 'Hand over'} · ${selectedCandidate.productName}` : 'Record product handover'}>
         <div className="space-y-4">
