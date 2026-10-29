@@ -922,6 +922,9 @@ export default function Distribution() {
         halloumiPool: {
           ...pool,
           handedOverWeight: (pool.handedOverWeight || 0) + form.quantity,
+          hcpOtherAllocatedKg: (pool.hcpOtherAllocatedKg || 0) + (
+            form.partialTransferDisposition === 'incorrectly_recorded' ? partialTransferRemainder : 0
+          ),
           availableForCrumbing: Math.max(0, available - form.quantity - (
             form.partialTransferDisposition === 'incorrectly_recorded' ? partialTransferRemainder : 0
           )),

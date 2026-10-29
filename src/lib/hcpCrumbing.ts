@@ -103,6 +103,9 @@ export function returnHcpBalanceToPool(pool: HalloumiPool, batch: CrumbingBatch)
 }
 
 export function reconcileHcpChillerReturns(pool: HalloumiPool): HalloumiPool {
+  // The server already reconciled batch allocations AND chiller returns.
+  // Never credit those returns a second time on a browser render.
+  if ((pool.hcpAccountingVersion || 0) >= 1) return pool;
   const returnedKg = Object.values(pool.hcpChillerReturns || {}).reduce((sum, receipt) =>
     sum + (Number.isFinite(receipt.weightKg) && receipt.weightKg > 0 ? receipt.weightKg : 0), 0);
   const delta = returnedKg - (pool.hcpChillerReturnsAppliedKg || 0);

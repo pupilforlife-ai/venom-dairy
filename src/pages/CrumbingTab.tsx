@@ -669,13 +669,19 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
       sourceBatchCode = pool.batchId || `HAL-${source.lotCode}`;
       milkLotCode = source.lotCode;
       sourceWeightKg = Math.min(availableForCrumbing, Math.max(0, Number(newBatchForm.halloumiWeightKg) || 0));
-      updateMilkLot(source.id, {
-        halloumiPool: {
-          ...pool,
+      // The HCP batch below is the allocation ledger. Server reconciliation
+      // deducts its sourceWeightKg atomically with the saved batch. A separate
+      // milk-lot counter write could be lost, reset by an older tab, or saved
+      // without the batch; it must not be the source of truth.
+      if (!pool.hcpAccountingVersion) {
+        // Preserve offline/local-demo behavior until a server-backed pool has
+        // opted into authoritative reconciliation. The database guards legacy
+        // clients too; no existing production record is rewritten here.
+        updateMilkLot(source.id, { halloumiPool: { ...pool,
           usedInCrumbing: (pool.usedInCrumbing || 0) + sourceWeightKg,
           availableForCrumbing: Math.max(0, availableForCrumbing - sourceWeightKg),
-        },
-      });
+        } });
+      }
     }
 
     const batchCode = generateBatchCode(newBatchForm.type, milkLotCode);

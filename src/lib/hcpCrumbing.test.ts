@@ -124,6 +124,21 @@ describe('unused HCP Halloumi returned to chiller stock', () => {
     vacuumPacked: 100, availableForCrumbing: 80, usedInCrumbing: 20, soldWeight: 0, roundsContributed: [] });
   const finished = (): CrumbingBatch => ({ ...batch(), ...complete({ ...form(), balanceDisposition: 'chiller' }) });
 
+  it('does not credit an authoritative server-reconciled chiller return a second time', () => {
+    const reconciled: HalloumiPool = { ...pool(), hcpAccountingVersion: 1,
+      availableForCrumbing: 82, usedInCrumbing: 18, hcpReturnedKg: 2,
+      hcpChillerReturns: { 'test-hcp': { weightKg: 2, recordedAt: now, recordedBy: 'test-user' } },
+      hcpChillerReturnsAppliedKg: 0 };
+    expect(reconcileHcpChillerReturns(reconciled)).toBe(reconciled);
+    expect(returnHcpBalanceToPool(reconciled, finished())).toBe(reconciled);
+  });
+
+  it('does not hide a server-reconciled overdraw or restore old stock from return receipts', () => {
+    const overdraw: HalloumiPool = { ...pool(), hcpAccountingVersion: 1, availableForCrumbing: -5, hcpOverdrawKg: 5,
+      hcpChillerReturns: { old: { weightKg: 100, recordedAt: now, recordedBy: 'old record' } } };
+    expect(reconcileHcpChillerReturns(overdraw).availableForCrumbing).toBe(-5);
+  });
+
   it('makes only the unused chiller balance available for future sale or HCP', () => {
     const updated = reconcileHcpChillerReturns(returnHcpBalanceToPool(pool(), finished()));
     expect(updated).toMatchObject({ availableForCrumbing: 82, usedInCrumbing: 18, vacuumPacked: 100, totalProduced: 100, soldWeight: 0 });

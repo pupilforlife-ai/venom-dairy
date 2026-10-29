@@ -1,0 +1,52 @@
+-- Pure-function regression checks: synthetic JSON only, no app_state writes.
+do $test$
+declare
+  lots jsonb := '[{"id":"milk-test","lotCode":"TEST","supplier":"KEEP","halloumiPool":{"batchId":"HAL-TEST","milkLotId":"milk-test","totalProduced":89.2,"vacuumPacked":89.2,"availableForCrumbing":89.2,"usedInCrumbing":0,"soldWeight":0,"roundsContributed":["r1"]}},{"id":"other","lotCode":"OTHER","supplier":"UNCHANGED"}]';
+  rounds jsonb := '[{"id":"r1","type":"Halloumi","milkLotId":"milk-test","outputWeight":89.2,"vacuumPackedWeight":89.2,"status":"vacuum_packed"}]';
+  batches jsonb := '[{"id":"hcp1","type":"HCP","sourceBatchId":"milk-test","sourceWeightKg":31.6,"status":"crumbing"}]';
+  baseline jsonb; actual jsonb; pool jsonb; b jsonb; changed jsonb;
+begin
+  baseline := public.reconcile_halloumi_state(lots,rounds,batches);
+  pool := baseline->0->'halloumiPool';
+  if (pool->>'availableForCrumbing')::numeric<>57.6 or (pool->>'usedInCrumbing')::numeric<>31.6 then raise exception '89.2 - 31.6 must be 57.6'; end if;
+  if baseline->1 is distinct from lots->1 or baseline->0->>'supplier'<>'KEEP' then raise exception 'Unrelated lot fields changed'; end if;
+  if lots->0->'halloumiPool'->>'usedInCrumbing'<>'0' then raise exception 'Inputs mutated'; end if;
+  if public.reconcile_halloumi_state(baseline,rounds,batches)<>baseline then raise exception 'Reconciliation is not idempotent'; end if;
+  actual := jsonb_set(jsonb_set(baseline,'{0,halloumiPool,usedInCrumbing}','0'),'{0,halloumiPool,availableForCrumbing}','89.2');
+  if public.reconcile_halloumi_state(actual,rounds,batches)<>baseline then raise exception 'Stale browser reset erased HCP issue'; end if;
+  actual := public.reconcile_halloumi_state(baseline,rounds,batches || '[{"id":"hcp2","type":"HCP","sourceBatchId":"milk-test","sourceWeightKg":10}]');
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>47.6 then raise exception 'Second concurrent batch not counted'; end if;
+  actual := public.reconcile_halloumi_state(baseline,rounds,batches || batches);
+  if (actual->0->'halloumiPool'->>'usedInCrumbing')::numeric<>31.6 or jsonb_array_length(actual->0->'halloumiPool'->'hcpAccountingWarnings')=0 then raise exception 'Duplicate IDs inflated stock use or went unflagged'; end if;
+  b := jsonb_set(jsonb_set(jsonb_set(batches,'{0,productionCompletedAt}','"2026-10-29T08:00:00Z"'),'{0,hcpBalanceDisposition}','"chiller"'),'{0,balanceWeightKg}','2');
+  actual := public.reconcile_halloumi_state(baseline,rounds,b);
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>59.6 or (actual->0->'halloumiPool'->>'usedInCrumbing')::numeric<>29.6 then raise exception 'Confirmed chiller return not credited'; end if;
+  if public.reconcile_halloumi_state(actual,rounds,b)<>actual then raise exception 'Chiller return credited twice'; end if;
+  if (public.reconcile_halloumi_state(actual,rounds,jsonb_set(b,'{0,balanceWeightKg}','3'))->0->'halloumiPool'->>'availableForCrumbing')::numeric<>60.6 then raise exception 'Return correction not reconciled'; end if;
+  if (public.reconcile_halloumi_state(baseline,rounds,jsonb_set(b,'{0,hcpBalanceDisposition}','"HAL111"'))->0->'halloumiPool'->>'availableForCrumbing')::numeric<>57.6 then raise exception 'HAL111 is not available Halloumi'; end if;
+  if (public.reconcile_halloumi_state(baseline,rounds,jsonb_set(b,'{0,hcpBalanceDisposition}','"disposed"'))->0->'halloumiPool'->>'availableForCrumbing')::numeric<>57.6 then raise exception 'Disposed balance credited as stock'; end if;
+  if (public.reconcile_halloumi_state(baseline,rounds,jsonb_build_array((b->0) - 'productionCompletedAt'))->0->'halloumiPool'->>'availableForCrumbing')::numeric<>57.6 then raise exception 'Unfinished balance credited'; end if;
+  actual := public.reconcile_halloumi_state(baseline,rounds,jsonb_set(b,'{0,balanceWeightKg}','100'));
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>57.6 or jsonb_array_length(actual->0->'halloumiPool'->'hcpAccountingWarnings')=0 then raise exception 'Invalid excess return credited silently'; end if;
+  actual := public.reconcile_halloumi_state(jsonb_set(jsonb_set(baseline,'{0,halloumiPool,soldWeight}','5'),'{0,halloumiPool,handedOverWeight}','7'),rounds,batches);
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>45.6 then raise exception 'Sales / handovers not preserved'; end if;
+  actual := public.reconcile_halloumi_state(jsonb_set(baseline,'{0,halloumiPool,hcpOtherAllocatedKg}','4'),rounds,batches);
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>53.6 then raise exception 'Discrepancy allocation resurrected'; end if;
+  actual := public.reconcile_halloumi_state(baseline,rounds || '[{"id":"r2","type":"Halloumi","milkLotId":"milk-test","outputWeight":10,"vacuumPackedWeight":10,"status":"vacuum_packed"}]',batches);
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>67.6 then raise exception 'Later vacuum packing lost earlier HCP deduction'; end if;
+  actual := public.reconcile_halloumi_state(jsonb_set(baseline,'{0,halloumiPool,vacuumPacked}','1000'),rounds,batches);
+  if (actual->0->'halloumiPool'->>'vacuumPacked')::numeric<>89.2 then raise exception 'Snapshot overrode source-round vacuum quantity'; end if;
+  actual := public.reconcile_halloumi_state(lots,rounds,'[{"id":"wrong","type":"HCP","sourceBatchId":"different-lot","sourceWeightKg":31.6},{"id":"jp","type":"JP","sourceBatchId":"milk-test","sourceWeightKg":50}]');
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>89.2 then raise exception 'Another lot / JP reduced this pool'; end if;
+  actual := public.reconcile_halloumi_state(baseline,rounds,'[{"id":"big","type":"HCP","sourceBatchId":"milk-test","sourceWeightKg":100}]');
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>-10.8 or (actual->0->'halloumiPool'->>'hcpOverdrawKg')::numeric<>10.8 then raise exception 'Overdraw hidden'; end if;
+  actual := public.reconcile_halloumi_state(lots,rounds,'[{"id":"missing","type":"HCP","sourceBatchId":"milk-test"}]');
+  if jsonb_array_length(actual->0->'halloumiPool'->'hcpAccountingWarnings')=0 then raise exception 'Missing HCP source weight silently accepted'; end if;
+  changed := '[{"id":"legacy","lotCode":"OLD","halloumiPool":{"batchId":"HAL-OLD","milkLotId":"legacy","totalProduced":32,"vacuumPacked":0,"availableForCrumbing":32}}]';
+  actual := public.reconcile_halloumi_state(changed,'[{"type":"Halloumi","milkLotId":"legacy","outputWeight":32}]','[]');
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>32 then raise exception 'Legacy unvacuumed stock discarded'; end if;
+  actual := public.reconcile_halloumi_state(actual,'[{"type":"Halloumi","milkLotId":"legacy","outputWeight":32,"vacuumPackedWeight":32}]','[]');
+  if (actual->0->'halloumiPool'->>'availableForCrumbing')::numeric<>32 then raise exception 'Legacy stock double counted when later vacuum packed'; end if;
+end;
+$test$;
+select '23 Halloumi accounting assertions passed; synthetic inputs only, no production writes' as result;

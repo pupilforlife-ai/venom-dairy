@@ -205,6 +205,16 @@ export interface HalloumiPool {
   // Idempotent receipts for unused Halloumi returned from completed HCP batches.
   hcpChillerReturns?: Record<string, { weightKg: number; recordedAt: string; recordedBy: string }>;
   hcpChillerReturnsAppliedKg?: number;
+  // Server-reconciled accounting. Source rounds / HCP batches are authoritative;
+  // old browser snapshots cannot reset these derived balances.
+  hcpAccountingVersion?: number;
+  hcpAllocatedKg?: number;
+  hcpReturnedKg?: number;
+  hcpLegacyStockBasisKg?: number;
+  hcpLegacyUsedKg?: number;
+  hcpOtherAllocatedKg?: number;
+  hcpOverdrawKg?: number;
+  hcpAccountingWarnings?: string[];
   roundsContributed: string[];
 }
 
