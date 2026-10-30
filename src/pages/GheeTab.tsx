@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Plus, Package, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
 import { Modal } from '../components/Modal';
 import { getButterBatchCode, getDateBatchCode, getGheeBatchCode } from '../data/mockData';
 import { getGheePackWeight, gheeSkuByCode, gheeSkuDefinitions } from '../data/skuConfig';
-import { allocateGheeButter } from '../lib/gheeButterAllocation';
+import { allocateGheeButter, getGheeAvailableButter, getGheeButterSources } from '../lib/gheeButterAllocation';
 
 type GheeStatus = 
   | 'scheduled'
@@ -47,12 +47,15 @@ interface GheeTabProps {
 }
 
 export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
-  const { productionRounds, milkLots, creamLots, updateProductionRound, updateMilkLot, addProductionRound } = useApp();
+  const { productionRounds, milkLots, creamLots, updateProductionRound, updateMilkLot, addProductionRound, createGheeRound } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const canRunSupervisorCheck = currentRole === 'admin' || currentRole === 'owner';
 
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
+  const [isCreatingRound, setIsCreatingRound] = useState(false);
+  const creatingRound = useRef(false);
+  const createAttempt = useRef<{ fingerprint: string; id: string } | null>(null);
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
@@ -114,21 +117,13 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   };
 
   const getAvailableButter = (butterSource: string) => {
-    const [sourceType, sourceId] = butterSource.split(':', 2);
-    const butterRounds = productionRounds.filter(r =>
-      r.type === 'Butter' &&
-      (sourceType === 'cream'
-        ? r.creamSource === 'external' && r.creamLotId === sourceId
-        : r.creamSource !== 'external' && r.milkLotId === sourceId) &&
-      r.butterOutput && 
-      r.butterOutput > 0 &&
-      (r.remainingBalance || 0) > 0
-    );
-    
-    return butterRounds.reduce((total, round) => {
-      return total + (round.remainingBalance || 0);
-    }, 0);
+    return getGheeAvailableButter(productionRounds, butterSource);
   };
+  const scopedButterSource = `milk:${scopedMilkLotId}`;
+  const scopedButterProduced = getGheeButterSources(productionRounds, scopedButterSource)
+    .reduce((sum, round) => sum + (round.butterOutput || 0), 0);
+  const scopedButterUsed = gheeRounds.filter(round => !round.sourceCreamLotId && round.milkLotId === scopedMilkLotId)
+    .reduce((sum, round) => sum + (Number.isFinite(round.butterInput) ? round.butterInput || 0 : 0), 0);
 
   // Calculate AF oil based on butter input (92.5:12.5 ratio)
   const calculateAFOil = (butterInput: number) => {
@@ -150,8 +145,9 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   };
 
   // Handlers
-  const handleCreateRound = () => {
-    if (!newRound.roundDate || !newRound.butterSource || newRound.butterInput <= 0) {
+  const handleCreateRound = async () => {
+    if (creatingRound.current) return;
+    if (!newRound.roundDate || !newRound.butterSource || !Number.isFinite(newRound.butterInput) || newRound.butterInput <= 0) {
       showToast('error', 'Please fill all required fields');
       return;
     }
@@ -164,6 +160,26 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       showToast('error', isExternalSource ? 'Purchased cream lot not found' : 'Milk lot not found');
       return;
     }
+
+    const fingerprint = JSON.stringify(newRound);
+    if (createAttempt.current?.fingerprint !== fingerprint) {
+      createAttempt.current = { fingerprint, id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` };
+    }
+    creatingRound.current = true;
+    setIsCreatingRound(true);
+    try {
+      const committed = await createGheeRound({ operationId: createAttempt.current.id,
+        roundDate: newRound.roundDate, butterSource: newRound.butterSource, butterInput: newRound.butterInput, team: newRound.team });
+      if (committed) {
+        createAttempt.current = null;
+        setShowNewRoundModal(false);
+        setNewRound({ roundDate: new Date().toISOString().slice(0, 10), roundNumber: 1, butterSource: '', butterInput: 0, team: '' });
+        showToast((committed.butterOverdrawKg || 0) > 0 ? 'info' : 'success',
+          `Ghee round confirmed by server: ${committed.batchCode}/R${committed.roundNumber}${(committed.butterOverdrawKg || 0) > 0 ? ` · ${committed.butterOverdrawKg!.toFixed(2)} kg above recorded stock; review required` : ''}`);
+        return;
+      }
+      // Existing disconnected/browser-demo behavior only. Production uses
+      // the single server transaction above and never queues separate writes.
 
     const afOilInput = calculateAFOil(newRound.butterInput);
     const totalInput = newRound.butterInput + afOilInput;
@@ -179,13 +195,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       ? getButterBatchCode(milkLot.lotCode)
       : `BUT-${externalCreamLot!.lotCode}`;
 
-    const butterRounds = productionRounds.filter(r =>
-      r.type === 'Butter' &&
-      (isExternalSource
-        ? r.creamSource === 'external' && r.creamLotId === externalCreamLot?.id
-        : r.creamSource !== 'external' && r.milkLotId === milkLot?.id) &&
-      (r.remainingBalance || 0) > 0
-    );
+    const butterRounds = getGheeButterSources(productionRounds, newRound.butterSource);
     const butterAllocation = allocateGheeButter(newRound.butterInput, butterRounds);
     const createdAt = new Date().toISOString();
     const recordedBy = typeof window === 'undefined'
@@ -276,6 +286,13 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
     showToast('success', `Ghee round created: ${externalCreamLot ? `GHEE-${sourceLabel}` : batchCode}/R${roundNumber}`);
     setShowNewRoundModal(false);
     setNewRound({ roundDate: new Date().toISOString().slice(0, 10), roundNumber: 1, butterSource: '', butterInput: 0, team: '' });
+    createAttempt.current = null;
+    } catch (error) {
+      showToast('error', error instanceof Error ? error.message : 'Ghee round was not confirmed. Retry the same form.');
+    } finally {
+      creatingRound.current = false;
+      setIsCreatingRound(false);
+    }
   };
 
   const handleStatusChange = (roundId: string, newStatus: GheeStatus) => {
@@ -536,6 +553,14 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
         </div>
       </div>
 
+      {scopedMilkLot && <section aria-label="Butter source balance" className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <h4 className="text-sm font-semibold text-amber-900">Source butter · Milk lot {scopedMilkLot.lotCode}</h4>
+        <div className="mt-2 grid grid-cols-3 gap-3 text-xs text-slate-700">
+          <div>Butter produced<strong className="mt-1 block text-sm">{scopedButterProduced.toFixed(2)} kg</strong></div>
+          <div>Butter recorded into ghee<strong className="mt-1 block text-sm">{scopedButterUsed.toFixed(2)} kg</strong></div>
+          <div>Unblended butter available<strong className="mt-1 block text-sm text-emerald-700">{getAvailableButter(scopedButterSource).toFixed(2)} kg</strong></div>
+        </div>
+      </section>}
       {scopedMilkLot && scopedMilkLot.gheePool && (
         <div className="bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-4">
           <h4 className="text-sm font-semibold text-amber-900 mb-3">🫙 Common Ghee Pool · Milk lot {scopedMilkLot.lotCode}</h4>
@@ -668,7 +693,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
 
       {/* Modals */}
       {/* New Round Modal */}
-      <Modal isOpen={showNewRoundModal} onClose={() => setShowNewRoundModal(false)} title="Create New Ghee Round">
+      <Modal isOpen={showNewRoundModal} onClose={() => { if (!creatingRound.current) setShowNewRoundModal(false); }} title="Create New Ghee Round">
         <div className="space-y-4">
           <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Production date</label>
@@ -731,7 +756,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
               <input
                 type="number"
               value={newRound.butterInput || ''}
-                onChange={(e) => setNewRound({ ...newRound, butterInput: parseFloat(e.target.value) })}
+                onChange={(e) => setNewRound({ ...newRound, butterInput: parseFloat(e.target.value) || 0 })}
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
                 step="0.1"
                 min="0"
@@ -782,12 +807,14 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
           <div className="flex gap-2 pt-2">
             <button
               onClick={handleCreateRound}
+              disabled={isCreatingRound}
               className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700"
             >
-              Create Round
+              {isCreatingRound ? 'Saving…' : 'Create Round'}
             </button>
             <button
               onClick={() => setShowNewRoundModal(false)}
+              disabled={isCreatingRound}
               className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200"
             >
               Cancel

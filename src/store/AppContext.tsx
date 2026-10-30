@@ -5,6 +5,7 @@ import type { CrumbingBatch } from '../pages/CrumbingTab';
 import { recordPaneerIngredientAllocation } from '../lib/paneerRecipe';
 import { supabase } from '../lib/supabase';
 import { persistPaneerPacking, PaneerPackingRequest } from '../lib/atomicPaneerPacking';
+import { persistGheeRound, GheeRoundRequest } from '../lib/atomicGheeRound';
 import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
 import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C } from '../lib/coldChain';
 import { 
@@ -69,6 +70,7 @@ interface AppContextType extends AppState {
   cancelProductionRound: (id: string, reason?: string) => boolean;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
   commitPaneerPacking: (request: PaneerPackingRequest) => Promise<ProductionRound | null>;
+  createGheeRound: (request: GheeRoundRequest) => Promise<ProductionRound | null>;
   recordProductionRoundActivity: (
     id: string,
     updates: Partial<ProductionRound>,
@@ -156,7 +158,7 @@ function normalizeTemperatureReading(reading: TemperatureReading): TemperatureRe
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [storedMilkLots, setMilkLots] = useSupabaseState<MilkLot[]>('vejoy_milkLots', initialMilkLots);
+  const [storedMilkLots, setMilkLots, , applyCommittedMilkLots] = useSupabaseState<MilkLot[]>('vejoy_milkLots', initialMilkLots);
   const [creamLots, setCreamLots] = useSupabaseState<CreamLot[]>('vejoy_creamLots', []);
   const [productionShifts, setProductionShifts] = useSupabaseState<ProductionShift[]>('vejoy_productionShifts', initialShifts);
   const [productionRounds, setProductionRounds, , applyCommittedProductionRounds] = useSupabaseState<ProductionRound[]>('vejoy_productionRounds', initialRounds);
@@ -334,6 +336,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ? current.map(item => item.id === committedRound.id ? committedRound : item)
       : [...current, committedRound]);
     return committedRound;
+  };
+
+  const createGheeRound = async (request: GheeRoundRequest) => {
+    if (!supabase) return null;
+    const saved = await persistGheeRound(supabase, request);
+    const updates = new Map([...saved.sourceRounds, saved.round].map(round => [round.id, round]));
+    applyCommittedProductionRounds(current => {
+      const next = current.map(round => updates.get(round.id) || round);
+      return current.some(round => round.id === saved.round.id) ? next : [...next, saved.round];
+    });
+    if (saved.milkLot) {
+      const lot = saved.milkLot;
+      applyCommittedMilkLots(current => current.map(item => item.id === lot.id ? lot : item));
+    }
+    return saved.round;
   };
 
   const commitPaneerPacking = async (request: PaneerPackingRequest) => {
@@ -688,6 +705,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cancelProductionRound,
     updateProductionRound,
     commitPaneerPacking,
+    createGheeRound,
     recordProductionRoundActivity,
     requestProductionRoundTypeChange,
     reviewProductionRoundTypeChange,
