@@ -6,6 +6,7 @@ import { recordPaneerIngredientAllocation } from '../lib/paneerRecipe';
 import { supabase } from '../lib/supabase';
 import { persistPaneerPacking, PaneerPackingRequest } from '../lib/atomicPaneerPacking';
 import { persistGheeRound, GheeRoundRequest } from '../lib/atomicGheeRound';
+import { persistButterLoss, prepareLocalButterLoss, type ButterLossRequest } from '../lib/butterLoss';
 import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
 import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C } from '../lib/coldChain';
 import { 
@@ -71,6 +72,7 @@ interface AppContextType extends AppState {
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
   commitPaneerPacking: (request: PaneerPackingRequest) => Promise<ProductionRound | null>;
   createGheeRound: (request: GheeRoundRequest) => Promise<ProductionRound | null>;
+  recordButterLoss: (request: ButterLossRequest) => Promise<void>;
   recordProductionRoundActivity: (
     id: string,
     updates: Partial<ProductionRound>,
@@ -351,6 +353,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       applyCommittedMilkLots(current => current.map(item => item.id === lot.id ? lot : item));
     }
     return saved.round;
+  };
+
+  const recordButterLoss = async (request: ButterLossRequest) => {
+    if (!supabase) {
+      const result = prepareLocalButterLoss(productionRounds, request, localStorage.getItem('vejoy_user_role') || '',
+        localStorage.getItem('vejoy_user_username') || 'Local tester', new Date().toISOString());
+      setProductionRounds(current => {
+        // Recheck the latest local data rather than applying a stale full snapshot.
+        return prepareLocalButterLoss(current, request, localStorage.getItem('vejoy_user_role') || '', result.loss.recordedBy, result.loss.recordedAt).rounds;
+      });
+      return;
+    }
+    const saved = await persistButterLoss(supabase, request);
+    const updates = new Map(saved.rounds.map(round => [round.id, round]));
+    applyCommittedProductionRounds(current => current.map(round => updates.get(round.id) || round));
   };
 
   const commitPaneerPacking = async (request: PaneerPackingRequest) => {
@@ -706,6 +723,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateProductionRound,
     commitPaneerPacking,
     createGheeRound,
+    recordButterLoss,
     recordProductionRoundActivity,
     requestProductionRoundTypeChange,
     reviewProductionRoundTypeChange,

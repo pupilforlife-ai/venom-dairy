@@ -10,6 +10,8 @@ import { calculateYieldPercent } from '../lib/yieldCalculations';
 import { calculateButterBlendRecipe } from '../lib/butterBlendRecipe';
 import { getAllowedButterPackingSkus } from '../lib/butterPacking';
 import { ButterPackingActions } from '../components/ButterPackingActions';
+import { ButterPoolLossAction } from '../components/ButterPoolLossAction';
+import { butterLossRecords, butterLossReasonLabels } from '../lib/butterLoss';
 
 type ButterStatus = 
   | 'scheduled'
@@ -68,7 +70,7 @@ const directButterStatuses = ['churned', 'packed_as_pubb'];
 const blendedButterStatuses = ['pubbb_pool', 'psbbb_pool', 'bb05_pool'];
 
 export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: string }) {
-  const { productionRounds, milkLots, creamLots, butterLotClosures, closeButterLot, updateProductionRound, addProductionRound, updateMilkLot, updateCreamLot } = useApp();
+  const { productionRounds, milkLots, creamLots, butterLotClosures, closeButterLot, updateProductionRound, addProductionRound, updateMilkLot, updateCreamLot, recordButterLoss } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const currentActor = typeof window === 'undefined' ? currentRole || 'User' : window.localStorage.getItem('vejoy_user_username') || currentRole || 'User';
@@ -288,6 +290,12 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
   const visiblePackingPools = [...availableDirectPools, ...availableBlendedPools].filter(pool =>
     packingSourceTab === 'internal' ? pool.origin === 'internal' || pool.origin === 'mixed' : pool.origin === 'external' || pool.origin === 'mixed',
   );
+  const visibleButterLosses = butterLossRecords(butterRounds).filter(loss => {
+    const sources = butterRounds.filter(round => loss.allocations.some(allocation => allocation.roundId === round.id));
+    const internal = sources.some(round => (round.blendingInternalButterQuantity || 0) > 0);
+    const external = sources.some(round => (round.blendingExternalButterQuantity || 0) > 0);
+    return packingSourceTab === 'internal' ? internal : external || !internal;
+  });
 
   // Handlers
   const openNewButterRound = (source: 'internal' | 'external' = creamSourceTab, creamLotId = '') => {
@@ -884,6 +892,10 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
                     </div>
                     <div>
                       <ButterPackingActions kind={pool.kind} poolSku={poolSku} onPack={sku => openPacking(pool, sku)} />
+                      {pool.kind === 'blended' && <ButterPoolLossAction role={currentRole} poolId={pool.id} batchCode={pool.batchId} availableKg={pool.availableBalance} onRecord={async request => {
+                        await recordButterLoss(request);
+                        showToast('success', 'Confirmed butter loss recorded. Produced and packed quantities retained.');
+                      }} />}
                       {pool.kind === 'blended' && (poolSku === 'PSBBB' || poolSku === 'BB05') && <p className="mt-2 max-w-sm text-[11px] text-emerald-700">BB05 bricks and PSBBB balls share this balance. Pack either format, including soft butter left over from the extruder.</p>}
                     </div>
                   </div>
@@ -891,6 +903,7 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
               })}
             </div>
           ) : <p className="text-sm text-emerald-700">No {packingSourceTab === 'internal' ? 'internal' : 'purchased-cream'} butter pools are waiting for packing.</p>}
+          {visibleButterLosses.length > 0 && <details className="mt-4 rounded-lg border border-amber-200 bg-white p-3"><summary className="cursor-pointer text-sm font-semibold text-amber-950">Recorded butter losses ({visibleButterLosses.length})</summary><div className="mt-3 space-y-3">{visibleButterLosses.map(loss => <div key={loss.operationId} className="rounded-lg bg-amber-50 p-3 text-xs text-slate-700"><p className="font-semibold">{loss.batchCode} · {loss.quantityKg.toFixed(3)} kg · {butterLossReasonLabels[loss.reason]}</p><p className="mt-1">{new Date(loss.recordedAt).toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' })} SAST · {loss.recordedBy}</p><p>{loss.note}</p><p className="mt-1">{loss.expectedBalanceKg.toFixed(3)} kg balance − {loss.quantityKg.toFixed(3)} kg loss = {loss.balanceAfterKg.toFixed(3)} kg at recording</p></div>)}</div></details>}
         </div>
       </section>}
 

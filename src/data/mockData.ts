@@ -641,6 +641,7 @@ export interface ProductionRound {
   butterPoolId?: string;
   blendedPoolId?: string;
   packedButterWeight?: number; // kg taken from the common butter pool for packing
+  butterLossHistory?: Record<string, import('../lib/butterLoss').ButterLossRecord>;
   
   // Ghee-specific fields
   butterInput?: number; // kg

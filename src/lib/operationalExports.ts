@@ -28,6 +28,7 @@ import { getMilkLotVesselBalances, getMilkSaleVesselSource } from './milkVesselA
 import { comparePaneerBlockToPackedWeight } from './paneerWeightReconciliation';
 import { latestPaneerIngredientIssue } from './paneerRecipe';
 import { getCoatingBalanceReport, getCreamCheeseUsage, type CoatingBalanceRecord } from './crumbingIngredientBalances';
+import { butterLossRecords, butterLossReasonLabels } from './butterLoss';
 
 interface CrumbingBatchExportRecord {
   id: string;
@@ -611,6 +612,22 @@ function butterWorkbookSheet(
       title: 'Butter Usage Ledger — one row per use or destination',
       columns: usageColumns,
       rows: usageRows.length ? usageRows : [{ date: 'No butter use has been recorded' }],
+    }, {
+      title: 'Confirmed Blended Butter Losses — not packed stock or blending inputs',
+      columns: [
+        { key: 'batch', header: 'Blend Batch', width: 24 },
+        { key: 'sku', header: 'Pool', width: 12 },
+        { key: 'quantityKg', header: 'Loss kg', width: 14, numberFormat: '0.000' },
+        { key: 'beforeKg', header: 'Balance Before kg', width: 20, numberFormat: '0.000' },
+        { key: 'afterKg', header: 'Balance After kg', width: 20, numberFormat: '0.000' },
+        { key: 'reason', header: 'Reason', width: 26 },
+        { key: 'note', header: 'Verification Note', width: 40 },
+        { key: 'by', header: 'Recorded By', width: 20 },
+        { key: 'at', header: 'Recorded At', width: 24 },
+      ],
+      rows: butterLossRecords(butterRounds).map(loss => ({ batch: loss.batchCode, sku: loss.poolSku, quantityKg: loss.quantityKg,
+        beforeKg: loss.expectedBalanceKg, afterKg: loss.balanceAfterKg, reason: butterLossReasonLabels[loss.reason],
+        note: loss.note, by: loss.recordedBy, at: excelDate(loss.recordedAt) })),
     }],
   };
 }
