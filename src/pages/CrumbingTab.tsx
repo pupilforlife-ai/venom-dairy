@@ -6,6 +6,8 @@ import { Modal } from '../components/Modal';
 import { crumbingSkuDefinitions, crumbingSkuByCode, getCrumbingPackWeight } from '../data/skuConfig';
 import { allocateTraysFifo, getCombinedPackingEligibleBatches, type FifoTrayAllocation } from '../lib/crumbingPacking';
 import { initialHcpCrumbingState, getHcpCrumbingForm, hcpRecipeReady, buildHcpDraftUpdates, buildHcpCompletionUpdates, type HcpCrumbingForm, type HcpBalanceDisposition } from '../lib/hcpCrumbing';
+import { CrumbingIngredientBalances } from '../components/CrumbingIngredientBalances';
+import { appendCoatingBalance, getCreamCheeseUsage, type CoatingBalanceRecord } from '../lib/crumbingIngredientBalances';
 
 type CrumbingStatus = 
   | 'scheduled'
@@ -100,6 +102,7 @@ export interface CrumbingBatch {
   };
   recipeRecordedAt?: string;
   recipeAutosavedAt?: string;
+  ingredientBalanceHistory?: Record<string, CoatingBalanceRecord>;
   balanceRecordedAt?: string;
   productionCompletedAt?: string;
   jpPrepping?: {
@@ -138,6 +141,9 @@ export interface CrumbingBatch {
     creamCheeseAvailableKg?: number;
     creamCheeseUsedKg?: number;
     creamCheeseLeftoverKg?: number;
+    creamCheeseBalanceRecorded?: boolean;
+    creamCheeseBalanceRecordedAt?: string;
+    creamCheeseBalanceRecordedBy?: string;
     creamCheeseDisposition?: 'none' | 'carry_forward' | 'discarded';
     creamCheeseCarriedForwardKg?: number;
     creamCheeseDiscardedKg?: number;
@@ -273,6 +279,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     traysFilled: 0,
     filledBy: '',
     creamCheeseLeftoverKg: 0,
+    creamCheeseBalanceRecorded: false,
     creamCheeseDisposition: 'none' as 'none' | 'carry_forward' | 'discarded',
   });
   const [additionalCreamCheesePan111Kg, setAdditionalCreamCheesePan111Kg] = useState(0);
@@ -329,6 +336,20 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     setCrumbingBatches(current => current.map(batch => batch.id === id ? { ...batch, ...updates } : batch));
   };
 
+  const saveIngredientBalances = (batchId: string, record: CoatingBalanceRecord) => {
+    try {
+      setCrumbingBatches(current => {
+        if (!current.some(batch => batch.id === batchId)) throw new Error('This batch no longer exists. Reopen the board before recording balances.');
+        return current.map(batch => batch.id === batchId ? appendCoatingBalance(batch, record) : batch);
+      });
+      showToast('success', 'Ingredient balances recorded; original recipe and production quantities retained');
+      return true;
+    } catch (error) {
+      showToast('error', error instanceof Error ? error.message : 'Could not record ingredient balances');
+      return false;
+    }
+  };
+
   const openJpWorkflow = (batch: CrumbingBatch) => {
     if (batch.type !== 'JP') return;
     setSelectedBatch(batch.id);
@@ -354,6 +375,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
         traysFilled: batch.jpFilling?.traysFilled || 0,
         filledBy: batch.jpFilling?.filledBy || batch.crumbingTeam || '',
         creamCheeseLeftoverKg: batch.jpFilling?.creamCheeseLeftoverKg || 0,
+        creamCheeseBalanceRecorded: batch.jpFilling?.creamCheeseBalanceRecorded ?? batch.jpFilling?.creamCheeseLeftoverKg !== undefined,
         creamCheeseDisposition: batch.jpFilling?.creamCheeseDisposition || 'none',
       });
     } else if (batch.status === 'jp_filling_frozen' || batch.status === 'crumbing') {
@@ -455,16 +477,20 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     const creamCheeseLeftoverKg = Math.max(0, Number(nextForm.creamCheeseLeftoverKg) || 0);
     updateCrumbingBatch(batch.id, {
       jpFilling: {
+        ...batch.jpFilling,
         damagedPieces,
         filledPieces: Math.max(0, crumbablePieces - damagedPieces),
         traysFilled: Math.max(0, Math.trunc(nextForm.traysFilled || 0)),
         filledBy: nextForm.filledBy,
         creamCheeseAvailableKg,
-        creamCheeseUsedKg: Math.max(0, creamCheeseAvailableKg - creamCheeseLeftoverKg),
-        creamCheeseLeftoverKg,
+        creamCheeseUsedKg: nextForm.creamCheeseBalanceRecorded ? Math.max(0, creamCheeseAvailableKg - creamCheeseLeftoverKg) : undefined,
+        creamCheeseLeftoverKg: nextForm.creamCheeseBalanceRecorded ? creamCheeseLeftoverKg : undefined,
+        creamCheeseBalanceRecorded: nextForm.creamCheeseBalanceRecorded,
+        creamCheeseBalanceRecordedAt: changes.creamCheeseBalanceRecorded !== undefined ? (nextForm.creamCheeseBalanceRecorded ? new Date().toISOString() : undefined) : batch.jpFilling?.creamCheeseBalanceRecordedAt,
+        creamCheeseBalanceRecordedBy: changes.creamCheeseBalanceRecorded !== undefined ? (nextForm.creamCheeseBalanceRecorded ? window.localStorage.getItem('vejoy_user_username') || nextForm.filledBy : undefined) : batch.jpFilling?.creamCheeseBalanceRecordedBy,
         creamCheeseDisposition: nextForm.creamCheeseDisposition,
-        creamCheeseCarriedForwardKg: nextForm.creamCheeseDisposition === 'carry_forward' ? creamCheeseLeftoverKg : 0,
-        creamCheeseDiscardedKg: nextForm.creamCheeseDisposition === 'discarded' ? creamCheeseLeftoverKg : 0,
+        creamCheeseCarriedForwardKg: nextForm.creamCheeseBalanceRecorded && nextForm.creamCheeseDisposition === 'carry_forward' ? creamCheeseLeftoverKg : 0,
+        creamCheeseDiscardedKg: nextForm.creamCheeseBalanceRecorded && nextForm.creamCheeseDisposition === 'discarded' ? creamCheeseLeftoverKg : 0,
         completedAt: batch.jpFilling?.completedAt,
         frozenAt: batch.jpFilling?.frozenAt,
       },
@@ -1090,7 +1116,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
         status: remainingPan111 > 0.001 ? 'available' : 'consumed',
       });
     }
-    setJpFillingForm({ damagedPieces: 0, traysFilled: 0, filledBy: jpPrepForm.preparedBy.trim(), creamCheeseLeftoverKg: 0, creamCheeseDisposition: 'none' });
+    setJpFillingForm({ damagedPieces: 0, traysFilled: 0, filledBy: jpPrepForm.preparedBy.trim(), creamCheeseLeftoverKg: 0, creamCheeseBalanceRecorded: false, creamCheeseDisposition: 'none' });
     showToast('success', `JP preparation completed · ${goodPieces * 2} crumbable jalapeño halves · ${pan111InputKg.toFixed(2)} kg PAN111 used`);
   };
 
@@ -1147,6 +1173,9 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
       updateIntermediateLot(source.id, { currentQuantity: remainingPan111, status: remainingPan111 > 0.001 ? 'available' : 'consumed' });
     }
     setAdditionalCreamCheesePan111Kg(0);
+    // More cheese changes the available input. Do not reuse the earlier
+    // physical balance as if staff had weighed it after this addition.
+    setJpFillingForm(current => ({ ...current, creamCheeseBalanceRecorded: false }));
     showToast('success', `Additional cream cheese recorded · ${pan111InputKg.toFixed(2)} kg PAN111 produced ${totalMadeKg.toFixed(2)} kg`);
   };
 
@@ -1203,16 +1232,18 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     updateCrumbingBatch(batch.id, {
       status: 'jp_filling_frozen',
       jpFilling: {
+        ...batch.jpFilling,
         damagedPieces: jpFillingForm.damagedPieces,
         filledPieces,
         traysFilled: jpFillingForm.traysFilled,
         filledBy: jpFillingForm.filledBy.trim(),
         creamCheeseAvailableKg,
-        creamCheeseUsedKg: Math.max(0, creamCheeseAvailableKg - creamCheeseLeftoverKg),
-        creamCheeseLeftoverKg,
+        creamCheeseUsedKg: jpFillingForm.creamCheeseBalanceRecorded ? Math.max(0, creamCheeseAvailableKg - creamCheeseLeftoverKg) : undefined,
+        creamCheeseLeftoverKg: jpFillingForm.creamCheeseBalanceRecorded ? creamCheeseLeftoverKg : undefined,
+        creamCheeseBalanceRecorded: jpFillingForm.creamCheeseBalanceRecorded,
         creamCheeseDisposition: creamCheeseLeftoverKg > 0 ? jpFillingForm.creamCheeseDisposition : 'none',
-        creamCheeseCarriedForwardKg: jpFillingForm.creamCheeseDisposition === 'carry_forward' ? creamCheeseLeftoverKg : 0,
-        creamCheeseDiscardedKg: jpFillingForm.creamCheeseDisposition === 'discarded' ? creamCheeseLeftoverKg : 0,
+        creamCheeseCarriedForwardKg: jpFillingForm.creamCheeseBalanceRecorded && jpFillingForm.creamCheeseDisposition === 'carry_forward' ? creamCheeseLeftoverKg : 0,
+        creamCheeseDiscardedKg: jpFillingForm.creamCheeseBalanceRecorded && jpFillingForm.creamCheeseDisposition === 'discarded' ? creamCheeseLeftoverKg : 0,
         completedAt: now,
         frozenAt: now,
       },
@@ -1632,6 +1663,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
     const prep = batch.jpPrepping;
     const filling = batch.jpFilling;
     const crumbing = batch.jpCrumbing;
+    const cheeseUsage = getCreamCheeseUsage(batch);
     const source = intermediateLots.find(lot => lot.id === batch.sourceBatchId);
     const formRawWeightKg = jpPrepForm.buckets.reduce((total, bucket) => total + (Number(bucket.rawWeightKg) || 0), 0);
     const formDrainedWeightKg = jpPrepForm.buckets.reduce((total, bucket) => total + (Number(bucket.drainedWeightKg) || 0), 0);
@@ -1767,7 +1799,8 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
           <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 text-xs text-slate-700">
             <div className="font-bold text-emerald-800">Phase 2 completed and first freeze recorded · {new Date(filling.completedAt).toLocaleString()}</div>
             <div className="mt-2">{crumbablePieces} crumbable − {filling.damagedPieces} damaged during filling = <strong>{filling.filledPieces} frozen filled pieces</strong> · {filling.traysFilled} trays · by {filling.filledBy}</div>
-            <div className="mt-1">Cream cheese: {(filling.creamCheeseAvailableKg || 0).toFixed(2)} kg available · {(filling.creamCheeseUsedKg || 0).toFixed(2)} kg used · {(filling.creamCheeseLeftoverKg || 0).toFixed(2)} kg leftover {filling.creamCheeseDisposition === 'carry_forward' ? 'carried forward' : filling.creamCheeseDisposition === 'discarded' ? 'discarded' : ''}.</div>
+            <div className="mt-1">Cream cheese: {cheeseUsage.availableKg.toFixed(2)} kg available · {cheeseUsage.consumedKg === null ? 'balance / use not recorded or requires recheck' : `${cheeseUsage.consumedKg.toFixed(2)} kg used · ${cheeseUsage.remainingKg!.toFixed(2)} kg leftover`} {filling.creamCheeseDisposition === 'carry_forward' ? 'carried forward' : filling.creamCheeseDisposition === 'discarded' ? 'discarded' : ''}.</div>
+            {filling.creamCheeseBalanceRecordedAt && <div className="mt-1 text-slate-500">Balance recorded {new Date(filling.creamCheeseBalanceRecordedAt).toLocaleString()} · {filling.creamCheeseBalanceRecordedBy}</div>}
           </div>
         )}
 
@@ -1790,7 +1823,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
               <label className="text-xs font-medium text-slate-600">Filled by<input type="text" value={jpFillingForm.filledBy} onChange={(event) => updateJpFillingDraft(batch, { filledBy: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>
             </div>
             <div className="mt-3 grid gap-3 rounded-lg border border-violet-200 bg-violet-50 p-3 sm:grid-cols-2">
-              <label className="text-xs font-medium text-violet-900">Cream cheese left after filling (kg)<input type="number" min="0" step="0.01" value={jpFillingForm.creamCheeseLeftoverKg || ''} onChange={(event) => updateJpFillingDraft(batch, { creamCheeseLeftoverKg: Number(event.target.value) || 0 })} className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm" /><span className="mt-1 block font-normal">Used automatically: {Math.max(0, creamCheeseAvailableKg - jpFillingForm.creamCheeseLeftoverKg).toFixed(2)} kg</span></label>
+              <label className="text-xs font-medium text-violet-900">Cream cheese left after filling (kg)<input type="number" inputMode="decimal" min="0" step="0.01" value={jpFillingForm.creamCheeseBalanceRecorded ? jpFillingForm.creamCheeseLeftoverKg : ''} onChange={(event) => updateJpFillingDraft(batch, { creamCheeseLeftoverKg: Number(event.target.value) || 0, creamCheeseBalanceRecorded: event.target.value !== '' })} className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm" /><span className="mt-1 block font-normal">{jpFillingForm.creamCheeseBalanceRecorded ? `Used automatically: ${Math.max(0, creamCheeseAvailableKg - jpFillingForm.creamCheeseLeftoverKg).toFixed(2)} kg` : 'Balance not recorded — enter 0 explicitly if none remains.'}</span></label>
               <label className="text-xs font-medium text-violet-900">Leftover action<select value={jpFillingForm.creamCheeseDisposition} disabled={jpFillingForm.creamCheeseLeftoverKg <= 0} onChange={(event) => updateJpFillingDraft(batch, { creamCheeseDisposition: event.target.value as typeof jpFillingForm.creamCheeseDisposition })} className="mt-1 w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm disabled:bg-slate-100"><option value="none">No leftover</option><option value="carry_forward">Carry forward to another JP batch</option><option value="discarded">Discard leftover</option></select></label>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-cyan-50 p-3 text-sm text-cyan-900"><span>Filled pieces: <strong>{crumbablePieces} − {jpFillingForm.damagedPieces || 0} = {Math.max(0, crumbablePieces - (jpFillingForm.damagedPieces || 0))}</strong></span><button type="button" onClick={() => handleCompleteJpFilling(batch)} className="rounded-lg bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-800">Complete filling & record first freeze</button></div>
@@ -1985,6 +2018,7 @@ export default function CrumbingTab({ crumbingBatches, setCrumbingBatches, selec
                           <button onClick={() => openHcpCrumbingWorkflow(batch)} className="mt-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-100">View crumbing record</button>
                         </div>
                       ) : '—'}
+                      <CrumbingIngredientBalances batch={batch} onSave={record => saveIngredientBalances(batch.id, record)} onOpenProcess={() => { if (batch.type === 'JP') openJpWorkflow(batch); }} />
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white ${crumbingStatusColors[batch.status]}`}>

@@ -21,7 +21,7 @@ function jsonEqual(left: unknown, right: unknown) {
 // JSON array per collection, so replacing the whole array from a stale tab
 // can otherwise erase another user's round update. We preserve server items
 // that the local edit did not touch and merge object fields independently.
-function mergePersistedValue<T>(base: T, next: T, remote: T): T {
+export function mergePersistedValue<T>(base: T, next: T, remote: T): T {
   if (Array.isArray(base) && Array.isArray(next) && Array.isArray(remote)) {
     const hasStableIds = [...base, ...next, ...remote].every(item => isRecord(item) && typeof item.id === 'string');
     if (hasStableIds) {
@@ -72,8 +72,10 @@ function mergePersistedValue<T>(base: T, next: T, remote: T): T {
         if (jsonEqual(remoteValue, baseValue)) delete merged[key];
         return;
       }
-      if (isRecord(baseValue) && isRecord(nextValue) && isRecord(remoteValue)) {
-        merged[key] = mergePersistedValue(baseValue, nextValue, remoteValue);
+      if ((baseValue === undefined || isRecord(baseValue)) && isRecord(nextValue) && isRecord(remoteValue)) {
+        // A first-time optional audit map can be added on two devices at once.
+        // Merge its distinct receipt IDs rather than losing the remote receipt.
+        merged[key] = mergePersistedValue(baseValue ?? {}, nextValue, remoteValue);
       } else {
         merged[key] = nextValue;
       }

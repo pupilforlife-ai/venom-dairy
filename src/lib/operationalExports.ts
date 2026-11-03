@@ -27,6 +27,7 @@ import { excelDate, ExcelCellValue, ExcelSheet, ExcelWorkbookExport, exportDateS
 import { getMilkLotVesselBalances, getMilkSaleVesselSource } from './milkVesselAllocation';
 import { comparePaneerBlockToPackedWeight } from './paneerWeightReconciliation';
 import { latestPaneerIngredientIssue } from './paneerRecipe';
+import { getCoatingBalanceReport, getCreamCheeseUsage, type CoatingBalanceRecord } from './crumbingIngredientBalances';
 
 interface CrumbingBatchExportRecord {
   id: string;
@@ -59,6 +60,7 @@ interface CrumbingBatchExportRecord {
     batterWaterL: number;
     breadingAdajioKg: number;
   };
+  ingredientBalanceHistory?: Record<string, CoatingBalanceRecord>;
   jpPrepping?: {
     buckets: Array<{
       id: string;
@@ -88,6 +90,8 @@ interface CrumbingBatchExportRecord {
     traysFilled: number;
     filledBy: string;
     creamCheeseUsedKg?: number;
+    creamCheeseAvailableKg?: number;
+    creamCheeseBalanceRecorded?: boolean;
     creamCheeseLeftoverKg?: number;
     creamCheeseDisposition?: string;
     completedAt?: string;
@@ -1171,11 +1175,18 @@ function crumbingBatchSheet(
       { key: 'traysFried', header: 'Trays Fried', width: 13, numberFormat: '0' },
       { key: 'traysRemaining', header: 'Trays Remaining', width: 17, numberFormat: '0' },
       { key: 'traysPacked', header: 'Trays Packed', width: 14, numberFormat: '0' },
-      { key: 'predustKg', header: 'Predust kg', width: 14, numberFormat: '0.000' },
-      { key: 'iyababKg', header: 'Iyabab kg', width: 14, numberFormat: '0.000' },
-      { key: 'batterKg', header: 'Batter Mix kg', width: 16, numberFormat: '0.000' },
+      { key: 'predustKg', header: 'Predust Issued kg', width: 19, numberFormat: '0.000' },
+      { key: 'iyababKg', header: 'Iyababa Issued kg', width: 19, numberFormat: '0.000' },
+      { key: 'batterKg', header: 'Batter Mix Issued kg', width: 22, numberFormat: '0.000' },
       { key: 'waterL', header: 'Batter Water L', width: 17, numberFormat: '0.000' },
-      { key: 'adajioKg', header: 'Adajio kg', width: 14, numberFormat: '0.000' },
+      { key: 'adajioKg', header: 'Adajio Issued kg', width: 19, numberFormat: '0.000' },
+      { key: 'ingredientBalanceStatus', header: 'Ingredient Balance Check', width: 26 },
+      ...(['iyababa', 'predust', 'batterMix', 'adajio'] as const).flatMap(key => [
+        { key: `${key}RemainingKg`, header: `${key} Balance kg`, width: 23, numberFormat: '0.000' },
+        { key: `${key}ConsumedKg`, header: `${key} Consumed kg`, width: 23, numberFormat: '0.000' },
+      ]),
+      { key: 'ingredientsRecordedBy', header: 'Ingredients Checked By', width: 24 },
+      { key: 'ingredientsRecordedAt', header: 'Ingredients Checked At', width: 24 },
       { key: 'packedSkus', header: 'Packed SKUs', width: 34 },
       { key: 'packedCases', header: 'Packed Cases', width: 14, numberFormat: '0' },
       { key: 'packedLoose', header: 'Loose Units', width: 13, numberFormat: '0' },
@@ -1189,6 +1200,8 @@ function crumbingBatchSheet(
       { key: 'pepperKg', header: 'Black Pepper kg', width: 17, numberFormat: '0.000' },
       { key: 'saltKg', header: 'Salt kg', width: 12, numberFormat: '0.000' },
       { key: 'creamCheeseAvailableKg', header: 'Cream Cheese Available kg', width: 24, numberFormat: '0.00' },
+      { key: 'creamCheeseBalanceKg', header: 'Cream Cheese Balance kg', width: 24, numberFormat: '0.000' },
+      { key: 'creamCheeseConsumedKg', header: 'Cream Cheese Used kg', width: 24, numberFormat: '0.000' },
       { key: 'fillingDamaged', header: 'Filling Damaged Pieces', width: 22, numberFormat: '0' },
       { key: 'filledPieces', header: 'Filled Pieces', width: 14, numberFormat: '0' },
       { key: 'traysFilled', header: 'Trays Filled', width: 13, numberFormat: '0' },
@@ -1199,6 +1212,8 @@ function crumbingBatchSheet(
     ],
     rows: batches.map(batch => {
       const packs = batch.packedSkus || [];
+      const ingredientReport = getCoatingBalanceReport(batch);
+      const creamCheese = getCreamCheeseUsage(batch);
       return {
         batch: batch.batchCode,
         source: batch.sourceBatchCode,
@@ -1220,6 +1235,12 @@ function crumbingBatchSheet(
         batterKg: batch.jpCrumbing?.batterMixKg ?? batch.recipe?.batterIyababaKg ?? 0,
         waterL: batch.jpCrumbing?.batterWaterL ?? batch.recipe?.batterWaterL ?? 0,
         adajioKg: batch.jpCrumbing?.adajioKg ?? batch.recipe?.breadingAdajioKg ?? 0,
+        ingredientBalanceStatus: ingredientReport.status,
+        ...Object.fromEntries(ingredientReport.rows.flatMap(row => [
+          [`${row.key}RemainingKg`, row.remainingKg ?? ''], [`${row.key}ConsumedKg`, row.consumedKg ?? ''],
+        ])),
+        ingredientsRecordedBy: ingredientReport.status === 'recorded' ? ingredientReport.record?.recordedBy || '' : '',
+        ingredientsRecordedAt: ingredientReport.status === 'recorded' ? excelDate(ingredientReport.record?.recordedAt) : '',
         packedSkus: packs.map(pack => `${normalizeFinishedGoodsSku(pack.sku)}: ${pack.cases || 0} cs${pack.loose ? ` + ${pack.loose} loose` : ''}`).join('; '),
         packedCases: packs.reduce((total, pack) => total + Math.max(0, pack.cases || 0), 0),
         packedLoose: packs.reduce((total, pack) => total + Math.max(0, pack.loose || 0), 0),
@@ -1232,7 +1253,9 @@ function crumbingBatchSheet(
         creamKg: batch.jpPrepping?.creamKg ?? '',
         pepperKg: batch.jpPrepping?.blackPepperKg ?? '',
         saltKg: batch.jpPrepping?.saltKg ?? '',
-        creamCheeseAvailableKg: batch.jpPrepping?.totalCreamCheeseAvailableKg ?? '',
+        creamCheeseAvailableKg: batch.type === 'JP' ? creamCheese.availableKg : '',
+        creamCheeseBalanceKg: batch.type === 'JP' ? creamCheese.remainingKg ?? '' : '',
+        creamCheeseConsumedKg: batch.type === 'JP' ? creamCheese.consumedKg ?? '' : '',
         fillingDamaged: batch.jpFilling?.damagedPieces ?? '',
         filledPieces: batch.jpFilling?.filledPieces ?? '',
         traysFilled: batch.jpFilling?.traysFilled ?? '',

@@ -6,3 +6,4 @@ build/
 .env.local
 .env.*.local
 supabase/.temp/
+/previews/ingredient-balances-qa/

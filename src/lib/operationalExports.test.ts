@@ -5,6 +5,8 @@ import { MilkLot, ProductionRound, ProductionShift } from '../data/mockData';
 import { buildExcelFileSheets, excelAutoFilterFeature } from './excelExport';
 import { buildMilkReceivingWorkbook, buildProductionBoardWorkbook } from './operationalExports';
 import { recordPaneerIngredientAllocation } from './paneerRecipe';
+import { appendCoatingBalance, buildCoatingBalanceRecord } from './crumbingIngredientBalances';
+import type { CrumbingBatch } from '../pages/CrumbingTab';
 
 const lot: MilkLot = {
   id: 'lot-011026',
@@ -50,6 +52,22 @@ function productionRound(overrides: Partial<ProductionRound>): ProductionRound {
 }
 
 describe('Production Board Excel export', () => {
+  it('exports issued, remaining and consumed coating quantities without inventing historical balances', () => {
+    const source: CrumbingBatch = { id: 'crumb-1', batchCode: '011026-spp-001', type: 'SPP', sourceBatchId: 'round-1',
+      sourceBatchCode: '011026/S1/R1/D', createdAt: '2026-10-01T08:00:00Z', status: 'frozen', traysCrumbed: 4,
+      traysRemaining: 4, traysFried: 0, traysPacked: 0, recipe: { flavourMultiplier: 1, batterMultiplier: 2,
+        breadingMultiplier: 5, flavourIyababKg: 0.8, flavourPredustKg: 0.2, batterIyababaKg: 2, batterWaterL: 5, breadingAdajioKg: 5 } };
+    const record = buildCoatingBalanceRecord(source, { flavourBasis: 'separate', iyababaKg: 0.1, predustKg: 0,
+      flavourMixKg: 0, batterBasis: 'dry', batterKg: 0.5, adajioKg: 1.2 },
+      { id: 'check-1', recordedAt: '2026-10-01T09:00:00Z', recordedBy: 'Test staff', note: '' });
+    const saved = appendCoatingBalance(source, record);
+    const workbook = buildProductionBoardWorkbook({ lot, rounds: [productionRound({})], shifts: [shift], cipRecords: [], crumbingBatches: [saved, { ...source, id: 'old', batchCode: '011026-spp-002' }] });
+    const rows = workbook.sheets.find(sheet => sheet.name === 'Crumbing')!.rows;
+    expect(rows[0]).toMatchObject({ adajioKg: 5, adajioRemainingKg: 1.2, adajioConsumedKg: 3.8,
+      batterKg: 2, batterMixRemainingKg: 0.5, batterMixConsumedKg: 1.5, ingredientsRecordedBy: 'Test staff', ingredientBalanceStatus: 'recorded' });
+    expect(rows[1]).toMatchObject({ adajioKg: 5, adajioRemainingKg: '', adajioConsumedKg: '', ingredientBalanceStatus: 'missing' });
+    expect(source.ingredientBalanceHistory).toBeUndefined();
+  });
   it('puts a complete production summary first and generates a valid Excel file for every product workflow', async () => {
     const rounds = [
       productionRound({
