@@ -52,6 +52,16 @@ function productionRound(overrides: Partial<ProductionRound>): ProductionRound {
 }
 
 describe('Production Board Excel export', () => {
+  it('exports late butter matching separately from unchanged ghee inputs and packing', () => {
+    const round = productionRound({ type: 'Ghee', butterInput: 92.5, afOilInput: 12.5, butterOverdrawKg: 0,
+      butterOriginalOverdrawKg: 82.3, butterSettlementHistory: { match: { id: 'match', sourceKey: `milk:${lot.id}`,
+        recordedAt: '2026-11-05T09:00:00Z', recordedBy: 'Owner-approved reconciliation', matchedKg: 82.3,
+        pendingBeforeKg: 82.3, pendingAfterKg: 0, allocations: [{ id: 'butter-late', quantityKg: 82.3 }] } } });
+    const workbook = buildProductionBoardWorkbook({ lot, shifts: [shift], rounds: [round], cipRecords: [] });
+    const row = workbook.sheets.find(sheet => sheet.name === 'Ghee')!.rows[0];
+    expect(row).toMatchObject({ butterKg: 92.5, afOilKg: 12.5, butterPendingKg: 0, butterOriginalShortfallKg: 82.3, butterMatchedLateKg: 82.3 });
+    expect(row.butterMatchingHistory).toContain('butter-late: 82.3 kg');
+  });
   it('exports issued, remaining and consumed coating quantities without inventing historical balances', () => {
     const source: CrumbingBatch = { id: 'crumb-1', batchCode: '011026-spp-001', type: 'SPP', sourceBatchId: 'round-1',
       sourceBatchCode: '011026/S1/R1/D', createdAt: '2026-10-01T08:00:00Z', status: 'frozen', traysCrumbed: 4,

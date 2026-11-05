@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { Plus, Package, CheckCircle2 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -12,6 +13,7 @@ import { getAllowedButterPackingSkus } from '../lib/butterPacking';
 import { ButterPackingActions } from '../components/ButterPackingActions';
 import { ButterPoolLossAction } from '../components/ButterPoolLossAction';
 import { butterLossRecords, butterLossReasonLabels } from '../lib/butterLoss';
+import { getPendingGheeButter, type ButterOutputRequest } from '../lib/lateButterReconciliation';
 
 type ButterStatus = 
   | 'scheduled'
@@ -70,7 +72,7 @@ const directButterStatuses = ['churned', 'packed_as_pubb'];
 const blendedButterStatuses = ['pubbb_pool', 'psbbb_pool', 'bb05_pool'];
 
 export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: string }) {
-  const { productionRounds, milkLots, creamLots, butterLotClosures, closeButterLot, updateProductionRound, addProductionRound, updateMilkLot, updateCreamLot, recordButterLoss } = useApp();
+  const { productionRounds, milkLots, creamLots, butterLotClosures, closeButterLot, updateProductionRound, addProductionRound, updateMilkLot, updateCreamLot, recordButterLoss, recordButterOutput } = useApp();
   const { showToast } = useToast();
   const currentRole = typeof window === 'undefined' ? '' : window.localStorage.getItem('vejoy_user_role')?.toLowerCase() || '';
   const currentActor = typeof window === 'undefined' ? currentRole || 'User' : window.localStorage.getItem('vejoy_user_username') || currentRole || 'User';
@@ -78,6 +80,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
 
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showOutputModal, setShowOutputModal] = useState(false);
+  const [recordingOutput, setRecordingOutput] = useState(false);
+  const outputAttempt = useRef<ButterOutputRequest | null>(null);
+  const savingOutput = useRef(false);
   const [showBlendingModal, setShowBlendingModal] = useState(false);
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
@@ -213,7 +218,8 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       poolSku: 'PUBB',
       rounds,
       totalProduced: rounds.reduce((sum, round) => sum + (round.butterOutput || 0), 0),
-      availableBalance: rounds.reduce((sum, round) => sum + Math.max(0, round.remainingBalance ?? round.butterOutput ?? 0), 0),
+      availableBalance: Math.max(0, rounds.reduce((sum, round) => sum + Math.max(0, round.remainingBalance ?? round.butterOutput ?? 0), 0)
+        - (isInternal ? getPendingGheeButter(productionRounds, `milk:${first.milkLotId}`) : 0)),
     };
   });
 
@@ -411,58 +417,23 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
     showToast('success', `Status: ${butterStatusLabels[newStatus]}`);
   };
 
-  const handleRecordOutput = () => {
-    if (!selectedRound || outputForm.butterOutput <= 0) {
-      showToast('error', 'Please enter valid output quantities');
-      return;
+  const handleRecordOutput = async () => {
+    if (savingOutput.current || !selectedRound) return;
+    if (!Number.isFinite(outputForm.butterOutput) || outputForm.butterOutput <= 0 || !Number.isFinite(outputForm.buttermilkOutput) || outputForm.buttermilkOutput < 0) {
+      showToast('error', 'Please enter valid output quantities'); return;
     }
-
-    const round = butterRounds.find(r => r.id === selectedRound);
-    if (!round) return;
-    const milkLot = round.creamSource === 'internal'
-      ? milkLots.find(lot => lot.id === round.milkLotId)
-      : undefined;
-    if (round.creamSource === 'internal' && !milkLot) return;
-    const outputDelta = outputForm.butterOutput - (round.butterOutput || 0);
-
-    updateProductionRound(selectedRound, {
-      butterOutput: outputForm.butterOutput,
-      buttermilkOutput: outputForm.buttermilkOutput,
-      remainingBalance: outputForm.butterOutput,
-      status: 'churned',
-      butterPoolId: round.creamSource === 'internal'
-        ? `direct:internal:${round.milkLotId}`
-        : `direct:external:${round.sourceBatchCode || round.creamLotId || round.id}`,
-    });
-
-    if (milkLot) {
-      const existingPool = milkLot.butterPool || {
-        batchId: getButterBatchCode(milkLot.lotCode),
-        sourceCreamBatchId: getCreamBatchCode(milkLot.lotCode),
-        milkLotId: milkLot.id,
-        totalButterProduced: 0,
-        usedInGhee: 0,
-        usedInBlending: 0,
-        packedAsPubb: 0,
-        availableBalance: 0,
-        roundsContributed: [],
-      };
-      updateMilkLot(milkLot.id, {
-        butterPool: {
-          ...existingPool,
-          batchId: existingPool.batchId || getButterBatchCode(milkLot.lotCode),
-          sourceCreamBatchId: existingPool.sourceCreamBatchId || getCreamBatchCode(milkLot.lotCode),
-          totalButterProduced: Math.max(0, existingPool.totalButterProduced + outputDelta),
-          availableBalance: Math.max(0, existingPool.availableBalance + outputDelta),
-          roundsContributed: existingPool.roundsContributed.includes(round.id)
-            ? existingPool.roundsContributed
-            : [...existingPool.roundsContributed, round.id],
-        },
-      });
-    }
-    showToast('success', `Output recorded: ${outputForm.butterOutput} kg butter, ${outputForm.buttermilkOutput} kg buttermilk`);
-    setShowOutputModal(false);
-    setOutputForm({ butterOutput: 0, buttermilkOutput: 0 });
+    try {
+      if (outputAttempt.current?.roundId !== selectedRound) outputAttempt.current = null;
+      const request = outputAttempt.current || { operationId: uuidv4(), roundId: selectedRound, ...outputForm };
+      if (request.butterOutput !== outputForm.butterOutput || request.buttermilkOutput !== outputForm.buttermilkOutput) {
+        showToast('error', 'Retry the same quantities first so an uncertain save cannot be recorded twice.'); return;
+      }
+      outputAttempt.current = request; savingOutput.current = true; setRecordingOutput(true);
+      const matchedKg = await recordButterOutput(request);
+      showToast('success', `Butter output confirmed${matchedKg > 0 ? ` · ${matchedKg.toFixed(2)} kg matched to earlier ghee inputs` : ''}`);
+      outputAttempt.current = null; setShowOutputModal(false); setOutputForm({ butterOutput: 0, buttermilkOutput: 0 });
+    } catch (error) { showToast('error', error instanceof Error ? error.message : 'Butter output was not confirmed'); }
+    finally { savingOutput.current = false; setRecordingOutput(false); }
   };
 
   const openBlending = (pool: ButterPoolView) => {
@@ -1283,8 +1254,9 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
       <Modal isOpen={showOutputModal} onClose={() => setShowOutputModal(false)} title="Record Butter Output">
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Butter Output (kg)</label>
+            <label htmlFor="butter-output-kg" className="text-xs font-medium text-slate-600 uppercase tracking-wide">Butter Output (kg)</label>
             <input
+              id="butter-output-kg"
               type="number"
               value={outputForm.butterOutput || ''}
               onChange={(e) => setOutputForm({ ...outputForm, butterOutput: parseFloat(e.target.value) })}
@@ -1294,11 +1266,12 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Buttermilk Output (kg, optional)</label>
+            <label htmlFor="buttermilk-output-kg" className="text-xs font-medium text-slate-600 uppercase tracking-wide">Buttermilk Output (kg, optional)</label>
             <input
+              id="buttermilk-output-kg"
               type="number"
               value={outputForm.buttermilkOutput || ''}
-              onChange={(e) => setOutputForm({ ...outputForm, buttermilkOutput: parseFloat(e.target.value) })}
+              onChange={(e) => setOutputForm({ ...outputForm, buttermilkOutput: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               step="0.1"
               min="0"
@@ -1306,10 +1279,11 @@ export default function ButterTab({ selectedMilkLotId }: { selectedMilkLotId: st
           </div>
           <div className="flex gap-2 pt-2">
             <button
-              onClick={handleRecordOutput}
+              onClick={() => void handleRecordOutput()}
+              disabled={recordingOutput}
               className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
             >
-              Record Output
+              {recordingOutput ? 'Confirming output…' : 'Record Output'}
             </button>
             <button
               onClick={() => setShowOutputModal(false)}

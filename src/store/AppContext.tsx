@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { persistPaneerPacking, PaneerPackingRequest } from '../lib/atomicPaneerPacking';
 import { persistGheeRound, GheeRoundRequest } from '../lib/atomicGheeRound';
 import { persistButterLoss, prepareLocalButterLoss, type ButterLossRequest } from '../lib/butterLoss';
+import { persistButterOutput, settleLateButter, type ButterOutputRequest } from '../lib/lateButterReconciliation';
 import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
 import { isRawMilkTemperatureInRange, RAW_MILK_TEMP_MAX_C, RAW_MILK_TEMP_MIN_C } from '../lib/coldChain';
 import { 
@@ -73,6 +74,7 @@ interface AppContextType extends AppState {
   commitPaneerPacking: (request: PaneerPackingRequest) => Promise<ProductionRound | null>;
   createGheeRound: (request: GheeRoundRequest) => Promise<ProductionRound | null>;
   recordButterLoss: (request: ButterLossRequest) => Promise<void>;
+  recordButterOutput: (request: ButterOutputRequest) => Promise<number>;
   recordProductionRoundActivity: (
     id: string,
     updates: Partial<ProductionRound>,
@@ -353,6 +355,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       applyCommittedMilkLots(current => current.map(item => item.id === lot.id ? lot : item));
     }
     return saved.round;
+  };
+
+  const recordButterOutput = async (request: ButterOutputRequest) => {
+    if (!supabase) {
+        const source = productionRounds.find(round => round.id === request.roundId);
+        if (!source || source.type !== 'Butter' || source.blendedPoolId) throw new Error('Select a cream-to-butter round.');
+        if (source.butterOutputOperationId === request.operationId) {
+          if (source.butterOutput !== request.butterOutput || source.buttermilkOutput !== request.buttermilkOutput) throw new Error('This output operation ID was used for different quantities.');
+          return 0;
+        }
+        if ((source.butterOutput || 0) > 0 || !['scheduled', 'churning'].includes(source.status)) throw new Error('This output is already recorded. Review the existing entry.');
+        const key = source.creamSource === 'external' ? `cream:${source.creamLotId}` : `milk:${source.milkLotId}`;
+        const next = productionRounds.map(round => round.id === source.id ? { ...round, butterOutput: request.butterOutput, buttermilkOutput: request.buttermilkOutput,
+          remainingBalance: request.butterOutput, status: 'churned', butterOutputOperationId: request.operationId } : round);
+        const settled = settleLateButter(next, key, request.operationId, localStorage.getItem('vejoy_user_username') || 'Local tester', new Date().toISOString());
+        setProductionRounds(settled);
+        return settled.reduce((sum, round) => sum + Object.values(round.type === 'Ghee' ? round.butterSettlementHistory || {} : {})
+          .filter(item => item.id === `${request.operationId}:${round.id}`).reduce((total, item) => total + item.matchedKg, 0), 0);
+    }
+    const saved = await persistButterOutput(supabase, request);
+    const updates = new Map(saved.changedRounds.map(round => [round.id, round]));
+    applyCommittedProductionRounds(current => current.map(round => updates.get(round.id) || round));
+    if (saved.milkLot) { const lot = saved.milkLot; applyCommittedMilkLots(current => current.map(item => item.id === lot.id ? lot : item)); }
+    return saved.matchedKg;
   };
 
   const recordButterLoss = async (request: ButterLossRequest) => {
@@ -724,6 +750,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     commitPaneerPacking,
     createGheeRound,
     recordButterLoss,
+    recordButterOutput,
     recordProductionRoundActivity,
     requestProductionRoundTypeChange,
     reviewProductionRoundTypeChange,

@@ -22,6 +22,8 @@ interface GheeButterSource extends ButterSourceBalance {
   creamLotId?: string;
   blendedPoolId?: string;
   butterOutput?: number;
+  sourceCreamLotId?: string;
+  butterOverdrawKg?: number;
 }
 
 /** Ghee consumes pure churned butter, never replacer/salt-containing blends. */
@@ -36,8 +38,12 @@ export function getGheeButterSources<T extends GheeButterSource>(rounds: T[], so
 }
 
 export function getGheeAvailableButter(rounds: GheeButterSource[], source: string): number {
-  return getGheeButterSources(rounds, source).reduce((total, round) => total
+  const recordedBalance = getGheeButterSources(rounds, source).reduce((total, round) => total
     + (Number.isFinite(round.remainingBalance) ? Math.max(0, round.remainingBalance || 0) : 0), 0);
+  const pending = source.startsWith('milk:') ? rounds.filter(round => round.type === 'Ghee' && (round.sourceCreamLotId
+    ? `cream:${round.sourceCreamLotId}` : `milk:${round.milkLotId}`) === source)
+    .reduce((total, round) => total + (Number.isFinite(round.butterOverdrawKg) ? Math.max(0, round.butterOverdrawKg || 0) : 0), 0) : 0;
+  return Math.max(0, Math.round((recordedBalance - pending) * 1e6) / 1e6);
 }
 
 /** Allocate available butter FIFO without preventing a truthful production record. */

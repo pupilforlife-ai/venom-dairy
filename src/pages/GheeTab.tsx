@@ -647,8 +647,18 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
                           <div>{round.butterInput || '—'} kg</div>
                           {(round.butterOverdrawKg || 0) > 0 && (
                             <div className="mt-1 inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-1 text-[10px] font-medium text-amber-800" title="Physical butter input exceeded the app's recorded source balance">
-                              <AlertTriangle size={12} /> {round.butterOverdrawKg!.toFixed(2)} kg over recorded balance · review
+                              <AlertTriangle size={12} /> {round.butterOverdrawKg!.toFixed(2)} kg awaiting butter entry / allocation
                             </div>
+                          )}
+                          {round.butterSettlementHistory && (
+                            <details className="mt-2 min-w-[180px] max-w-[240px] whitespace-normal break-words rounded border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900">
+                              <summary className="cursor-pointer font-semibold">Late butter matched: {Object.values(round.butterSettlementHistory).reduce((sum, item) => sum + item.matchedKg, 0).toFixed(2)} kg</summary>
+                              {Object.values(round.butterSettlementHistory).map(item => <div key={item.id} className="mt-2">
+                                <p>{item.matchedKg.toFixed(2)} kg · {new Date(item.recordedAt).toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' })} SAST · {item.recordedBy}</p>
+                                <p>Outstanding {item.pendingBeforeKg.toFixed(2)} → {item.pendingAfterKg.toFixed(2)} kg</p>
+                                {item.allocations.map((allocation, i) => <p key={`${allocation.id}-${i}`}>{productionRounds.find(source => source.id === allocation.id)?.batchCode || allocation.id}: {allocation.quantityKg.toFixed(2)} kg</p>)}
+                              </div>)}
+                            </details>
                           )}
                         </td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{round.afOilInput?.toFixed(2) || '—'} kg</td>
