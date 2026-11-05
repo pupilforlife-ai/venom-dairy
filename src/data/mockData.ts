@@ -651,6 +651,9 @@ export interface ProductionRound {
   butterSettlementHistory?: Record<string, import('../lib/lateButterReconciliation').ButterSettlement>;
   butterOutputOperationId?: string;
   afOilInput?: number; // kg
+  afOilConfirmationRequired?: boolean;
+  afOilRecord?: import('../lib/gheeAfOil').GheeAfOilRecord;
+  afOilAuditHistory?: Record<string, import('../lib/gheeAfOil').GheeAfOilEvent>;
   expectedYield?: number; // kg
   sourceCreamLotId?: string; // standalone purchased-cream genealogy for external ghee
 

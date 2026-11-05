@@ -6,6 +6,7 @@ import { recordPaneerIngredientAllocation } from '../lib/paneerRecipe';
 import { supabase } from '../lib/supabase';
 import { persistPaneerPacking, PaneerPackingRequest } from '../lib/atomicPaneerPacking';
 import { persistGheeRound, GheeRoundRequest } from '../lib/atomicGheeRound';
+import { persistGheeAfOil, prepareGheeAfOilRecord, prepareGheeAfOilReview, type RecordGheeAfOilRequest, type ReviewGheeAfOilRequest } from '../lib/gheeAfOil';
 import { persistButterLoss, prepareLocalButterLoss, type ButterLossRequest } from '../lib/butterLoss';
 import { persistButterOutput, settleLateButter, type ButterOutputRequest } from '../lib/lateButterReconciliation';
 import { getProductionRoundTypeChangeConflict } from '../lib/productionRoundTypeChange';
@@ -73,6 +74,8 @@ interface AppContextType extends AppState {
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
   commitPaneerPacking: (request: PaneerPackingRequest) => Promise<ProductionRound | null>;
   createGheeRound: (request: GheeRoundRequest) => Promise<ProductionRound | null>;
+  recordGheeAfOil: (request: RecordGheeAfOilRequest) => Promise<void>;
+  reviewGheeAfOil: (request: ReviewGheeAfOilRequest) => Promise<void>;
   recordButterLoss: (request: ButterLossRequest) => Promise<void>;
   recordButterOutput: (request: ButterOutputRequest) => Promise<number>;
   recordProductionRoundActivity: (
@@ -356,6 +359,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     return saved.round;
   };
+
+  const saveGheeAfOil = async (action: 'record' | 'review', request: RecordGheeAfOilRequest | ReviewGheeAfOilRequest) => {
+    if (supabase) {
+      const saved = await persistGheeAfOil(supabase, action, request);
+      applyCommittedProductionRounds(current => current.map(item => item.id === saved.id ? saved : item));
+      return;
+    }
+    const round = productionRounds.find(item => item.id === request.roundId);
+    if (!round) throw new Error('Ghee round not found.');
+    const actor = localStorage.getItem('vejoy_user_username') || 'Local tester', role = localStorage.getItem('vejoy_user_role') || '';
+    const saved = action === 'record'
+      ? prepareGheeAfOilRecord(round, request as RecordGheeAfOilRequest, actor, role, new Date().toISOString())
+      : prepareGheeAfOilReview(round, request as ReviewGheeAfOilRequest, actor, role, new Date().toISOString());
+    setProductionRounds(current => current.map(item => item.id === saved.id ? saved : item));
+  };
+  const recordGheeAfOil = (request: RecordGheeAfOilRequest) => saveGheeAfOil('record', request);
+  const reviewGheeAfOil = (request: ReviewGheeAfOilRequest) => saveGheeAfOil('review', request);
 
   const recordButterOutput = async (request: ButterOutputRequest) => {
     if (!supabase) {
@@ -749,6 +769,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateProductionRound,
     commitPaneerPacking,
     createGheeRound,
+    recordGheeAfOil,
+    reviewGheeAfOil,
     recordButterLoss,
     recordButterOutput,
     recordProductionRoundActivity,

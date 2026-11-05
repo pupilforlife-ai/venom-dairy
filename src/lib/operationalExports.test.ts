@@ -52,6 +52,14 @@ function productionRound(overrides: Partial<ProductionRound>): ProductionRound {
 }
 
 describe('Production Board Excel export', () => {
+  it('exports actual AF oil, its recommendation and pending approval without changing packed figures', () => {
+    const round = productionRound({ type: 'Ghee', butterInput: 92.5, afOilInput: 10, expectedYield: 71.75,
+      afOilRecord: { id: 'oil', recommendedKg: 12.5, actualKg: 10, butterInputKg: 92.5, mode: 'changed', reason: 'Availability adjustment',
+        recordedAt: '2026-11-05T13:00:00Z', recordedBy: 'Operator', recordedByRole: 'staff', approvalStatus: 'pending' } });
+    const workbook = buildProductionBoardWorkbook({ lot, shifts: [shift], rounds: [round], cipRecords: [] });
+    expect(workbook.sheets.find(sheet => sheet.name === 'Ghee')!.rows[0]).toMatchObject({ afOilKg: 10, afOilRecommendedKg: 12.5,
+      totalInputKg: 102.5, expectedKg: 71.75, afOilConfirmation: 'pending', afOilRecordedBy: 'Operator', afOilReason: 'Availability adjustment' });
+  });
   it('exports late butter matching separately from unchanged ghee inputs and packing', () => {
     const round = productionRound({ type: 'Ghee', butterInput: 92.5, afOilInput: 12.5, butterOverdrawKg: 0,
       butterOriginalOverdrawKg: 82.3, butterSettlementHistory: { match: { id: 'match', sourceKey: `milk:${lot.id}`,

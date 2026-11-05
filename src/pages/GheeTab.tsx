@@ -6,6 +6,7 @@ import { Modal } from '../components/Modal';
 import { getButterBatchCode, getDateBatchCode, getGheeBatchCode } from '../data/mockData';
 import { getGheePackWeight, gheeSkuByCode, gheeSkuDefinitions } from '../data/skuConfig';
 import { allocateGheeButter, getGheeAvailableButter, getGheeButterSources } from '../lib/gheeButterAllocation';
+import { GheeAfOilModal, afOilApprovalLabels } from '../components/GheeAfOilModal';
 
 type GheeStatus = 
   | 'scheduled'
@@ -59,6 +60,8 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [selectedRound, setSelectedRound] = useState<string | null>(null);
+  const [afOilRoundId, setAfOilRoundId] = useState<string | null>(null);
+  const afOilRound = productionRounds.find(round => round.id === afOilRoundId);
 
   // Forms
   const [newRound, setNewRound] = useState({
@@ -232,6 +235,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       butterInput: newRound.butterInput,
       butterOverdrawKg: butterAllocation.overdrawKg,
       afOilInput: afOilInput,
+      afOilConfirmationRequired: true,
       expectedYield: expectedYield,
       remainingBalance: 0,
       batchCode: externalCreamLot ? `GHEE-${externalCreamLot.lotCode}` : batchCode,
@@ -445,7 +449,7 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
       buttons.push(
         <button
           key="add_af_oil"
-          onClick={() => handleStatusChange(round.id, 'af_oil_added')}
+          onClick={() => setAfOilRoundId(round.id)}
           className="px-3 py-1.5 bg-orange-500 text-white rounded text-xs font-medium hover:bg-orange-600"
         >
           Add AF Oil
@@ -552,6 +556,11 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
           </button>
         </div>
       </div>
+
+      {gheeRounds.some(round => round.afOilRecord?.approvalStatus === 'pending') && <section aria-label="Pending AF oil reviews" className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+        <h4 className="text-sm font-semibold text-amber-950">AF oil changes awaiting owner/admin approval</h4>
+        <div className="mt-2 flex flex-wrap gap-2">{gheeRounds.filter(round => round.afOilRecord?.approvalStatus === 'pending').map(round => <button key={round.id} onClick={() => setAfOilRoundId(round.id)} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900">{canRunSupervisorCheck ? 'Review' : 'View'} {round.batchCode}/R{round.roundNumber} · {round.afOilRecord!.actualKg.toFixed(3)} kg</button>)}</div>
+      </section>}
 
       {scopedMilkLot && <section aria-label="Butter source balance" className="rounded-xl border border-amber-200 bg-amber-50 p-4">
         <h4 className="text-sm font-semibold text-amber-900">Source butter · Milk lot {scopedMilkLot.lotCode}</h4>
@@ -661,7 +670,12 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
                             </details>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 text-xs">{round.afOilInput?.toFixed(2) || '—'} kg</td>
+                        <td className="px-4 py-3 text-slate-600 text-xs">
+                          <div>{round.afOilInput?.toFixed(2) ?? '—'} kg</div>
+                          {round.afOilRecord ? <p className={`mt-1 text-[10px] ${['pending', 'rejected'].includes(round.afOilRecord.approvalStatus) ? 'font-semibold text-amber-800' : 'text-emerald-700'}`}>{afOilApprovalLabels[round.afOilRecord.approvalStatus]}</p>
+                            : <p className="mt-1 text-[10px] text-slate-500">{round.afOilConfirmationRequired ? 'Recommended · not yet confirmed' : 'Legacy · not separately confirmed'}</p>}
+                          <button onClick={() => setAfOilRoundId(round.id)} className="mt-1 rounded border border-orange-200 px-2 py-1 text-[10px] font-semibold text-orange-800">{round.afOilRecord?.approvalStatus === 'pending' && canRunSupervisorCheck ? 'Review AF oil' : round.afOilRecord ? 'AF oil details' : 'Confirm AF oil'}</button>
+                        </td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{round.expectedYield?.toFixed(2) || '—'} kg</td>
                         <td className="px-4 py-3 text-slate-600 text-xs">
                           {round.outputWeight > 0 ? `${round.outputWeight.toFixed(2)} kg` : '—'}
@@ -890,6 +904,8 @@ export default function GheeTab({ selectedMilkLotId }: GheeTabProps) {
           </div>
         </div>
       </Modal>
+
+      {afOilRound && <GheeAfOilModal key={afOilRound.id} round={afOilRound} role={currentRole} onClose={() => setAfOilRoundId(null)} />}
 
       {/* Discard Modal */}
       <Modal isOpen={showDiscardModal} onClose={() => setShowDiscardModal(false)} title="Discard Ghee Round">
