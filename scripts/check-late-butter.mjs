@@ -15,7 +15,8 @@ if(process.argv.includes('--snapshot')){
 }else{
  const migration=await fs.readFile(path.join(root,'supabase/migrations/20261103170000_settle_late_internal_butter.sql'),'utf8');
  const tests=await fs.readFile(path.join(root,'supabase/tests/late_internal_butter.sql'),'utf8');
- const sql=migration.replace(/commit;\s*$/,'')+tests.replace(/\bbegin;\s*/,'');
+ const confirmation=await fs.readFile(path.join(root,'supabase/migrations/20261105110000_confirm_already_reconciled_butter_pool.sql'),'utf8');
+ const sql=migration.replace(/commit;\s*$/,'')+confirmation.replace(/\bbegin;\s*/,'').replace(/commit;\s*$/,'')+tests.replace(/\bbegin;\s*/,'');
  if(!sql.trimEnd().endsWith('rollback;'))throw Error('Tests must roll back');
  const file=path.join(dir,'rollback-test.sql');await fs.writeFile(file,sql,{mode:0o600});console.log(JSON.stringify({...JSON.parse(query(['\n'+sql])),testSql:file}));
 }
