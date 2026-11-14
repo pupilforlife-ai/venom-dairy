@@ -123,7 +123,7 @@ export default function Dashboard() {
   const inRangeTemperatureReadings = rangeCheckedTemperatureReadings.filter(temperatureIsInRange);
   const outOfRangeTemps = rangeCheckedTemperatureReadings.filter((reading) => !temperatureIsInRange(reading));
   const reconciledFinishedStock = reconcileFinishedStock(productionRounds, finishedStock);
-  const awaitingHandover = reconciledFinishedStock.filter((stock) => stock.status === 'awaiting_handover');
+  const awaitingHandover = reconciledFinishedStock.filter((stock) => (stock.status === 'awaiting_handover'||stock.status==='returned'));
   const totalCases = awaitingHandover.reduce((sum, stock) => sum + (stock.cases || 0), 0);
   const reconciledRoundIds = new Set(reconciledFinishedStock.map(stock => stock.sourceRoundId).filter(Boolean));
   const otherRoundCases = productionRounds

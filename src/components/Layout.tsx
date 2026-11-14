@@ -30,6 +30,7 @@ const navItems = [
   { path: '/instructions', label: 'Instructions', icon: ClipboardCheck },
   { path: '/production-board', label: 'Production Board', icon: ClipboardList },
   { path: '/milk-receiving', label: 'Milk Receiving', icon: Milk },
+  { path: '/traceability', label: 'Batch Traceability', icon: ClipboardCheck },
   { path: '/inventory', label: 'Inventory & Stock', icon: Package },
   { path: '/cutting', label: 'Cutting', icon: ClipboardList },
   { path: '/packing', label: 'Packing', icon: Package },
@@ -45,8 +46,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { milkLots, productionShifts } = useApp();
   const isLocalDemo = import.meta.env.VITE_LOCAL_DEMO_MODE === 'true';
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [username, setUsername] = useState('');
-  const [role, setRole] = useState('');
+  const [username, setUsername] = useState(() => window.localStorage.getItem('vejoy_user_username') || 'Local tester');
+  const [role, setRole] = useState(() => window.localStorage.getItem('vejoy_user_role') || 'owner');
   const [theme, setTheme] = useState(() => window.localStorage.getItem('vejoy_theme') || 'light');
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);

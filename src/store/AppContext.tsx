@@ -1,8 +1,14 @@
+import { saveTrayPacking, type TrayPackingRequest } from '../traceability/paneerTrays';
+import { savePaneerAfterCutting, type AfterCuttingRequest } from '../traceability/afterCutting';
+import { capturePaneerCutting } from '../traceability/paneerJourney';
 import { createContext, useContext, ReactNode } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { returnHcpBalanceToPool, reconcileHcpChillerReturns } from '../lib/hcpCrumbing';
 import type { CrumbingBatch } from '../pages/CrumbingTab';
 import { recordPaneerIngredientAllocation } from '../lib/paneerRecipe';
+import { captureAutomaticPaneer, correctPaneerBag, type BagCorrectionRequest } from '../traceability/automaticPaneer';
+import { emptyTraceState } from '../traceability/domain';
+import { readPreviewState } from '../preview/storage';
 import { supabase } from '../lib/supabase';
 import { persistPaneerPacking, PaneerPackingRequest } from '../lib/atomicPaneerPacking';
 import { persistGheeRound, GheeRoundRequest } from '../lib/atomicGheeRound';
@@ -72,6 +78,9 @@ interface AppContextType extends AppState {
   removeProductionRound: (id: string) => boolean;
   cancelProductionRound: (id: string, reason?: string) => boolean;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
+  recordPaneerBagCorrection: (request:BagCorrectionRequest) => void;
+  recordPaneerAfterCutting: (request:AfterCuttingRequest) => void;
+  recordPaneerTrayPacking: (request:TrayPackingRequest) => void;
   commitPaneerPacking: (request: PaneerPackingRequest) => Promise<ProductionRound | null>;
   createGheeRound: (request: GheeRoundRequest) => Promise<ProductionRound | null>;
   recordGheeAfOil: (request: RecordGheeAfOilRequest) => Promise<void>;
@@ -448,6 +457,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const recordProductionRoundActivity: AppContextType['recordProductionRoundActivity'] = (id, updates, event) => {
     setProductionRounds(currentRounds => currentRounds.map(round => {
       if (round.id !== id) return round;
+      if(event.type==='in_production'&&updates.status==='in_production'&&round.status!=='scheduled')return round;
       const occurredAt = event.occurredAt || new Date().toISOString();
       const nextRound: ProductionRound = {
         ...round,
@@ -459,10 +469,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }],
       };
       if (isMilkProductionRound(nextRound) && nextRound.plannedInput <= 0) return round;
-      return recordPaneerIngredientAllocation(nextRound, occurredAt, event.recordedBy || 'User',
+      const issued=recordPaneerIngredientAllocation(nextRound, occurredAt, event.recordedBy || 'User',
         updates.status === 'in_production' ? 'Ingredients issued when vat selection and production start were confirmed' : event.details,
         round.status === 'scheduled' && updates.status === 'in_production' && Boolean(updates.vat));
+      return round.status==='scheduled'&&updates.status==='in_production'
+        ?captureAutomaticPaneer(issued,currentRounds,readPreviewState('vejoy_traceability',emptyTraceState),event.recordedBy||'User',occurredAt)
+        :['cut','clingwrapped'].includes(event.type)&&updates.paneerCuttingDetails?capturePaneerCutting(issued,{...nextRound.historyEvents![nextRound.historyEvents!.length-1],phase:'weighing',sequence:Math.max(0,...currentRounds.flatMap(r=>(r.paneerCuttingHistory||[]).map(h=>h.sequence||0)))+1}):issued;
     }));
+  };
+  const recordPaneerTrayPacking=(request:TrayPackingRequest)=>{
+    const actor=window.localStorage.getItem('vejoy_user_username')||'User',role=window.localStorage.getItem('vejoy_user_role')||'',at=new Date().toISOString();
+    setProductionRounds(current=>saveTrayPacking(current,request,actor,role,at));
+  };
+  const recordPaneerAfterCutting=(request:AfterCuttingRequest)=>{
+    const actor=window.localStorage.getItem('vejoy_user_username')||'User',role=window.localStorage.getItem('vejoy_user_role')||'',at=new Date().toISOString();
+    setProductionRounds(current=>savePaneerAfterCutting(current,readPreviewState('vejoy_traceability',emptyTraceState),milkLots,request,actor,role,at));
+  };
+  const recordPaneerBagCorrection=(request:BagCorrectionRequest)=>{
+    const actor=window.localStorage.getItem('vejoy_user_username')||'User',at=new Date().toISOString();
+    setProductionRounds(current=>correctPaneerBag(current,readPreviewState('vejoy_traceability',emptyTraceState),request,actor,at));
   };
 
   const requestProductionRoundTypeChange = async (id: string, newType: 'D' | 'C/S', reason: string) => {
@@ -767,6 +792,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeProductionRound,
     cancelProductionRound,
     updateProductionRound,
+    recordPaneerBagCorrection,
+    recordPaneerAfterCutting,
+    recordPaneerTrayPacking,
     commitPaneerPacking,
     createGheeRound,
     recordGheeAfOil,

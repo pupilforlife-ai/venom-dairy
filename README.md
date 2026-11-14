@@ -1,3 +1,7 @@
+# Paneer traceability — isolated test branch
+
+Browser-only test version. See [PANEER-TEST-RELEASE.md](PANEER-TEST-RELEASE.md). Do not promote this branch to the live production domain.
+
 # venom-dairy
 dairy production tracking and inventory management
 

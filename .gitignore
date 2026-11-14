@@ -7,3 +7,8 @@ build/
 .env.*.local
 supabase/.temp/
 /previews/ingredient-balances-qa/
+
+.vercel/
+dist-local/
+.vercel
+.env*

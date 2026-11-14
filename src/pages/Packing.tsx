@@ -20,7 +20,7 @@ export default function Packing() {
   const { showToast } = useToast();
   const currentActor = typeof window === 'undefined' ? 'System' : window.localStorage.getItem('vejoy_user_username') || window.localStorage.getItem('vejoy_user_role') || 'User';
   const awaitingFinishedStock = useMemo(
-    () => reconcileFinishedStock(productionRounds, finishedStock).filter(stock => stock.status === 'awaiting_handover'),
+    () => reconcileFinishedStock(productionRounds, finishedStock).filter(stock => (stock.status === 'awaiting_handover'||stock.status==='returned')),
     [finishedStock, productionRounds],
   );
 

@@ -1,3 +1,4 @@
+import TraceabilityPage from './traceability/TraceabilityPage';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './store/AppContext';
 import AuthGate from './components/AuthGate';
@@ -41,6 +42,7 @@ export default function App() {
               {/* Keep the old bookmark working while the page is now called Distribution. */}
               <Route path="/handover" element={<Navigate to="/distribution" replace />} />
               <Route path="/reconciliation" element={<Reconciliation />} />
+              <Route path="/traceability" element={<TraceabilityPage />} />
               <Route path="/settings" element={<Settings />} />
               </Routes>
             </Layout>
