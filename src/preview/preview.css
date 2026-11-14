@@ -125,3 +125,8 @@
   .vejoy-modal-dialog .trace-fields { grid-template-columns:minmax(0,1fr); }
   .vejoy-modal-dialog .trace-form input,.vejoy-modal-dialog .trace-form select { min-width:0; max-width:100%; }
 }
+
+.trace-cut-tray-grid .trace-cut-tray-occupied { background:#fde68a; border:2px solid #d97706; color:#78350f; font-weight:700; }
+.trace-cut-tray-grid .trace-cut-tray-occupied:has(input:checked) { outline:3px solid #dc2626; outline-offset:1px; }
+.trace-cut-tray-grid small { font-size:9px; line-height:1.1; }
+.trace-buttons button:disabled { opacity:.5; cursor:not-allowed; }

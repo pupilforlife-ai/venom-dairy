@@ -1,3 +1,6 @@
+import PaneerScrambleReconciliation from '../traceability/PaneerScrambleReconciliation';
+import { useTraceability } from '../traceability/useTraceability';
+import { lotScrambleSummary } from '../traceability/pan111Reconciliation';
 import LotTracePanel from '../traceability/LotTracePanel';
 import { milkCode } from '../traceability/domain';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -18,6 +21,7 @@ import { createExternalCreamLotCode } from '../lib/creamLotCode';
 import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 
 export default function MilkReceiving() {
+  const {state:traceState}=useTraceability();
   const [searchParams,setSearchParams]=useSearchParams();
   const section=searchParams.get('section')==='planning'?'planning':'receiving';
   const selectSection=(value:'planning'|'receiving')=>setSearchParams(previous=>{const next=new URLSearchParams(previous);next.set('section',value);return next;});
@@ -167,8 +171,8 @@ export default function MilkReceiving() {
   };
 
   const packedSkuSummary = useMemo(() => {
-    return displayedLot ? buildMilkLotPackedSummary(displayedLot, productionRounds, crumbingBatches) : null;
-  }, [displayedLot, productionRounds, crumbingBatches]);
+    return displayedLot ? buildMilkLotPackedSummary(displayedLot, productionRounds, crumbingBatches,traceState) : null;
+  }, [displayedLot, productionRounds, crumbingBatches,traceState]);
 
   const totals = displayedLot ? {
     received: displayedLot.litresReceived,
@@ -693,7 +697,7 @@ export default function MilkReceiving() {
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">PAN111</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lotReconciliation.pan111.toFixed(2)} kg
+                                      {(traceState.pan111Reconciliations?.[lot.id]?.measuredKg??lotScrambleSummary(productionRounds,lot.id,traceState).totalKg).toFixed(2)} kg
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-slate-300 pl-3">
@@ -714,6 +718,7 @@ export default function MilkReceiving() {
                               </div>
                             </div>
 
+                            <PaneerScrambleReconciliation lotId={lot.id}/>
                             <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
                               <h3 className="text-sm font-bold text-slate-900 mb-3">Common product pools · {lot.lotCode}</h3>
                               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">

@@ -1,5 +1,6 @@
+import { reconcilePan111, type Pan111Request } from './pan111Reconciliation';
 import { assembleMixedCaseStock,cancelMixedCaseStock,linkExistingMixedCaseStock,returnMixedCaseStock,type ReturnMixedCaseRequest } from './mixedCaseStock';
-import type { FinishedStockLot } from '../data/mockData';
+import type { IntermediateLot, FinishedStockLot } from '../data/mockData';
 import { transferRetentionSamples, reviewRetentionTransfer } from './paneerStorage';
 import { readPreviewState, usePreviewState, batchPreviewWrites, writePreviewState } from '../preview/storage';
 import type { MilkLot, ProductionRound } from '../data/mockData';
@@ -47,7 +48,13 @@ export function useTraceability() {
   const cancelMixedCase=(id:string,reason:string)=>stockCommand((current,stock,rounds,lots,actor,role,at)=>cancelMixedCaseStock(current,stock,id,reason,actor,role,at));
   const linkMixedCaseStock=(id:string)=>stockCommand((current,stock,rounds,lots,actor,role,at)=>linkExistingMixedCaseStock(current,stock,id,rounds,lots,actor,role,at));
   const returnMixedStock=(request:ReturnMixedCaseRequest)=>stockCommand((current,stock,rounds,lots,actor,role,at)=>returnMixedCaseStock(current,stock,request,actor,role,at));
+  const savePan111=(request:Pan111Request)=>batchPreviewWrites(()=>{
+    const current=readPreviewState('vejoy_traceability',emptyTraceState),stock=readPreviewState<IntermediateLot[]>('vejoy_intermediateLots',[]);
+    const next=reconcilePan111(current,stock,request,readPreviewState<ProductionRound[]>('vejoy_productionRounds',[]),readPreviewState<MilkLot[]>('vejoy_milkLots',[]),localStorage.getItem('vejoy_user_username')||'Local tester',localStorage.getItem('vejoy_user_role')||'',new Date().toISOString());
+    if(next.state!==current)writePreviewState('vejoy_traceability',emptyTraceState,next.state);
+    if(next.stock!==stock)writePreviewState<IntermediateLot[]>('vejoy_intermediateLots',[],next.stock);
+  });
   const moveRetentionSamples=(request:Parameters<typeof transferRetentionSamples>[1])=>setState(current=>transferRetentionSamples(current,request,readPreviewState<ProductionRound[]>('vejoy_productionRounds',[]),readPreviewState<MilkLot[]>('vejoy_milkLots',[]),localStorage.getItem('vejoy_user_username')||'Local tester',new Date().toISOString()));
   const reviewRetention=(request:Parameters<typeof reviewRetentionTransfer>[1])=>setState(current=>reviewRetentionTransfer(current,request,readPreviewState<ProductionRound[]>('vejoy_productionRounds',[]),readPreviewState<MilkLot[]>('vejoy_milkLots',[]),localStorage.getItem('vejoy_user_username')||'Local tester',localStorage.getItem('vejoy_user_role')||'',new Date().toISOString()));
-  return {state,save,saveReadiness,saveChecklist,saveMixedCase,cancelMixedCase,linkMixedCaseStock,returnMixedStock,moveRetentionSamples,reviewRetention};
+  return {state,save,savePan111,saveReadiness,saveChecklist,saveMixedCase,cancelMixedCase,linkMixedCaseStock,returnMixedStock,moveRetentionSamples,reviewRetention};
 }

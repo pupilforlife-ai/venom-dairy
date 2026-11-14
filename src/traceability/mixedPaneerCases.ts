@@ -18,6 +18,14 @@ export interface MixedPaneerCase {
 }
 export interface MixedCaseRequest { id:string;sku:string;caseCount:number;parts:{key:string;packets:number;expectedFingerprint:string}[] }
 export const packingSourceKey=(roundId:string,pack:PackedSku,index:number)=>JSON.stringify([roundId,pack.packingRunId||`legacy-index:${index}`]);
+export function loosePackingBalance(round:ProductionRound,pack:PackedSku,index:number,state:TraceState) {
+ const key=packingSourceKey(round.id,pack,index);
+ const used=Object.values(state.mixedCases||{}).filter(c=>!c.voided).flatMap(c=>c.parts).filter(p=>p.source.key===key).reduce((n,p)=>n+p.packets,0);
+ return {recorded:pack.loose||0,used,remaining:(pack.loose||0)-used};
+}
+export function assemblySourceOptions(sources:LoosePacketSource[],parts:{key:string}[],index:number) {
+ return sources.filter(s=>(s.availableLoose>0||s.key===parts[index]?.key)&&!parts.some((p,i)=>i!==index&&p.key===s.key));
+}
 export function loosePacketSources(rounds:ProductionRound[],lots:MilkLot[],state:TraceState):LoosePacketSource[] {
  const used=new Map<string,number>();
  for(const item of Object.values(state.mixedCases||{}))if(!item.voided)for(const part of item.parts)used.set(part.source.key,(used.get(part.source.key)||0)+part.packets);
@@ -37,7 +45,7 @@ export function buildMixedPaneerCase(request:MixedCaseRequest,rounds:ProductionR
  const definition=paneerSkuByCode[request.sku];if(definition?.packMode!=='units'||!definition.unitsPerCase)throw Error('Choose a paneer SKU packed by packet count.');
  if(!Number.isSafeInteger(request.caseCount)||request.caseCount<1)throw Error('Enter a positive whole number of cases.');
  if(!request.id||!actor.trim())throw Error('The case reference and recorder are required.');
- if(request.parts.length<2||new Set(request.parts.map(p=>p.key)).size!==request.parts.length)throw Error('Choose at least two different loose-packet entries, once each.');
+ if(request.parts.length<1||new Set(request.parts.map(p=>p.key)).size!==request.parts.length)throw Error('Choose at least one loose-packet entry, once each.');
  const sources=loosePacketSources(rounds,lots,state);
  const parts=request.parts.map(part=>{
   const source=sources.find(s=>s.key===part.key);if(!source||source.sku!==request.sku)throw Error('The selected packing source no longer matches this SKU.');
@@ -77,14 +85,17 @@ export function voidMixedPaneerCase(state:TraceState,id:string,reason:string,act
  const entry=state.mixedCases?.[id];if(!entry)throw Error('Case assembly not found.');if(entry.voided)return state;
  return {...state,mixedCases:{...state.mixedCases,[id]:{...entry,voided:{at,by:actor,reason:reason.trim()}}}};
 }
-export function paneerCaseSummary(rounds:ProductionRound[],lots:MilkLot[],state:TraceState,sku:string) {
+export function paneerCaseSummary(rounds:ProductionRound[],lots:MilkLot[],state:TraceState,sku:string,lotId='all') {
  const definition=paneerSkuByCode[sku];if(definition?.packMode!=='units'||!definition.unitsPerCase)return null;
- const packs=rounds.filter(r=>['D','C/S'].includes(r.type)&&!['cancelled','spoiled'].includes(r.status)).flatMap(r=>(r.packedSkus||[]).filter(p=>p.sku===sku));
+ const packs=rounds.filter(r=>(lotId==='all'||r.milkLotId===lotId)&&['D','C/S'].includes(r.type)&&!['cancelled','spoiled'].includes(r.status)).flatMap(r=>(r.packedSkus||[]).filter(p=>p.sku===sku));
  const fullCases=packs.reduce((n,p)=>n+p.cases,0),recordedLoose=packs.reduce((n,p)=>n+(p.loose||0),0);
- const cases=Object.values(state.mixedCases||{}).filter(c=>c.sku===sku&&!c.voided),mixedCases=cases.reduce((n,c)=>n+c.caseCount,0),used=cases.reduce((n,c)=>n+c.parts.reduce((m,p)=>m+p.packets,0),0);
+ const cases=Object.values(state.mixedCases||{}).filter(c=>c.sku===sku&&!c.voided&&(lotId==='all'||c.parts.some(p=>p.source.lotId===lotId)));
+ const ownCases=cases.filter(c=>lotId==='all'||c.parts.every(p=>p.source.lotId===lotId));
+ const sharedCases=cases.filter(c=>!ownCases.includes(c));
+ const mixedCases=ownCases.reduce((n,c)=>n+c.caseCount,0),used=cases.reduce((n,c)=>n+c.parts.filter(p=>lotId==='all'||p.source.lotId===lotId).reduce((m,p)=>m+p.packets,0),0);
  const looseRemaining=recordedLoose-used,totalPackets=fullCases*definition.unitsPerCase+recordedLoose;
- const sources=loosePacketSources(rounds,lots,state).filter(s=>s.sku===sku);
+ const sources=loosePacketSources(rounds,lots,state).filter(s=>s.sku===sku&&(lotId==='all'||s.lotId===lotId));
  const problems=sources.filter(s=>s.usedLoose>s.recordedLoose).map(s=>`S${s.shift}/R${s.round}: packing was corrected below the number of packets already used in mixed cases.`);
- for(const c of cases)for(const p of c.parts)if(!sources.some(s=>s.key===p.source.key))problems.push(`Case ${c.caseBatchCode}: a source packing entry is no longer present; owner review required.`);
- return {sku,originalCases:fullCases,recordedLoose,mixedCases,totalCases:fullCases+mixedCases,looseRemaining,totalPackets,sources,problems};
+ for(const c of cases)for(const p of c.parts.filter(p=>lotId==='all'||p.source.lotId===lotId))if(!sources.some(s=>s.key===p.source.key))problems.push(`Case ${c.caseBatchCode}: a source packing entry is no longer present; owner review required.`);
+ return {sku,originalCases:fullCases,recordedLoose,mixedCases,totalCases:fullCases+mixedCases,looseRemaining,totalPackets,sources,problems,sharedCases,sharedPackets:sharedCases.reduce((n,c)=>n+c.parts.filter(p=>p.source.lotId===lotId).reduce((m,p)=>m+p.packets,0),0)};
 }

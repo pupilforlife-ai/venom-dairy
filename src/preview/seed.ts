@@ -23,10 +23,13 @@ if (!localStorage.getItem(PREFIX + 'initialized')) {
   for (const [key, value] of Object.entries({ milkLots: [lot], productionShifts: [shift], productionRounds: rounds })) {
     localStorage.setItem(PREFIX + 'vejoy_' + key, JSON.stringify(value));
   }
-  if(location.port==='4342'){
-    const qa=makePaneerQaFixture(true);
+  if(location.port==='4342'||(!import.meta.env.PROD&&location.port==='4354')){
+    const qa=makePaneerQaFixture(location.port==='4342');
+    if(location.port==='4354')qa.rounds=qa.rounds.map((r,i)=>i<2?{...r,type:'C/S' as const,packedSkus:[{...r.packedSkus![0],sku:'RPAN400',cases:6,loose:13}]}:r);
     for(const [key,value] of Object.entries({milkLots:qa.lots,productionRounds:qa.rounds,productionShifts:[qa.shift],traceability:qa.state}))localStorage.setItem(PREFIX+'vejoy_'+key,JSON.stringify(value));
   }
+  const seedSnapshot=Object.fromEntries(Object.keys(localStorage).filter(k=>k.startsWith(PREFIX+'vejoy_')).map(k=>[k.slice(PREFIX.length),JSON.parse(localStorage.getItem(k)!)]));
+  localStorage.setItem(PREFIX+'__seedSnapshot',JSON.stringify(seedSnapshot));
   localStorage.setItem(PREFIX + 'initialized', new Date().toISOString());
 }
 if (!localStorage.getItem('vejoy_user_role')) localStorage.setItem('vejoy_user_role', 'owner');

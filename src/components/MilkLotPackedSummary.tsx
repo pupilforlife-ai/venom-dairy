@@ -3,9 +3,10 @@ import type { buildMilkLotPackedSummary } from '../lib/milkLotPackedSummary';
 
 export function MilkLotPackedSummary({ summary, loading = false }: { summary: ReturnType<typeof buildMilkLotPackedSummary>; loading?: boolean }) {
   return <div className="space-y-4">
-    <p className="text-xs text-slate-500">Recorded packed production for this milk lot—not stock remaining after transfers. Weights use SKU pack sizes and recorded case weights. Halloumi shows kg vacuum packed. Standalone JP and unlinked batches are not assigned to this milk lot.</p>
+    <p className="text-xs text-slate-500">Recorded packed production for this milk lot—not stock remaining after transfers. Cases include recorded assemblies; loose excludes packets already cased. Weights use SKU pack sizes and recorded case weights. Halloumi shows kg vacuum packed. Standalone JP and unlinked batches are not assigned to this milk lot.</p>
     {loading && <p role="status" className="text-xs text-slate-500">Loading crumbing records…</p>}
     {summary.mixedLotPackingEntries > 0 && <p role="status" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">{summary.mixedLotPackingEntries} mixed-source crumbing packing {summary.mixedLotPackingEntries === 1 ? 'entry is' : 'entries are'} excluded from these lot totals: no exact per-milk-lot case/weight split was recorded. Review the combined packing record on the Production Board.</p>}
+    {summary.sharedPaneerCases.map((c,i)=><p key={i} className="rounded-lg bg-cyan-50 p-2 text-xs text-cyan-900">Shared case {c.caseCode} · {c.sku}: {c.packetsFromLot} packets from this lot in {c.cases} case(s) spanning milk lots. Counted once in the combined register; not assigned wholly to this lot. Weight remains part of this lot’s recorded output.</p>)}
     {summary.groups.map(group => <section key={group.id} aria-label={`${group.label} packed summary`} className="overflow-hidden rounded-lg border border-slate-200">
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3 py-2">
         <h4 className="text-sm font-bold text-slate-900">{group.label}</h4>

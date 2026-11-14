@@ -52,7 +52,8 @@ export function paneerJourney(round:ProductionRound,lot:MilkLot|undefined,state:
  const packed=(round.packedSkus||[]).map(pack=>({pack,kg:paneerPackMass(pack)}));
  const paneerPacked=packed.filter(p=>p.pack.sku!=='PAN111'),scramblePacked=packed.filter(p=>p.pack.sku==='PAN111');
  const packedKg=paneerPacked.some(p=>p.kg===null)?null:kg(paneerPacked.reduce((n,p)=>n+(p.kg||0),0));
- const pan111Kg=scramblePacked.some(p=>p.kg===null)?null:kg(scramblePacked.reduce((n,p)=>n+(p.kg||0),0));
+ const packedPan111Kg=scramblePacked.some(p=>p.kg===null)?null:kg(scramblePacked.reduce((n,p)=>n+(p.kg||0),0));
+ const pan111Kg=cutting.scrambleKg??packedPan111Kg;
  const netKg=blockKg===null||cutting.clothKg===null?null:kg(blockKg-cutting.clothKg);
  const derivative=(key:'MPAN111'|'RPAN111'|'MSPP'|'RSPP'|'Cream')=>safeCode(state.prefixes[key]?.value||agreedPrefixes[key],origin.date,round.shiftNumber,round.roundNumber).code;
  const pan111Code=derivative(round.type==='D'?'MPAN111':'RPAN111'),sppCode=derivative(round.type==='D'?'MSPP':'RSPP');

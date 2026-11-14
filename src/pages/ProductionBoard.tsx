@@ -1,3 +1,5 @@
+import PaneerScrambleReconciliation from '../traceability/PaneerScrambleReconciliation';
+import { loosePackingBalance } from '../traceability/mixedPaneerCases';
 import { batchPreviewWrites,afterPreviewCommit,readPreviewState,writePreviewState } from '../preview/storage';
 import { correctMixedSourceStock,hasMixedCaseSourceHistory } from '../traceability/mixedCaseStock';
 import { packingSourceKey } from '../traceability/mixedPaneerCases';
@@ -228,12 +230,6 @@ export default function ProductionBoard() {
     reason: '',
   });
   const [editingPackIndex, setEditingPackIndex] = useState<number | null>(null);
-  
-  // PAN111 form state
-  const [pan111Form, setPan111Form] = useState({
-    weight: 0,
-    recordedBy: '',
-  });
   
   // Cream form state
   const [creamForm, setCreamForm] = useState({
@@ -1023,41 +1019,6 @@ export default function ProductionBoard() {
       details: 'Balance returned to normal Paneer packing or SPP routing', recordedBy: currentActor, source: 'approval',
     });
     showToast('success', 'PAN111 request rejected. The balance is available for normal paneer packing or SPP routing.');
-  };
-
-  const handleRecordPan111 = () => {
-    if (!activeMilkLot) return;
-    
-    if (pan111Form.weight <= 0) {
-      showToast('error', 'Enter a PAN111 weight');
-      return;
-    }
-    const useByDate = new Date(Date.now() + 730 * 24 * 60 * 60 * 1000);
-    addIntermediateLot({
-      lotCode: `PAN111-${activeMilkLot.lotCode}`,
-      productId: 'pan111',
-      productName: 'PAN111 (Recovered Paneer)',
-      productClass: 'intermediate',
-      sourceBatchId: 'milk-lot',
-      sourceBatchCode: activeMilkLot.lotCode,
-      producedQuantity: pan111Form.weight,
-      currentQuantity: pan111Form.weight,
-      uom: 'kg',
-      storageLocation: 'Chiller',
-      status: 'available',
-      producedAt: new Date().toISOString(),
-      sourceMilkLotCode: activeMilkLot.lotCode,
-      sourceShift: 0,
-      sourceRound: 0,
-      qualityClass: 'standard',
-      shelfLifeDays: 730,
-      useByDate: useByDate.toISOString(),
-      priorityUse: false,
-    });
-
-    showToast('success', `PAN111 recorded: ${pan111Form.weight} kg`);
-    setShowPan111Modal(false);
-    setPan111Form({ weight: 0, recordedBy: '' });
   };
 
   const handleRecordCream = () => {
@@ -1947,7 +1908,7 @@ export default function ProductionBoard() {
         </div>
       </div>
 
-      {activeTab==='paneer'&&activeMilkLot&&<><PaneerBagStatus lotId={activeMilkLot.id}/><MixedPaneerCases lotId={activeMilkLot.id}/><PaneerTrayRetentionPanel lotId={activeMilkLot.id}/></>}
+      {activeTab==='paneer'&&activeMilkLot&&<><PaneerBagStatus lotId={activeMilkLot.id}/><MixedPaneerCases lotId={activeMilkLot.id}/><PaneerTrayRetentionPanel lotId={activeMilkLot.id}/><PaneerScrambleReconciliation lotId={activeMilkLot.id} open={showPan111Modal} onClose={()=>setShowPan111Modal(false)}/></>}
 
       {/* Paneer Tab Content */}
       {activeTab === 'paneer' && (
@@ -2300,7 +2261,7 @@ export default function ProductionBoard() {
                             const recordedBy = pack.recordedBy || historyEvent?.recordedBy || 'Recorder not captured';
                             const recordedAtValue = pack.recordedAt || historyEvent?.occurredAt;
                             const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB') : 'timestamp not captured';
-                            const packLabel = pack.weightKg !== undefined ? `${pack.sku}: ${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.sku}: ${pack.cases}c × ${(pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku])).toFixed(2)} kg + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.sku}: ${pack.cases}c + ${pack.loose || 0} loose`;
+                            const packLabel = pack.weightKg !== undefined ? `${pack.sku}: ${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.sku}: ${pack.cases}c × ${(pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku])).toFixed(2)} kg + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.sku}: ${pack.cases}c + ${loosePackingBalance(round,pack,packIndex,traceState).remaining} loose remaining`;
                             return <div key={`${pack.sku}-${packIndex}`} className="flex flex-wrap items-center gap-1"><button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="max-w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-left text-xs font-semibold text-emerald-700">{packLabel}</button>{isOwner && <button type="button" onClick={() => openPackingCorrection(round, packIndex)} className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-700">Correct</button>}</div>;
                           })}</div> : <p className="text-sm text-slate-400">Nothing packed yet</p>}
                           <RoundLooseStatus round={round} state={traceState}/>
@@ -2430,7 +2391,7 @@ export default function ProductionBoard() {
                                   const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB') : 'timestamp not captured';
                                   const auditLabel = `${p.sku} · ${recordedBy} · ${recordedAt}`;
                                   return <div key={i} className="flex flex-wrap items-center gap-1">
-                                    <button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c × ${(p.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[p.sku])).toFixed(2)} kg + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}<span className="sr-only"> ({auditLabel})</span></button>
+                                    <button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c × ${(p.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[p.sku])).toFixed(2)} kg + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${loosePackingBalance(round,p,i,traceState).remaining} loose remaining`}<span className="sr-only"> ({auditLabel})</span></button>
                                     {isOwner && <button type="button" onClick={() => openPackingCorrection(round, i)} className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
                                   </div>;
                                 })}
@@ -2816,28 +2777,7 @@ export default function ProductionBoard() {
         </div>
       </Modal>
 
-      {/* PAN111 Modal */}
-      <Modal isOpen={showPan111Modal} onClose={() => setShowPan111Modal(false)} title="Record PAN111 (Once per Milk Lot)">
-        <div className="space-y-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-            <p className="text-xs text-amber-700">
-              <strong>Note:</strong> PAN111 is recorded once per milk lot by the supervisor after all production is complete.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Weight (kg)</label>
-            <input type="number" value={pan111Form.weight || ''} onChange={(e) => setPan111Form({ ...pan111Form, weight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" step="0.1" min="0" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded By (Supervisor)</label>
-            <input type="text" value={pan111Form.recordedBy} onChange={(e) => setPan111Form({ ...pan111Form, recordedBy: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Supervisor name" />
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button onClick={handleRecordPan111} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record PAN111</button>
-            <button onClick={() => setShowPan111Modal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
-          </div>
-        </div>
-      </Modal>
+
 
       {/* Cream details */}
       <Modal isOpen={showCreamDetailsModal} onClose={() => setShowCreamDetailsModal(false)} title="Cream recovery details">

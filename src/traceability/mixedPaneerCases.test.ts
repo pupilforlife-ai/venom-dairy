@@ -70,3 +70,35 @@ describe('mixed paneer cases preserve source packet counts',()=>{
   const changed={...next,prefixes:{MPAN100:{value:'99',audit:[]}}};expect(paneerCaseSummary(rounds,lots,changed,'MPAN100')!.totalPackets).toBe(168);expect(changed.mixedCases!.case1.caseBatchCode).toBe('11-1011A');
  });
 });
+
+describe('assembly form choices and current composition',()=>{
+ it('excludes another row’s selected source and offers it again when selection clears',async()=>{
+  const {assemblySourceOptions}=await import('./mixedPaneerCases');
+  const sources=loosePacketSources([makeRound('r1',1,1,13),makeRound('r2',1,2,11)],lots,emptyTraceState);
+  const parts=[{key:sources[0].key},{key:''}];
+  expect(assemblySourceOptions(sources,parts,1).map(s=>s.key)).toEqual([sources[1].key]);
+  expect(assemblySourceOptions(sources,parts,0).map(s=>s.key)).toContain(sources[0].key);
+  expect(assemblySourceOptions(sources,[{key:''},{key:''}],1)).toHaveLength(2);
+ });
+ it('shows 13 cases and 2 loose after casing 24 of 26 RPAN400 loose packets',async()=>{
+  const {loosePackingBalance}=await import('./mixedPaneerCases');
+  const rounds=[makeRound('r1',1,1,13,'milk','RPAN400'),makeRound('r2',1,2,13,'milk','RPAN400')];rounds.forEach(r=>r.packedSkus![0].cases=6);
+  const req={...request(rounds,[13,11]),sku:'RPAN400'},next=recordMixedPaneerCase(emptyTraceState,req,rounds,lots,'packer','now');
+  expect(paneerCaseSummary(rounds,lots,next,'RPAN400')).toMatchObject({totalCases:13,looseRemaining:2,totalPackets:314});
+  expect(loosePackingBalance(rounds[0],rounds[0].packedSkus![0],0,next)).toEqual({recorded:13,used:13,remaining:0});
+  expect(loosePackingBalance(rounds[1],rounds[1].packedSkus![0],0,next)).toEqual({recorded:13,used:11,remaining:2});
+ });
+ it('subtracts each lot’s cased loose packets while listing shared cases separately',()=>{
+  const rounds=[makeRound('r1',1,1,12,'milk','MPAN200'),makeRound('r2',1,1,12,'other','MPAN200')];
+  const next=recordMixedPaneerCase(emptyTraceState,{...request(rounds,[12,12]),sku:'MPAN200'},rounds,lots,'packer','now');
+  for(const lotId of ['milk','other'])expect(paneerCaseSummary(rounds,lots,next,'MPAN200',lotId)).toMatchObject({totalCases:4,looseRemaining:0,sharedPackets:12,totalPackets:108});
+  expect(paneerCaseSummary(rounds,lots,next,'MPAN200')).toMatchObject({totalCases:9,looseRemaining:0,totalPackets:216});
+ });
+});
+
+it('allows casing 24 of a single entry’s 26 RPAN400 loose packets without selecting the same entry twice',()=>{
+ const rounds=[makeRound('r1',1,1,26,'milk','RPAN400')];rounds[0].packedSkus![0].cases=12;
+ const next=recordMixedPaneerCase(emptyTraceState,{...request(rounds,[24]),sku:'RPAN400'},rounds,lots,'packer','now');
+ expect(paneerCaseSummary(rounds,lots,next,'RPAN400')).toMatchObject({totalCases:13,looseRemaining:2,totalPackets:314});
+ expect(()=>recordMixedPaneerCase(next,{...request(rounds,[24]),id:'again',sku:'RPAN400'},rounds,lots,'packer','later')).toThrow(/only 2 loose/);
+});
