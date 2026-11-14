@@ -130,3 +130,5 @@
 .trace-cut-tray-grid .trace-cut-tray-occupied:has(input:checked) { outline:3px solid #dc2626; outline-offset:1px; }
 .trace-cut-tray-grid small { font-size:9px; line-height:1.1; }
 .trace-buttons button:disabled { opacity:.5; cursor:not-allowed; }
+
+.trace-cut-occupied-warning { border:1px solid #f59e0b; background:#fef3c7; color:#78350f; padding:8px; border-radius:7px; font-size:12px; overflow-wrap:anywhere; }

@@ -26,12 +26,16 @@ describe('partial tray packing',()=>{
   const r=source(),partial=save([r],request(r)),next=save(partial,request(partial[0],[1,3,12],'t2'),'next shift');
   expect(trayPackingProgress(next[0])).toMatchObject({packed:[1,3,12],pending:[]});expect(traysReleased(next[0])).toBe(true);expect(next[0].paneerTrayPackingHistory).toHaveLength(2);expect(next[0].packedSkus).toEqual(r.packedSkus);expect(next[0].status).toBe('cut');
  });
- it('preserves old packed/handed-over release behavior, but an explicit partial tray record keeps its remaining tray occupied',()=>{
+ it('releases every tray when the whole round is packed, retaining earlier partial history',()=>{
+  const r=source(),partial=save([r],request(r))[0],before=JSON.stringify(partial);
   for(const status of ['packed','handed_over']){
-   const r=source('r1',1,[1,3,12],status);expect(trayPackingProgress(r)).toMatchObject({packed:[1,3,12],pending:[],inferred:true});
-   const next=save([r],request(r))[0];expect(next.status).toBe(status);expect(trayPackingProgress(next)).toMatchObject({packed:[1,3],pending:[12],inferred:false});
+   const finished={...partial,status};expect(trayPackingProgress(finished)).toMatchObject({packed:[1,3,12],pending:[],inferred:true,explicit:true});
+   expect(finished.paneerTrayPackingHistory).toBe(partial.paneerTrayPackingHistory);
+   expect(paneerTrayConflicts([finished,source('later',2,[12])])).toEqual([]);
+   expect(()=>save([finished],request(finished,[1,3],'bad-reopen'))).toThrow(/correct the round status/);
+   expect(save([finished],request(finished,[1,3,12],'complete'))[0]).toBe(finished);
   }
-  const r=source(),partial=save([r],request(r))[0];expect(trayPackingProgress({...partial,status:'packed'}).pending).toEqual([12]);
+  expect(JSON.stringify(partial)).toBe(before);
  });
  it('prevents duplicate/invalid tray IDs, unassigned trays and marking completion before cutting',()=>{
   const r=source();for(const ids of [[1,1],[2],[0],[21],[1.5],[]])expect(()=>save([r],request(r,ids))).toThrow();
@@ -47,7 +51,9 @@ describe('partial tray packing',()=>{
   const r=source(),req=request(r),first=save([r],req);
   expect(()=>save(first,{...req,id:'stale'})).toThrow(/changed/);
   const advanced={...r,status:'packed',remainingBalance:0,packedSkus:[{sku:'MPAN100',cases:5,loose:0}]};
-  const next=save([advanced],req)[0];expect(next).toMatchObject({status:'packed',remainingBalance:0,packedSkus:advanced.packedSkus});expect(trayPackingProgress(next).pending).toEqual([12]);
+  expect(()=>save([advanced],req)).toThrow(/changed/);
+  expect(trayPackingProgress(advanced).pending).toEqual([]);
+  const inProgress={...r,status:'frozen',packedSkus:[{sku:'MPAN100',cases:4,loose:0}]},next=save([inProgress],req)[0];expect(next.packedSkus).toEqual(inProgress.packedSkus);expect(next.status).toBe('frozen');
  });
  it('requires owner/admin and reason to reopen packed trays, retaining before/after history',()=>{
   const r=source(),partial=save([r],request(r)),reopen=request(partial[0],[1],'reopen');
@@ -58,9 +64,38 @@ describe('partial tray packing',()=>{
  it('requires fresh confirmation after a tray assignment changes, while later sample updates do not reset completion',()=>{
   const r=source(),partial=save([r],request(r)),laterSamples=capturePaneerCutting({...partial[0],paneerCuttingDetails:{...partial[0].paneerCuttingDetails!,samplePieces:4}},{id:'samples',sequence:2,stage:'After cutting details',occurredAt:'later',recordedBy:'staff'});
   expect(trayPackingProgress(laterSamples)).toMatchObject({packed:[1,3],pending:[12],assignmentChanged:false});
-  const reassigned=capturePaneerCutting({...laterSamples,status:'packed',paneerCuttingDetails:{...laterSamples.paneerCuttingDetails!,trayNumbers:[1,3,15],trays:3}},{id:'reassigned',sequence:3,stage:'After cutting details',occurredAt:'later',recordedBy:'owner'});
+  const reassigned=capturePaneerCutting({...laterSamples,status:'frozen',paneerCuttingDetails:{...laterSamples.paneerCuttingDetails!,trayNumbers:[1,3,15],trays:3}},{id:'reassigned',sequence:3,stage:'After cutting details',occurredAt:'later',recordedBy:'owner'});
   expect(trayPackingProgress(reassigned)).toMatchObject({packed:[],pending:[1,3,15],assignmentChanged:true});
   expect(()=>save([reassigned],request(partial[0],[1,3,12],'stale'))).toThrow(/changed/);
   const confirmed=save([reassigned],request(reassigned,[1,3],'confirm'));expect(trayPackingProgress(confirmed[0])).toMatchObject({packed:[1,3],pending:[15]});expect(confirmed[0].paneerTrayPackingHistory).toHaveLength(2);
+ });
+});
+
+describe('tray reuse inquiry and warning lifecycle',()=>{
+ it('flags only the earlier unfinished round, then clears that flag after its tray is recorded empty',async()=>{
+  const {trayPickerOccupants}=await import('./paneerStorage');
+  const first=source('first',1,[1,3,12]),partial=save([first],request(first))[0],later=source('later',2,[12]);
+  const both=[partial,later],before=JSON.stringify(both);
+  expect(paneerTrayConflicts(both).map(c=>c.earlier.id)).toEqual(['first']);
+  expect(trayPickerOccupants(both,later.id).get(12)?.map(r=>r.id)).toEqual(['first']);
+  const completed=save(both,request(partial,[1,3,12],'finish-first'));
+  expect(paneerTrayConflicts(completed)).toEqual([]);
+  expect(currentTrayRegister(completed)[11].round?.id).toBe('later');
+  expect(trayPickerOccupants(completed,'third').get(12)?.map(r=>r.id)).toEqual(['later']);
+  expect(completed[1]).toBe(later);expect(completed[0].packedSkus).toEqual(first.packedSkus);expect(JSON.stringify(both)).toBe(before);
+ });
+ it('clears the earlier warning after full packing despite an old partial tray record, without clearing the new occupant',async()=>{
+  const {trayPickerOccupants}=await import('./paneerStorage');
+  const first=source('first',1,[1,3,12]),partial=save([first],request(first))[0],later=source('later',2,[12]);
+  const completed=[{...partial,status:'packed'},later];
+  expect(paneerTrayConflicts(completed)).toEqual([]);
+  expect(trayPickerOccupants(completed,'third').get(12)?.map(r=>r.id)).toEqual(['later']);
+  expect(completed[0].paneerTrayPackingHistory).toBe(partial.paneerTrayPackingHistory);
+ });
+ it('keeps unresolved earlier claims visible in the picker even after a later claimant has packed',async()=>{
+  const {trayPickerOccupants}=await import('./paneerStorage');
+  const first=source('first',1,[12]),later=source('later',2,[12],'packed');
+  expect(trayPickerOccupants([first,later],'third').get(12)?.map(r=>r.id)).toEqual(['first']);
+  expect(trayPickerOccupants([{...first,status:'packed'},later],'third').has(12)).toBe(false);
  });
 });

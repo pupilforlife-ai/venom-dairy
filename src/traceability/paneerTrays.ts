@@ -14,12 +14,14 @@ export function trayAssignment(round:ProductionRound) {
 }
 export function trayPackingProgress(round:ProductionRound) {
  const assignment=trayAssignment(round),history=round.paneerTrayPackingHistory||[],matching=history.filter(e=>e.assignmentKey===assignment.key),last=matching[matching.length-1];
- const inferred=!history.length&&['packed','handed_over'].includes(round.status);
- const packed=last?assignment.numbers.filter(n=>last.packedNumbers.includes(n)):inferred?[...assignment.numbers]:[];
- return {assignment,packed,pending:assignment.numbers.filter(n=>!packed.includes(n)),explicit:Boolean(last),inferred,assignmentChanged:history.length>0&&!last};
+ // Finishing the whole round empties every tray, including trays not ticked
+ // in an earlier partial entry. The earlier partial entry remains in history.
+ const inferred=['packed','handed_over'].includes(round.status);
+ const packed=inferred?[...assignment.numbers]:last?assignment.numbers.filter(n=>last.packedNumbers.includes(n)):[];
+ return {assignment,packed,pending:assignment.numbers.filter(n=>!packed.includes(n)),explicit:Boolean(last),inferred,assignmentChanged:!inferred&&history.length>0&&!last};
 }
 export function trayIsReleased(round:ProductionRound,number:number) {return trayPackingProgress(round).packed.includes(number);}
-export function trayPackingFingerprint(round:ProductionRound) {return JSON.stringify({assignment:trayAssignment(round).key,history:round.paneerTrayPackingHistory||[]});}
+export function trayPackingFingerprint(round:ProductionRound) {return JSON.stringify({assignment:trayAssignment(round).key,history:round.paneerTrayPackingHistory||[],wholeRoundPacked:['packed','handed_over'].includes(round.status)});}
 export function saveTrayPacking(rounds:ProductionRound[],request:TrayPackingRequest,actor:string,role:string,at:string):ProductionRound[] {
  if(!request.id||!actor.trim())throw Error('A save reference and recorder are required.');
  const requestKey=JSON.stringify(request),prior=rounds.find(r=>r.paneerTrayPackingHistory?.some(h=>h.id===request.id));
@@ -31,6 +33,10 @@ export function saveTrayPacking(rounds:ProductionRound[],request:TrayPackingRequ
  if(trayPackingFingerprint(round)!==request.expectedFingerprint)throw Error('Tray details changed. Reopen tray packing before saving.');
  const selected=request.packedNumbers;
  if(selected.some(n=>!Number.isSafeInteger(n)||n<1||n>20||!assigned.includes(n))||new Set(selected).size!==selected.length)throw Error('Select each assigned tray once, from 1 to 20.');
+ if(progress.inferred){
+  if(selected.length!==assigned.length)throw Error('This whole round is recorded packed, so all its trays are empty. Owner/Admin must correct the round status before reopening a tray.');
+  return rounds;
+ }
  const packed=[...selected].sort((a,b)=>a-b),before=progress.explicit?progress.packed:[],reopened=before.filter(n=>!packed.includes(n));
  if(reopened.length){if(!['owner','admin'].includes(role.toLowerCase()))throw Error('Only Owner/Admin can reopen trays already recorded packed.');if(request.reason.trim().length<5)throw Error('Enter a reason for reopening packed trays.');}
  if(!progress.explicit&&!packed.length)throw Error('Select at least one tray that has been fully packed and emptied.');

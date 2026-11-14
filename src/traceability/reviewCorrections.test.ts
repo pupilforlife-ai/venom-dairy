@@ -35,3 +35,9 @@ describe('reported paneer review corrections across views',()=>{
   expect(packingLabels(r,'MPAN101',qa.lots[0],{...qa.state,prefixes:{MPAN101:{value:'99',audit:[]}}}).packetBatchCode).toBe('99-1011A1');
  });
 });
+
+it('shows amber even when editing the latest claimant of a tray still unresolved on an earlier round',()=>{
+ const qa=makePaneerQaFixture(),first=qa.rounds[0],later={...qa.rounds[1],paneerCuttingDetails:{...qa.rounds[1].paneerCuttingDetails!,trayNumbers:[12],trays:1},paneerCuttingHistory:undefined};
+ const html=renderToStaticMarkup(createElement(PaneerCutDetailsForm,{phase:'after_cutting',roundId:later.id,rounds:[first,later],value:later.paneerCuttingDetails,onChange:()=>{},blockKg:80,packetBatchCode:'80-1011A2'}));
+ expect(html).toContain('trace-cut-tray-occupied');expect(html).toContain('In use · 091126 S1/R1');expect(html).toContain('Selected occupied trays:');
+});

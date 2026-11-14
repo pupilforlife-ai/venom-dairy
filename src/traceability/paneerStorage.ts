@@ -30,6 +30,16 @@ export function currentTrayRegister(rounds:ProductionRound[]) {
   return {number,round:last&&!trayIsReleased(last.round,number)?last.round:undefined,earlierConflicts:conflicts.filter(c=>c.number===number)};
  });
 }
+/** Picker warnings include every unresolved claim, even when this round is
+ * the latest claimant. Reusing a tray never silently clears the earlier claim. */
+export function trayPickerOccupants(rounds:ProductionRound[],roundId:string) {
+ const claims=trayClaims(rounds),occupied=new Map<number,ProductionRound[]>();
+ for(const claim of claims)if(claim.round.id!==roundId)for(const number of claim.numbers){
+  if(trayIsReleased(claim.round,number))continue;
+  occupied.set(number,[...(occupied.get(number)||[]),claim.round]);
+ }
+ return occupied;
+}
 export interface RetentionSample { roundId:string;lotId:string;lotCode:string;shift:number;round:number;pieces:number;batchCode:string;crateCode:string;recordedLocation:string;fingerprint:string }
 export interface RetentionTransfer { id:string;lotId:string;crateCode:string;from:'Container';to:'Coldroom';packaging:'Case';samples:RetentionSample[];recordedAt:string;recordedBy:string;reviews?:{at:string;by:string;reason:string;before:RetentionSample[];after:RetentionSample[]}[] }
 export function retentionSamples(rounds:ProductionRound[],lot:MilkLot,state:TraceState):RetentionSample[] {
