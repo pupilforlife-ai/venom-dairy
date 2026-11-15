@@ -132,3 +132,7 @@
 .trace-buttons button:disabled { opacity:.5; cursor:not-allowed; }
 
 .trace-cut-occupied-warning { border:1px solid #f59e0b; background:#fef3c7; color:#78350f; padding:8px; border-radius:7px; font-size:12px; overflow-wrap:anywhere; }
+
+/* Keep tray notices compact even inside the desktop table’s nowrap cells. */
+.trace-round-trays { min-width:0; max-width:20rem; white-space:normal; overflow-wrap:anywhere; }
+.trace-tray-warning,.trace-cut-occupied-warning,.trace-cut-note { max-width:100%; white-space:normal; overflow-wrap:anywhere; }

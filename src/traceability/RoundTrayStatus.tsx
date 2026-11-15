@@ -13,13 +13,13 @@ export default function RoundTrayStatus({round,rounds}:{round:ProductionRound;ro
  const owner=['owner','admin'].includes((localStorage.getItem('vejoy_user_role')||'').toLowerCase());
  function start(){setSelected(progress.packed);setExpected(trayPackingFingerprint(round));setId(globalThis.crypto?.randomUUID?.()||`tray-${Date.now()}-${Math.random().toString(36).slice(2)}`);setReason('');setMessage('');setOpen(true);}
  function save(){try{recordPaneerTrayPacking({id,roundId:round.id,expectedFingerprint:expected,packedNumbers:selected,reason});setOpen(false);setMessage('Tray packing saved.');}catch(e){setMessage((e as Error).message);}}
- return <div className="mt-1 rounded-lg border border-cyan-200 bg-cyan-50 p-2 text-xs text-cyan-900">
+ return <div className="trace-round-trays mt-1 rounded-lg border border-cyan-200 bg-cyan-50 p-2 text-xs text-cyan-900">
   <strong>Trays · {progress.packed.length}/{numbers.length} packed</strong>
   {!!progress.packed.length&&<p className="text-emerald-700">Packed: {progress.packed.join(', ')}{progress.inferred?' · from round status':''}</p>}
   {!!progress.pending.length&&<p className="font-semibold text-amber-800">Still waiting: {progress.pending.join(', ')}</p>}
   {progress.assignmentChanged&&<p className="text-amber-800">Tray numbers changed. Confirm packing for this assignment.</p>}
   <button type="button" className="mt-1 rounded border border-cyan-300 bg-white px-2 py-1.5 font-semibold text-cyan-900" onClick={start}>{progress.inferred?'Review tray packing':'Record trays packed'}</button>
-  {conflicts.map(c=><p className="text-amber-800" key={c.number}>Tray {c.number} reused by {c.later.milkLotCode} · S{c.later.shiftNumber}/R{c.later.roundNumber}. Check packing on this earlier round; the warning clears when this tray is recorded empty or the round is fully packed.</p>)}
+  {!!conflicts.length&&<p className="trace-tray-warning text-amber-800" title={conflicts.map(c=>`Tray ${c.number}: ${c.later.milkLotCode} S${c.later.shiftNumber}/R${c.later.roundNumber}`).join("; ")}>Trays in use: {conflicts.map(c=>c.number).join(", ")}</p>}
   {message&&!open&&<p role="status" className="text-emerald-700">{message}</p>}
   <Modal isOpen={open} onClose={()=>setOpen(false)} title={`Tray packing · S${round.shiftNumber}/R${round.roundNumber}`}>
    <div className="space-y-3"><p className="text-sm text-slate-600">{progress.inferred?'This round is fully packed: all assigned trays are empty and available. Earlier partial tray records remain in the history below.':'Tick only trays that have been fully packed and emptied. Leave partly packed or untouched trays unticked.'}</p>
