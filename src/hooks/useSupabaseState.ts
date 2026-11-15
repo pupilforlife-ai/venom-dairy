@@ -261,6 +261,19 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
 
     if (!client) return undefined;
 
+    const committed = (event: Event) => {
+      const row = (event as CustomEvent<AppStateRow<T>>).detail;
+      if (!row || row.key !== key || row.version < serverVersionRef.current) return;
+      if (pendingWritesRef.current > 0) {
+        if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) deferredRealtimeRowRef.current = row;
+      } else {
+        localWriteVersionRef.current += 1;
+        applyServerValue(row);
+        setHasLoaded(true);
+      }
+    };
+    window.addEventListener('vejoy:committed-app-state', committed);
+
     const channel = client
       .channel(`app-state-${key}`)
       .on(
@@ -268,7 +281,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
         { event: '*', schema: 'public', table: 'app_state', filter: `key=eq.${key}` },
         (payload) => {
           const row = payload.new as AppStateRow<T>;
-          if (!row?.key || row.key !== key) return;
+          if (!row?.key || row.key !== key || row.version < serverVersionRef.current) return;
           serverValueRef.current = row.value;
           if (pendingWritesRef.current === 0) {
             applyServerValue(row);
@@ -281,6 +294,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
 
     return () => {
       cancelled = true;
+      window.removeEventListener('vejoy:committed-app-state', committed);
       void client.removeChannel(channel);
     };
   }, [key]);

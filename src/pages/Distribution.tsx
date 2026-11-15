@@ -1,4 +1,9 @@
-import { useMemo, useState } from 'react';
+import { splitUnitStock,stockTransferAllocation } from '../traceability/unitStockTransfer';
+import MixedCaseReturns from '../traceability/MixedCaseReturns';
+import {runTraceCommand} from '../traceability/transport';
+import { mixedCaseStockIssues } from '../traceability/mixedCaseStock';
+import { useTraceability } from '../traceability/useTraceability';
+import { useMemo, useState, useRef } from 'react';
 import {
   ArrowRight,
   CheckCircle2,
@@ -60,12 +65,13 @@ interface DistributionCandidate {
 }
 
 interface DistributionCrumbingBatch {
+  latePackingHistory?: Array<{id:string}>;
   id: string;
   batchCode: string;
   type: 'SPP' | 'JP' | 'HCP';
   status: string;
   traysPacked: number;
-  packedSkus?: Array<{ sku: string; cases: number; loose: number; sourceBatchCodes?: string[]; packingRunId?: string }>;
+  packedSkus?: Array<{ sku: string; cases: number; loose: number; sourceBatchCodes?: string[]; packingRunId?: string; packetBatchCode?: string; caseBatchCode?: string }>;
   combinedPackingAllocations?: Array<{ primaryBatchId: string }>;
 }
 
@@ -180,6 +186,7 @@ function getReceiptDateForRound(
 }
 
 export default function Distribution() {
+  const {state:traceState}=useTraceability();
   const {
     finishedStock,
     milkLots,
@@ -210,7 +217,7 @@ export default function Distribution() {
   const candidates = useMemo<DistributionCandidate[]>(() => {
     const finishedBySku = new Map<string, ReconciledFinishedStockLine[]>();
     reconciledFinishedStock
-      .filter(stock => stock.status === 'awaiting_handover')
+      .filter(stock => (stock.status === 'awaiting_handover'||stock.status==='returned')&&stock.totalPackets+stock.cases+(stock.weightKg||0)+(stock.looseWeightKg||0)>0)
       .forEach(stock => {
         const definition = paneerSkuByCode[stock.sku];
         const caseWeight = definition?.packMode === 'weight_loose'
@@ -218,7 +225,7 @@ export default function Distribution() {
           : undefined;
         const milkLotCodes = getMilkLotCodesForSources(stock.sourceBatchCodes, productionRounds);
         const milkLotKey = milkLotCodes.length ? milkLotCodes.join('+') : 'unlinked';
-        const groupKey = `${stock.sku}::${caseWeight === undefined ? 'standard' : caseWeight.toFixed(2)}::${milkLotKey}::${stock.storageLocation}::${stock.finishedGoodsBatchCode || ''}::${stock.productionRemainderReviewId || ''}`;
+        const groupKey = `${stock.sku}::${caseWeight === undefined ? 'standard' : caseWeight.toFixed(2)}::${milkLotKey}::${stock.storageLocation}::${stock.finishedGoodsBatchCode || stock.caseBatchCode || ''}::${stock.productionRemainderReviewId || ''}`;
         const existing = finishedBySku.get(groupKey) || [];
         existing.push(stock);
         finishedBySku.set(groupKey, existing);
@@ -235,7 +242,7 @@ export default function Distribution() {
       const receiptDates = [...new Set(sourceRounds
         .map(round => getReceiptDateForRound(round, sku, milkLots, creamLots))
         .filter((date): date is string => Boolean(date)))];
-      const existingFinishedCodes = [...new Set(stocks.map(stock => stock.finishedGoodsBatchCode).filter(Boolean))] as string[];
+      const existingFinishedCodes = [...new Set(stocks.map(stock => stock.finishedGoodsBatchCode || stock.caseBatchCode).filter(Boolean))] as string[];
       const generatedFinishedCode = existingFinishedCodes.length === 1
         ? existingFinishedCodes[0]
         : receiptDates.length === 1
@@ -306,7 +313,7 @@ export default function Distribution() {
 
     const crumbingCandidates: DistributionCandidate[] = crumbingBatches
       .filter(batch => {
-        if (batch.status !== 'packed' || batch.traysPacked <= 0) return false;
+        if ((batch.status !== 'packed' || batch.traysPacked <= 0) && !batch.latePackingHistory?.length) return false;
         return hasDistributionPackingRecord(batch);
       })
       .map(batch => {
@@ -339,6 +346,7 @@ export default function Distribution() {
           sourceBatchCodes,
           milkLotCodes: sourceLotCodes,
           milkLotLabel: getMilkLotLabel(sourceLotCodes, batch.type === 'JP' ? 'Standalone JP (no milk lot)' : 'No milk lot linked'),
+          finishedGoodsBatchCode: [...new Set((batch.packedSkus||[]).map(p=>p.caseBatchCode).filter(Boolean))].length===1 ? batch.packedSkus?.find(p=>p.caseBatchCode)?.caseBatchCode : undefined,
           finishedGoodsBatchCodeMode: 'manual',
         };
       });
@@ -572,12 +580,28 @@ export default function Distribution() {
     setForm(emptyForm);
   };
 
-  const recordHandover = () => {
+  const handoverAttempt=useRef<{signature:string;id:string}>();
+  const handoverSaving=useRef(false);
+  const recordHandover = async () => {
+    if(handoverSaving.current)return;
+    try {
+      if(selectedCandidate?.sourceType==='finished_stock'&&selectedCandidate.sku&&paneerSkuByCode[selectedCandidate.sku]){
+        const payload={form,candidate:selectedCandidate},signature=JSON.stringify(payload);
+        if(handoverAttempt.current?.signature!==signature)handoverAttempt.current={signature,id:crypto.randomUUID()};
+        handoverSaving.current=true;
+        await runTraceCommand('handover',payload,handoverAttempt.current.id);
+        handoverAttempt.current=undefined;showToast('success','Paneer handover confirmed by server.');closeModal();return;
+      }
+      performHandover();
+    }catch(error){showToast('error',(error as Error).message);}finally{handoverSaving.current=false;}
+  };
+  const performHandover = () => {
     const productName = form.productName.trim();
     const batchCode = form.batchCode.trim();
     const finishedGoodsBatchCode = form.finishedGoodsBatchCode.trim();
     const handedOverBy = form.handedOverBy.trim();
     const isFinishedStockCandidate = selectedCandidate?.sourceType === 'finished_stock';
+    const linkedAllocations:NonNullable<DistributionHandover['stockAllocations']>=[];
     const now = new Date().toISOString();
     const recordId = `dist-${crypto.randomUUID()}`;
     if (!productName || !batchCode || !handedOverBy || (!reviewOnly && (!form.destination || !Number.isFinite(form.quantity) || form.quantity <= 0))) {
@@ -594,8 +618,9 @@ export default function Distribution() {
       showToast('error', 'Owner/admin review is required before a finished-goods batch can be handed over');
       return;
     }
-    if (!reviewOnly && selectedBatchDefinition?.prefix && !finishedGoodsBatchCode.startsWith(`${selectedBatchDefinition.prefix}_`)) {
-      showToast('error', `The finished-goods code for ${selectedCandidate?.sku} must start with ${selectedBatchDefinition.prefix}_`);
+    const expectedPrefix = selectedCandidate?.sku ? traceState.prefixes[selectedCandidate.sku]?.value || selectedBatchDefinition?.prefix : undefined;
+    if (!reviewOnly && expectedPrefix && !finishedGoodsBatchCode.startsWith(`${expectedPrefix}_`) && !finishedGoodsBatchCode.startsWith(`${expectedPrefix}-`)) {
+      showToast('error', `The finished-goods code for ${selectedCandidate?.sku} must start with ${expectedPrefix}-`);
       return;
     }
     const reviewMethod: DistributionHandover['finishedGoodsBatchCodeReviewMethod'] = selectedCandidate?.finishedGoodsBatchCode
@@ -724,6 +749,8 @@ export default function Distribution() {
         status: 'awaiting_handover' | 'handed_over' | 'incorrectly_recorded',
       ) => {
         addFinishedStock({
+          mixedCaseId:stock.mixedCaseId,mixedCaseCount:stock.mixedCaseCount,mixedCaseParts:stock.mixedCaseParts,sourceStockId:stock.id,
+          packetBatchCode:stock.packetBatchCode,caseBatchCode:stock.caseBatchCode,traceabilityProductionDate:stock.traceabilityProductionDate,
           sku: stock.sku,
           productName: stock.productName,
           packingRunId,
@@ -821,24 +848,12 @@ export default function Distribution() {
         }
 
         if (selectedFinishedDefinition?.packMode === 'units') {
-          const transferredCases = Math.min(stock.cases || 0, casesLeftToTransfer);
-          const transferredLoose = Math.min(stock.loosePackets || 0, looseLeftToTransfer);
-          casesLeftToTransfer -= transferredCases;
-          looseLeftToTransfer -= transferredLoose;
+          const split=splitUnitStock(stock,casesLeftToTransfer,looseLeftToTransfer,selectedFinishedDefinition.unitsPerCase||0);
+          const transferredCases=split.transferred.cases,transferredLoose=split.transferred.loosePackets;
+          casesLeftToTransfer-=transferredCases;looseLeftToTransfer-=transferredLoose;
+          if(transferredCases||transferredLoose)linkedAllocations.push(stockTransferAllocation(stock,transferredCases,transferredLoose));
           if (transferredCases <= 0 && transferredLoose <= 0) { classifyUntouchedLine(stock); return; }
-
-          const remainingCases = (stock.cases || 0) - transferredCases;
-          const remainingLoose = (stock.loosePackets || 0) - transferredLoose;
-          const transferredQuantities = {
-            cases: transferredCases,
-            loosePackets: transferredLoose,
-            totalPackets: transferredCases * (selectedFinishedDefinition.unitsPerCase || 0) + transferredLoose,
-          };
-          const remainingQuantities = {
-            cases: remainingCases,
-            loosePackets: remainingLoose,
-            totalPackets: remainingCases * (selectedFinishedDefinition.unitsPerCase || 0) + remainingLoose,
-          };
+          const transferredQuantities=split.transferred,remainingQuantities=split.remaining,remainingCases=split.remaining.cases,remainingLoose=split.remaining.loosePackets;
           const hasRemaining = remainingCases > 0 || remainingLoose > 0;
 
           if (!hasRemaining) {
@@ -983,6 +998,7 @@ export default function Distribution() {
       : '';
     const record: DistributionHandover = {
       id: recordId,
+      stockAllocations:linkedAllocations.length?linkedAllocations:undefined,
       recordKind: reviewOnly ? 'balance_review' : 'handover',
       sku: selectedCandidate?.sku,
       sourceBatchCodes: selectedCandidate?.sourceBatchCodes,
@@ -1027,8 +1043,7 @@ export default function Distribution() {
       notes: [sourceNote, codeReviewNote, extraNote, partialDispositionNote, form.notes.trim()].filter(Boolean).join(' · ') || undefined,
     };
     setHandovers(current => [...current, record]);
-    showToast('success', reviewOnly ? `${productName} balance review saved` : `${productName} recorded as handed over to ${record.destination}`);
-    closeModal();
+    showToast('success', reviewOnly ? `${productName} balance review saved` : `${productName} recorded as handed over to ${record.destination}`);closeModal();
   };
 
   const renderCandidateGroups = (groups: Array<[string, DistributionCandidate[]]>) => groups.map(([milkLotLabel, group]) =>
@@ -1075,7 +1090,7 @@ export default function Distribution() {
         </div>
         {readyCandidates.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">No new products awaiting handover. Reviewed balances are in the Still in Production tab.</p> : <div className="space-y-4">{renderCandidateGroups(candidateGroups)}</div>}
       </section>,
-        history: <DistributionRecords groups={handoverGroups} />,
+        history: <><DistributionRecords groups={handoverGroups} /><MixedCaseReturns/></>,
 
         production: <section className="rounded-xl border border-amber-200 bg-white p-4" aria-label="Still in production">
         <h3 className="text-sm font-semibold text-slate-900">Still in production</h3>
@@ -1096,7 +1111,7 @@ export default function Distribution() {
           <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
             <label className="text-xs font-semibold uppercase tracking-wide text-emerald-900">Finished-goods batch code</label>
             <input value={form.finishedGoodsBatchCode} disabled={!finishedGoodsBatchCodeEditable} onChange={event => setForm({ ...form, finishedGoodsBatchCode: event.target.value })} className="mt-1 w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 font-mono text-sm disabled:bg-emerald-50" placeholder="e.g. 11_011026" />
-            <p className="mt-1 text-[11px] text-emerald-800">{selectedBatchDefinition?.mode === 'receipt_date' && selectedCandidate?.finishedGoodsBatchCode ? `Generated from the receipt date: ${selectedCandidate.receiptDates?.join(', ') || 'recorded source date'}.` : selectedCandidate?.receiptDates && selectedCandidate.receiptDates.length > 1 ? 'This SKU combines multiple receipt dates; an owner/admin must assign one finished-goods code.' : selectedBatchDefinition?.prefix ? `Owner/admin must assign this code using prefix ${selectedBatchDefinition.prefix}.` : 'Owner/admin assigns this code for products without one source receipt date.'}{!canAssignManualBatchCode && ' You can view it, but only an owner or admin can enter a manual code.'}</p>
+            <p className="mt-1 text-[11px] text-emerald-800">{selectedCandidate?.stockLines?.some(stock => stock.caseBatchCode) ? 'Saved case code from the start of production date and contributing shift; source packet codes remain in the history.' : selectedBatchDefinition?.mode === 'receipt_date' && selectedCandidate?.finishedGoodsBatchCode ? `Generated from the receipt date: ${selectedCandidate.receiptDates?.join(', ') || 'recorded source date'}.` : selectedCandidate?.receiptDates && selectedCandidate.receiptDates.length > 1 ? 'This SKU combines multiple receipt dates; an owner/admin must assign one finished-goods code.' : selectedBatchDefinition?.prefix ? `Owner/admin must assign this code using prefix ${selectedBatchDefinition.prefix}.` : 'Owner/admin assigns this code for products without one source receipt date.'}{!canAssignManualBatchCode && ' You can view it, but only an owner or admin can enter a manual code.'}</p>
             {!canAssignManualBatchCode && <p className="mt-2 text-xs font-semibold text-amber-800">Owner/admin review is required before this handover can be confirmed.</p>}
           </div>
           {!reviewOnly && <>

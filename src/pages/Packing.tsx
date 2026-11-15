@@ -1,3 +1,4 @@
+import {runTraceCommand} from '../traceability/transport';
 import { useMemo, useState } from 'react';
 import {
   Package,
@@ -20,7 +21,7 @@ export default function Packing() {
   const { showToast } = useToast();
   const currentActor = typeof window === 'undefined' ? 'System' : window.localStorage.getItem('vejoy_user_username') || window.localStorage.getItem('vejoy_user_role') || 'User';
   const awaitingFinishedStock = useMemo(
-    () => reconcileFinishedStock(productionRounds, finishedStock).filter(stock => stock.status === 'awaiting_handover'),
+    () => reconcileFinishedStock(productionRounds, finishedStock).filter(stock => (stock.status === 'awaiting_handover'||stock.status==='returned')),
     [finishedStock, productionRounds],
   );
 
@@ -57,7 +58,7 @@ export default function Packing() {
       ? getAllowedPaneerSkus(selectedSourceRound.type, selectedSourceRound.cuttingType)
       : paneerSkuDefinitions;
 
-  const handlePack = () => {
+  const handlePack = async () => {try {
     if (!packForm.lotId || (!packForm.cases && !packForm.loosePackets && !packForm.looseWeightKg && !packForm.weightKg)) {
       showToast('error', 'Please fill in all required fields');
       return;
@@ -85,70 +86,11 @@ export default function Packing() {
       return;
     }
 
-    const packingRecordedAt = new Date().toISOString();
-    const packingRunId = `pk-${Date.now()}`;
-
-    // Create finished stock. The same packingRunId is stored on the source
-    // round so Inventory, Distribution, and the production board share one
-    // traceable stock record.
-    addFinishedStock({
-      sku: packForm.sku,
-      productName: definition.productName,
-      packingRunId,
-      cases: packForm.cases,
-      loosePackets: packForm.loosePackets,
-      totalPackets,
-      storageLocation: 'Dairy Container (Finished Stock)',
-      status: 'awaiting_handover',
-      createdAt: packingRecordedAt,
-      sourceBatchCodes: [lot.sourceBatchCode],
-      ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightKg } : definition.packMode === 'weight_loose' ? { caseWeightKg, looseWeightKg: packForm.looseWeightKg } : {}),
-    });
-
-    // Update intermediate lot
-    const newQuantity = lot.currentQuantity - totalWeightKg;
-    updateIntermediateLot(lot.id, {
-      currentQuantity: newQuantity,
-      status: newQuantity <= 0 ? 'consumed' : 'available',
-    });
-
-    // Keep every packing session on the source round. Previously this
-    // replaced the earlier sessions whenever the final balance reached zero,
-    // which made the board and stock totals disagree.
-    const round = productionRounds.find((item) => item.id === lot.sourceBatchId);
-    if (round) {
-      const packedEntry = {
-        sku: packForm.sku,
-        cases: packForm.cases,
-        loose: packForm.loosePackets,
-        packingRunId,
-        recordedBy: currentActor,
-        recordedAt: packingRecordedAt,
-        ...(definition.packMode === 'weight_only'
-          ? { weightKg: totalWeightKg }
-          : definition.packMode === 'weight_loose'
-            ? { caseWeightKg, looseWeightKg: packForm.looseWeightKg }
-            : {}),
-      };
-      recordProductionRoundActivity(round.id, {
-        status: newQuantity <= 0 ? 'packed' : round.status,
-        packedSkus: [...(round.packedSkus || []), packedEntry],
-        remainingBalance: newQuantity,
-        intermediateBalance: newQuantity,
-      }, {
-        type: 'packing_recorded',
-        stage: 'Packing Recorded',
-        occurredAt: packingRecordedAt,
-        details: `${packedEntry.sku} · ${packedEntry.cases} cases + ${packedEntry.loose} loose · Balance ${newQuantity.toFixed(2)} kg`,
-        recordedBy: currentActor,
-        source: 'workflow',
-      });
-    }
-
+    await runTraceCommand('intermediate_packing',{...packForm,expectedLot:lot});
     showToast('success', `Packed ${packForm.cases} cases + ${packForm.loosePackets} loose packets of ${definition.productName}`);
     setShowPackModal(false);
     setPackForm({ lotId: '', sku: '', cases: 0, caseWeightKg: 0, loosePackets: 0, looseWeightKg: 0, weightKg: 0, notes: '' });
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
   // Check if selected lot is FIFO compliant
   const isFifoCompliant = () => {

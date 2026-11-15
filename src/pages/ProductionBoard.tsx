@@ -1,3 +1,21 @@
+import PaneerScrambleReconciliation from '../traceability/PaneerScrambleReconciliation';
+import { loosePackingBalance } from '../traceability/mixedPaneerCases';
+import { correctMixedSourceStock,hasMixedCaseSourceHistory } from '../traceability/mixedCaseStock';
+import { packingSourceKey } from '../traceability/mixedPaneerCases';
+import PaneerAfterCutting from '../traceability/PaneerAfterCutting';
+import PaneerTrayRetentionPanel from '../traceability/PaneerTrayRetentionPanel';
+import RoundTrayStatus from '../traceability/RoundTrayStatus';
+import { cuttingStorageDefaults } from '../traceability/paneerStorage';
+import RoundLooseStatus from '../traceability/RoundLooseStatus';
+import MixedPaneerCases from '../traceability/MixedCasePanel';
+import PaneerCutDetailsForm from '../traceability/PaneerCutDetailsForm';
+import { emptyRoundTrace } from '../traceability/domain';
+import { cuttingSaveDecision, retentionPacketBatchCode, validatePaneerCutting } from '../traceability/paneerJourney';
+import PaneerTraceReview from '../traceability/PaneerTraceReview';
+import PaneerBagStatus from '../traceability/PaneerBagStatus';
+import PackingLabelPreview from '../traceability/PackingLabelPreview';
+import { labelsForPacking } from '../traceability/labels';
+import { useTraceability } from '../traceability/useTraceability';
 import { Fragment, useMemo, useState, useEffect, useRef } from 'react';
 import {
   Filter,
@@ -117,6 +135,7 @@ function cipCycleLabel(record: CipRecord) {
 }
 
 export default function ProductionBoard() {
+  const {state:traceState}=useTraceability();
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots, finishedStock,
     cipRecords,
@@ -145,7 +164,10 @@ export default function ProductionBoard() {
   const [activeTab, setActiveTab] = useState<'paneer' | 'halloumi' | 'amassi' | 'butter' | 'ghee' | 'crumbing' | 'breads'>('paneer');
   const [filters, setFilters] = useState({ milkLot: '', status: 'all', type: 'all', shift: 'all', balance: 'all', workflow: 'all', query: '' });
   const [showFilters, setShowFilters] = useState(false);
-  const [selectedRound, setSelectedRound] = useState<string | null>(null);
+  const [selectedRound, setSelectedRoundState] = useState<string | null>(null);
+  const paneerFormAttempts=useRef<Record<string,{operationId:string;expectedRound:ProductionRound}>>({});
+  const rememberPaneerForm=(id:string)=>{const round=productionRounds.find(r=>r.id===id);if(round)paneerFormAttempts.current[id]={operationId:crypto.randomUUID(),expectedRound:round};};
+  const setSelectedRound=(id:string|null)=>{if(id)rememberPaneerForm(id);setSelectedRoundState(id);};
   const [showNewRoundModal, setShowNewRoundModal] = useState(false);
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
   const [showDailyCipModal, setShowDailyCipModal] = useState(false);
@@ -157,6 +179,7 @@ export default function ProductionBoard() {
   const [showCipDetailsModal, setShowCipDetailsModal] = useState(false);
   const [selectedCipRecordId, setSelectedCipRecordId] = useState<string | null>(null);
   const [showCutModal, setShowCutModal] = useState(false);
+  const packingCorrectionQuote=useRef<string|null>(null);
   const [showPackModal, setShowPackModal] = useState(false);
   const [isSavingPacking, setIsSavingPacking] = useState(false);
   const packingInFlight = useRef(false);
@@ -208,12 +231,6 @@ export default function ProductionBoard() {
     reason: '',
   });
   const [editingPackIndex, setEditingPackIndex] = useState<number | null>(null);
-  
-  // PAN111 form state
-  const [pan111Form, setPan111Form] = useState({
-    weight: 0,
-    recordedBy: '',
-  });
   
   // Cream form state
   const [creamForm, setCreamForm] = useState({
@@ -388,7 +405,7 @@ export default function ProductionBoard() {
     setShowTemperatureModal(true);
   };
 
-  const handleRecordTemperature = () => {
+  const handleRecordTemperature = async () => {try {
     if (!selectedRound || startingTemperature === null || !selectedVat) {
       showToast('error', 'Please enter the starting temperature');
       return;
@@ -403,8 +420,9 @@ export default function ProductionBoard() {
     }
 
     const occurredAt = new Date().toISOString();
-    recordProductionRoundActivity(selectedRound, {
+    await recordProductionRoundActivity(selectedRound, {
       vat: selectedVat,
+      traceabilityProductionDate: traceState.rounds[round.id]?.value.productionDate || round.traceabilityProductionDate || traceState.lots[round.milkLotId]?.value.productionDate || milkLots.find(lot=>lot.id===round.milkLotId)?.traceabilityProductionDate || undefined,
       status: 'in_production',
       actualInput: round.plannedInput,
       startingTemperature: startingTemperature
@@ -415,34 +433,34 @@ export default function ProductionBoard() {
       details: `${selectedVat === 'vat2' ? 'Vat 2' : 'Vat 3'} · Starting temp: ${startingTemperature}°C · ${round.plannedInput} L`,
       recordedBy: currentActor,
       source: 'workflow',
-    });
+    }, paneerFormAttempts.current[selectedRound]);
     showToast('success', `Started production in ${selectedVat === 'vat2' ? 'Vat 2' : 'Vat 3'} at ${startingTemperature}°C`);
     setShowTemperatureModal(false);
     setStartingTemperature(null);
     setSelectedVat(null);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleStartCoagulation = (roundId: string) => {
-    recordProductionRoundActivity(roundId, { status: 'coagulation' }, {
+  const handleStartCoagulation = async (roundId: string) => {try {
+    await recordProductionRoundActivity(roundId, { status: 'coagulation' }, {
       type: 'coagulation', stage: 'Coagulation', details: 'Coagulation started', recordedBy: currentActor, source: 'workflow',
     });
     showToast('success', 'Started coagulation');
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleStartPressing = (roundId: string) => {
+  const handleStartPressing = async (roundId: string) => {try {
     const occurredAt = new Date().toISOString();
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: 'pressing',
       pressingStartedAt: occurredAt
     }, {
       type: 'pressing', stage: 'Pressing', occurredAt, details: '30 min timer started', recordedBy: currentActor, source: 'workflow',
     });
     showToast('success', 'Started pressing (30 min)');
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleStartCooling = (roundId: string, location: 'tank' | 'chiller') => {
+  const handleStartCooling = async (roundId: string, location: 'tank' | 'chiller') => {try {
     const occurredAt = new Date().toISOString();
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       coolingLocation: location,
       status: 'cooling',
       coolingStartedAt: occurredAt
@@ -455,25 +473,28 @@ export default function ProductionBoard() {
       source: 'workflow',
     });
     showToast('success', `Started cooling in ${location === 'tank' ? 'Cooling Tank (90min)' : 'Chiller (120min)'}`);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleStartResting = (roundId: string) => {
+  const handleStartResting = async (roundId: string) => {try {
     const occurredAt = new Date().toISOString();
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: 'resting',
       restingStartedAt: occurredAt
     }, {
       type: 'resting', stage: 'Resting', occurredAt, details: '90 min timer started', recordedBy: currentActor, source: 'workflow',
     });
     showToast('success', 'Started resting (90min)');
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleReadyForCutting = (roundId: string) => {
-    recordProductionRoundActivity(roundId, { status: 'ready_cutting' }, {
+  const [cutTraceForm,setCutTraceForm]=useState(emptyRoundTrace().cutting);
+  const [cutCheckWarning,setCutCheckWarning]=useState(false),[cutPendingAcknowledged,setCutPendingAcknowledged]=useState(false);
+
+  const handleReadyForCutting = async (roundId: string) => {try {
+    await recordProductionRoundActivity(roundId, { status: 'ready_cutting' }, {
       type: 'ready_cutting', stage: 'Ready for Cutting', details: 'Paneer confirmed ready to cut', recordedBy: currentActor, source: 'workflow',
     });
     showToast('success', 'Ready for cutting');
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
   const openCutModal = (roundId: string) => {
     const round = productionRounds.find(item => item.id === roundId);
@@ -493,10 +514,12 @@ export default function ProductionBoard() {
       numberOfBlocks: isFinalCut ? round.storedNumberOfBlocks || recordedWeights.length : 0,
       blockWeights: isFinalCut ? [...recordedWeights] : [],
     });
+    setCutCheckWarning(false);setCutPendingAcknowledged(false);
+    setCutTraceForm(cuttingStorageDefaults(round.milkLotCode,round.paneerCuttingDetails||traceState.rounds[round.id]?.value.cutting));
     setShowCutModal(true);
   };
 
-  const handleCut = (roundId: string) => {
+  const handleCut = async (roundId: string) => {
     const round = productionRounds.find(r => r.id === roundId);
     if (!round) return;
 
@@ -507,16 +530,23 @@ export default function ProductionBoard() {
       return;
     }
 
+    const cuttingDetails={...cuttingStorageDefaults(round.milkLotCode,cutTraceForm),samplePacketBatchCode:cutTraceForm.samplePacketBatchCode||retentionPacketBatchCode(round,milkLots.find(l=>l.id===round.milkLotId),traceState),pendingAcknowledged:cutPendingAcknowledged};
+    try {validatePaneerCutting(cuttingDetails,totalWeight);}catch(error){showToast('error',(error as Error).message);return;}
+    const checkDecision=cuttingSaveDecision(cuttingDetails,cutPendingAcknowledged,'weighing');
+    if(!checkDecision.canSave){setCutCheckWarning(true);return;}
+    cuttingDetails.pendingAcknowledged=checkDecision.missing.length>0&&cutPendingAcknowledged;
+
     if (cutForm.cuttingType === 'SPP pieces') {
       if (!cutForm.cutBy || cutForm.numberOfBlocks <= 0 || totalWeight <= 0) {
         showToast('error', 'Enter cutter, block count, and block weights for SPP');
         return;
       }
-      recordProductionRoundActivity(roundId, {
+      await recordProductionRoundActivity(roundId, {
         status: 'spp_pending',
         cutBy: cutForm.cutBy,
         numberOfBlocks: cutForm.numberOfBlocks,
         blockWeights: cutForm.blockWeights,
+        paneerCuttingDetails: cuttingDetails,
         outputWeight: totalWeight,
         cuttingType: 'SPP pieces',
       }, {
@@ -525,7 +555,7 @@ export default function ProductionBoard() {
         details: `${cutForm.numberOfBlocks} blocks · ${totalWeight.toFixed(2)} kg · By ${cutForm.cutBy}`,
         recordedBy: currentActor,
         source: 'workflow',
-      });
+      }, paneerFormAttempts.current[roundId]);
       setSppForm({ cutBy: cutForm.cutBy, numberOfBlocks: cutForm.numberOfBlocks, recordedWeight: 0, balanceDisposition: '', balanceWeight: 0 });
       setShowCutModal(false);
       setShowSppModal(true);
@@ -536,12 +566,13 @@ export default function ProductionBoard() {
     const isFinalCutAfterStorage = round.status === 'clingwrapped';
     if (isClingwrapStorage) {
       const occurredAt = new Date().toISOString();
-      recordProductionRoundActivity(roundId, {
+      await recordProductionRoundActivity(roundId, {
         status: 'clingwrapped',
         cutBy: cutForm.cutBy,
         cuttingType: 'Clingwrapped / Stored',
         numberOfBlocks: cutForm.numberOfBlocks,
         blockWeights: cutForm.blockWeights,
+        paneerCuttingDetails: cuttingDetails,
         outputWeight: totalWeight,
         remainingBalance: totalWeight,
         storedCutBy: cutForm.cutBy,
@@ -556,19 +587,20 @@ export default function ProductionBoard() {
         details: `${cutForm.numberOfBlocks} blocks · ${totalWeight.toFixed(2)} kg · By ${cutForm.cutBy}`,
         recordedBy: currentActor,
         source: 'workflow',
-      });
+      }, paneerFormAttempts.current[roundId]);
       showToast('success', `Stored ${cutForm.numberOfBlocks} clingwrapped blocks (${totalWeight.toFixed(2)} kg)`);
       setShowCutModal(false);
       setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] });
       return;
     }
     
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: 'cut',
       cutBy: cutForm.cutBy,
       cuttingType: cutForm.cuttingType,
       numberOfBlocks: cutForm.numberOfBlocks,
       blockWeights: cutForm.blockWeights,
+      paneerCuttingDetails: cuttingDetails,
       outputWeight: totalWeight,
       remainingBalance: totalWeight,
       ...(isFinalCutAfterStorage ? {
@@ -584,14 +616,14 @@ export default function ProductionBoard() {
       details: `${cutForm.cuttingType} · ${cutForm.numberOfBlocks} blocks · ${totalWeight.toFixed(2)} kg · By ${cutForm.cutBy}`,
       recordedBy: currentActor,
       source: 'workflow',
-    });
+    }, paneerFormAttempts.current[roundId]);
 
     showToast('success', `Cut recorded: ${cutForm.numberOfBlocks} blocks, ${totalWeight.toFixed(2)} kg`);
     setShowCutModal(false);
     setCutForm({ cutBy: '', cuttingType: '', numberOfBlocks: 0, blockWeights: [] });
   };
 
-  const handleRecordSppWeight = (roundId: string) => {
+  const handleRecordSppWeight = async (roundId: string) => {try {
     const round = productionRounds.find(item => item.id === roundId);
     if (!round) return;
     const totalWeight = (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
@@ -604,7 +636,7 @@ export default function ProductionBoard() {
       showToast('error', 'Record how the balance Paneer was used');
       return;
     }
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: 'cut',
       cutBy: sppForm.cutBy,
       numberOfBlocks: sppForm.numberOfBlocks,
@@ -621,10 +653,10 @@ export default function ProductionBoard() {
       details: `${sppForm.recordedWeight.toFixed(2)} kg for SPP · ${Math.max(0, balance).toFixed(2)} kg balance · By ${sppForm.cutBy}`,
       recordedBy: currentActor,
       source: 'workflow',
-    });
+    }, paneerFormAttempts.current[roundId]);
     setShowSppModal(false);
     showToast('success', `Recorded ${sppForm.recordedWeight.toFixed(2)} kg for SPP`);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
   const openSpoilageModal = (roundId: string) => {
     const round = productionRounds.find(item => item.id === roundId);
@@ -640,7 +672,7 @@ export default function ProductionBoard() {
     setShowSpoilageModal(true);
   };
 
-  const handleReportSpoilage = (roundId: string) => {
+  const handleReportSpoilage = async (roundId: string) => {try {
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.locked || ['cancelled', 'handed_over', 'spoiled', 'spoilage_pending'].includes(round.status)) return;
     if (spoilageForm.quantity <= 0 || !spoilageForm.reason.trim() || !spoilageForm.reportedBy.trim()) {
@@ -648,7 +680,7 @@ export default function ProductionBoard() {
       return;
     }
     const reportedAt = new Date().toISOString();
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: 'spoilage_pending',
       locked: false,
       spoilageApprovalStatus: 'pending',
@@ -670,9 +702,9 @@ export default function ProductionBoard() {
     setShowSpoilageModal(false);
     setSpoilageForm({ quantity: 0, unit: 'kg', reason: '', notes: '', reportedBy: '' });
     showToast('success', `${roundDisplayCode(round)} spoilage reported for owner approval`);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleApproveSpoilage = (roundId: string) => {
+  const handleApproveSpoilage = async (roundId: string) => {try {
     if (!isOwner) return;
     const round = productionRounds.find(item => item.id === roundId);
     const quantity = round?.spoilageRequestedQuantity || 0;
@@ -688,7 +720,7 @@ export default function ProductionBoard() {
       batchCode: `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}`,
       isRecoverable: false,
     });
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: 'spoiled',
       locked: true,
       completedAt: approvedAt,
@@ -701,14 +733,14 @@ export default function ProductionBoard() {
       recordedBy: currentActor, source: 'approval',
     });
     showToast('success', `${roundDisplayCode(round)} spoilage approved and recorded in Waste & Yield`);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleRejectSpoilage = (roundId: string) => {
+  const handleRejectSpoilage = async (roundId: string) => {try {
     if (!isOwner) return;
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.spoilageApprovalStatus !== 'pending') return;
     const rejectedAt = new Date().toISOString();
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: round.spoilagePreviousStatus || 'resting',
       locked: false,
       spoilageApprovalStatus: 'rejected',
@@ -720,21 +752,21 @@ export default function ProductionBoard() {
       recordedBy: currentActor, source: 'approval',
     });
     showToast('success', `${roundDisplayCode(round)} spoilage rejected; round returned to its previous stage`);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleFreeze = (roundId: string) => {
-    recordProductionRoundActivity(roundId, { status: 'frozen' }, {
+  const handleFreeze = async (roundId: string) => {try {
+    await recordProductionRoundActivity(roundId, { status: 'frozen' }, {
       type: 'frozen', stage: 'Frozen', details: 'Moved to freezer', recordedBy: currentActor, source: 'workflow',
     });
     showToast('success', 'Moved to freezer');
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleStoreInChiller = (roundId: string) => {
-    recordProductionRoundActivity(roundId, { status: 'chiller_storage' }, {
+  const handleStoreInChiller = async (roundId: string) => {try {
+    await recordProductionRoundActivity(roundId, { status: 'chiller_storage' }, {
       type: 'chiller_storage', stage: 'Chiller Storage', details: 'Restaurant blocks stored fresh in the chiller', recordedBy: currentActor, source: 'workflow',
     });
     showToast('success', 'Restaurant blocks stored in chiller');
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
   const handlePack = async (roundId: string) => {
     if (packingInFlight.current) return;
@@ -763,6 +795,7 @@ export default function ProductionBoard() {
     // balance before applying the corrected values.
     const existingPacked = round.packedSkus || [];
     const previousPack = editingPackIndex !== null ? existingPacked[editingPackIndex] : undefined;
+    if(editingPackIndex!==null&&JSON.stringify(previousPack)!==packingCorrectionQuote.current){showToast('error','This packing entry changed. Reopen Correct before saving.');return;}
     const currentBalance = calculatePaneerRemainingBalance(
       round.outputWeight,
       round.sppRecordedWeight,
@@ -778,7 +811,7 @@ export default function ProductionBoard() {
         return;
       }
       const occurredAt = new Date().toISOString();
-      recordProductionRoundActivity(roundId, {
+      await recordProductionRoundActivity(roundId, {
         status: 'pan111_pending',
         locked: false,
         pan111ApprovalStatus: 'pending',
@@ -814,97 +847,7 @@ export default function ProductionBoard() {
         showToast('success', `Packing confirmed by server. Remaining balance: ${(committed.remainingBalance || 0).toFixed(2)} kg`);
         return;
       }
-      // Only disconnected/browser-demo mode uses the original local writes.
-
-    const sourceBatchCode = round.batchCode || round.sourceBatchCode || `${round.milkLotCode}/S${round.shiftNumber}/R${round.roundNumber}/${round.type}`;
-    const previousPackingRunId = previousPack?.packingRunId;
-    const packingRunId = previousPackingRunId || `pb-${round.id}-${Date.now()}`;
-    const packingRecordedAt = new Date().toISOString();
-
-    // Add to packed SKUs array. The packing run ID links this round entry to
-    // the corresponding finished-stock row, so corrections do not duplicate
-    // inventory.
-    const replacement = {
-      sku: packForm.sku,
-      cases: definition.packMode === 'weight_only' ? 0 : packForm.cases,
-      loose: definition.packMode === 'weight_only' ? 0 : packForm.loose,
-      packingRunId,
-      recordedBy: currentActor,
-      recordedAt: packingRecordedAt,
-      ...(caseWeightKg !== undefined ? { caseWeightKg } : {}),
-      ...(definition.packMode === 'weight_loose' ? { looseWeightKg: packForm.looseWeightKg } : {}),
-      ...(definition.packMode === 'weight_only' ? { weightKg: totalWeightPacked, reason: packForm.reason.trim() } : {}),
-    };
-    const newPackedSkus = editingPackIndex !== null
-      ? existingPacked.map((pack, index) => index === editingPackIndex ? replacement : pack)
-      : [...existingPacked, replacement];
-
-    // Determine new status - mark as packed if balance is 0 or negative
-    const newStatus = newBalance <= 0 ? 'packed' : round.status;
-
-    const finishedStockInput = {
-      sku: packForm.sku,
-      productName: definition.productName,
-      packingRunId,
-      cases: definition.packMode === 'weight_only' ? 0 : packForm.cases,
-      loosePackets: definition.packMode === 'weight_only' ? 0 : packForm.loose,
-      totalPackets: definition.packMode === 'units'
-        ? packForm.cases * (definition.unitsPerCase || 0) + packForm.loose
-        : 0,
-      storageLocation: 'Dairy Container (Finished Stock)',
-      status: 'awaiting_handover' as const,
-      createdAt: packingRecordedAt,
-      sourceBatchCodes: [sourceBatchCode],
-      ...(definition.packMode === 'weight_only'
-        ? { weightKg: totalWeightPacked }
-        : definition.packMode === 'weight_loose'
-          ? { looseWeightKg: packForm.looseWeightKg, caseWeightKg }
-          : {}),
-    };
-
-    const existingFinishedStock = previousPackingRunId
-      ? finishedStock.find((stock) => stock.packingRunId === previousPackingRunId)
-      : undefined;
-    if (existingFinishedStock) {
-      updateFinishedStock(existingFinishedStock.id, {
-        ...finishedStockInput,
-        status: existingFinishedStock.status,
-        createdAt: existingFinishedStock.createdAt,
-      });
-    } else {
-      addFinishedStock(finishedStockInput);
-    }
-
-    const packingDetails = definition.packMode === 'weight_only'
-      ? `${packForm.sku} · ${totalWeightPacked.toFixed(2)} kg`
-      : definition.packMode === 'weight_loose'
-        ? `${packForm.sku} · ${packForm.cases} cases × ${caseWeightKg?.toFixed(2)} kg/case + ${packForm.looseWeightKg.toFixed(2)} kg loose`
-        : `${packForm.sku} · ${packForm.cases} cases + ${packForm.loose} loose`;
-    recordProductionRoundActivity(roundId, {
-      status: newStatus,
-      packedSkus: newPackedSkus,
-      remainingBalance: newBalance,
-    }, {
-      type: editingPackIndex !== null ? 'packing_corrected' : 'packing_recorded',
-      stage: editingPackIndex !== null ? 'Packing Corrected' : 'Packing Recorded',
-      occurredAt: packingRecordedAt,
-      details: `${packingDetails} · Balance ${newBalance.toFixed(2)} kg`,
-      recordedBy: currentActor,
-      source: editingPackIndex !== null ? 'correction' : 'workflow',
-    });
-
-    if (newBalance < 0) {
-      showToast('info', `⚠️ Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Balance: ${newBalance.toFixed(2)} kg (over-packed)`);
-    } else if (newBalance === 0) {
-      showToast('success', `Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Round fully packed!`);
-    } else {
-      showToast('success', `Packed ${packForm.cases} cases + ${packForm.loose} loose of ${packForm.sku}. Remaining: ${newBalance.toFixed(2)} kg`);
-    }
-    
-    setShowPackModal(false);
-    setPackForm(emptyPackForm);
-    setEditingPackIndex(null);
-    packingAttempt.current = null;
+      throw Error('Shared packing was not confirmed. Keep this form open.');
     } catch (error) {
       showToast('error', error instanceof Error ? error.message : 'Packing was not confirmed. Keep this form open and retry.');
     } finally {
@@ -919,6 +862,7 @@ export default function ProductionBoard() {
     if (!pack) return;
     setSelectedRound(round.id);
     setEditingPackIndex(packIndex);
+    packingCorrectionQuote.current=JSON.stringify(pack);
     setPackForm({
       sku: pack.sku,
       cases: pack.cases || 0,
@@ -931,13 +875,13 @@ export default function ProductionBoard() {
     setShowPackModal(true);
   };
 
-  const handleApprovePan111 = (roundId: string) => {
+  const handleApprovePan111 = async (roundId: string) => {try {
     const round = productionRounds.find(item => item.id === roundId);
     const weight = round?.pan111RequestedWeight || 0;
     if (!round || round.pan111ApprovalStatus !== 'pending' || weight <= 0) return;
     const now = new Date();
     const useByDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const packedSkus = [...(round.packedSkus || []), { sku: 'PAN111', cases: 0, loose: 0, weightKg: weight, reason: round.pan111ApprovalReason }];
+    const packedSkus = [...(round.packedSkus || []), { ...labelsForPacking(round,'PAN111',milkLots.find(l=>l.id===round.milkLotId),traceState),sku: 'PAN111', cases: 0, loose: 0, weightKg: weight, reason: round.pan111ApprovalReason, recordedAt: now.toISOString(),recordedBy: currentActor }];
     addIntermediateLot({
       lotCode: `PAN111-${round.milkLotCode}-S${round.shiftNumber}-R${round.roundNumber}`,
       productId: 'pan111', productName: 'PAN111 (Round Recovered)', productClass: 'intermediate',
@@ -946,7 +890,7 @@ export default function ProductionBoard() {
       sourceMilkLotCode: round.milkLotCode, sourceShift: round.shiftNumber, sourceRound: round.roundNumber,
       qualityClass: 'round_recovered', shelfLifeDays: 7, useByDate: useByDate.toISOString(), priorityUse: true,
     });
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: 'packed', locked: true, packedSkus, remainingBalance: 0,
       pan111ApprovalStatus: 'approved', pan111ApprovedAt: now.toISOString(), pan111ApprovedBy: currentRole,
       pan111RequestedWeight: undefined, pan111PreviousStatus: undefined,
@@ -955,13 +899,13 @@ export default function ProductionBoard() {
       details: `${weight.toFixed(2)} kg approved for priority use`, recordedBy: currentActor, source: 'approval',
     });
     showToast('success', `PAN111 approved: ${weight.toFixed(2)} kg is now available for priority use`);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleRejectPan111 = (roundId: string) => {
+  const handleRejectPan111 = async (roundId: string) => {try {
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.pan111ApprovalStatus !== 'pending') return;
     const rejectedAt = new Date().toISOString();
-    recordProductionRoundActivity(roundId, {
+    await recordProductionRoundActivity(roundId, {
       status: round.pan111PreviousStatus || 'cut', locked: false, pan111ApprovalStatus: 'rejected',
       pan111RejectedAt: rejectedAt, pan111RejectedBy: currentRole,
       pan111RequestedWeight: undefined, pan111PreviousStatus: undefined,
@@ -970,44 +914,9 @@ export default function ProductionBoard() {
       details: 'Balance returned to normal Paneer packing or SPP routing', recordedBy: currentActor, source: 'approval',
     });
     showToast('success', 'PAN111 request rejected. The balance is available for normal paneer packing or SPP routing.');
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
-  const handleRecordPan111 = () => {
-    if (!activeMilkLot) return;
-    
-    if (pan111Form.weight <= 0) {
-      showToast('error', 'Enter a PAN111 weight');
-      return;
-    }
-    const useByDate = new Date(Date.now() + 730 * 24 * 60 * 60 * 1000);
-    addIntermediateLot({
-      lotCode: `PAN111-${activeMilkLot.lotCode}`,
-      productId: 'pan111',
-      productName: 'PAN111 (Recovered Paneer)',
-      productClass: 'intermediate',
-      sourceBatchId: 'milk-lot',
-      sourceBatchCode: activeMilkLot.lotCode,
-      producedQuantity: pan111Form.weight,
-      currentQuantity: pan111Form.weight,
-      uom: 'kg',
-      storageLocation: 'Chiller',
-      status: 'available',
-      producedAt: new Date().toISOString(),
-      sourceMilkLotCode: activeMilkLot.lotCode,
-      sourceShift: 0,
-      sourceRound: 0,
-      qualityClass: 'standard',
-      shelfLifeDays: 730,
-      useByDate: useByDate.toISOString(),
-      priorityUse: false,
-    });
-
-    showToast('success', `PAN111 recorded: ${pan111Form.weight} kg`);
-    setShowPan111Modal(false);
-    setPan111Form({ weight: 0, recordedBy: '' });
-  };
-
-  const handleRecordCream = () => {
+  const handleRecordCream = async () => {try {
     if (!selectedRound) return;
 
     if (creamEditRoundId && !canEditCream) {
@@ -1035,7 +944,7 @@ export default function ProductionBoard() {
     const recoveredBy = creamForm.recordedBy.trim() || round.creamRecoveredBy;
 
     const occurredAt = new Date().toISOString();
-    recordProductionRoundActivity(selectedRound, {
+    await recordProductionRoundActivity(selectedRound, {
       creamRecovered: totalWeight,
       creamBucketWeights: roundedBucketWeights,
       creamRecoveredAt: occurredAt,
@@ -1047,7 +956,7 @@ export default function ProductionBoard() {
       details: `${totalWeight.toFixed(2)} kg · ${roundedBucketWeights.length} buckets${isEditing ? ` · Previously ${previousWeight.toFixed(2)} kg` : ''}`,
       recordedBy: recoveredBy || currentActor,
       source: isEditing ? 'correction' : 'workflow',
-    });
+    }, paneerFormAttempts.current[selectedRound]);
 
     // Also create or update the intermediate cream lot. Editing a recovery
     // must adjust the existing lot rather than create a duplicate.
@@ -1083,7 +992,7 @@ export default function ProductionBoard() {
     setShowCreamModal(false);
     setCreamEditRoundId(null);
     setCreamForm({ numberOfBuckets: 0, bucketWeights: [], recordedBy: '' });
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
   const handleCreateShift = () => {
     const milkLotId = newShift.milkLotId || selectedMilkLotId;
@@ -1502,7 +1411,7 @@ export default function ProductionBoard() {
     setNewRound({ ...newRound, shiftId, roundNumber: existingRoundsInShift + 1 });
   };
 
-  const handleStageChange = (roundId: string, nextStatus: string) => {
+  const handleStageChange = async (roundId: string, nextStatus: string) => {try {
     if (!canForceStage) return;
     const round = productionRounds.find(item => item.id === roundId);
     if (!round || round.status === nextStatus) return;
@@ -1525,7 +1434,7 @@ export default function ProductionBoard() {
       stageUpdates.coolingStartedAt = undefined;
     }
     if (nextStatus === 'resting') stageUpdates.restingStartedAt = now;
-    recordProductionRoundActivity(roundId, stageUpdates, {
+    await recordProductionRoundActivity(roundId, stageUpdates, {
       type: 'stage_override',
       stage: 'Stage Override',
       occurredAt: now,
@@ -1534,7 +1443,7 @@ export default function ProductionBoard() {
       source: 'override',
     });
     showToast('success', `Stage changed to ${statusLabels[nextStatus] || nextStatus}`);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
   const openBlockWeights = (roundId: string) => {
     const round = productionRounds.find(item => item.id === roundId);
@@ -1551,7 +1460,7 @@ export default function ProductionBoard() {
     setBlockWeightsMode('review');
   };
 
-  const saveBlockWeights = () => {
+  const saveBlockWeights = async () => {try {
     if (!blockWeightsRoundId || !canForceStage) return;
     const round = productionRounds.find(item => item.id === blockWeightsRoundId);
     if (!round) return;
@@ -1568,7 +1477,7 @@ export default function ProductionBoard() {
     const remainingBalance = calculatePaneerRemainingBalance(totalWeight, round.sppRecordedWeight, round.packedSkus || []);
     const previousBlockCount = round.numberOfBlocks || round.blockWeights?.length || 0;
     const previousTotalWeight = (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
-    recordProductionRoundActivity(blockWeightsRoundId, {
+    await recordProductionRoundActivity(blockWeightsRoundId, {
       blockWeights: blockWeightsDraft,
       numberOfBlocks: blockWeightsDraft.length,
       outputWeight: totalWeight,
@@ -1583,7 +1492,7 @@ export default function ProductionBoard() {
     });
     closeBlockWeights();
     showToast('success', `Corrected to ${blockWeightsDraft.length} blocks (${totalWeight.toFixed(2)} kg)`);
-  };
+  }catch(error){showToast('error',(error as Error).message);}};
 
   const openCreamModal = (roundId: string) => {
     setSelectedRound(roundId);
@@ -1698,8 +1607,8 @@ export default function ProductionBoard() {
     }
     const canReport = !round.locked && !['cancelled', 'handed_over', 'spoiled', 'spoilage_pending'].includes(round.status);
     const reportButton = canReport ? <button onClick={() => openSpoilageModal(round.id)} className="flex w-fit items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"><AlertTriangle className="h-3 w-3" /> Report Spoilage</button> : null;
-    const linkedStock = reconciledFinishedStock.filter(stock => stock.sourceRoundId === round.id);
-    const hasAwaitingStock = linkedStock.some(stock => stock.status === 'awaiting_handover');
+    const linkedStock = reconciledFinishedStock.filter(stock => (stock.sourceRoundId === round.id||stock.mixedCaseParts?.some(p=>p.source.roundId===round.id))&&(stock.totalPackets>0||stock.cases>0||(stock.weightKg||0)>0||(stock.looseWeightKg||0)>0));
+    const hasAwaitingStock = linkedStock.some(stock => stock.status === 'awaiting_handover'||stock.status==='returned');
     const hasHandedOverStock = linkedStock.length > 0 && linkedStock.every(stock => stock.status === 'handed_over');
     const distributionLabel = hasAwaitingStock
       ? <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">{round.status === 'packed' ? 'Fully packed' : 'Packed stock'} · Awaiting distribution</span>
@@ -1894,6 +1803,8 @@ export default function ProductionBoard() {
         </div>
       </div>
 
+      {activeTab==='paneer'&&activeMilkLot&&<><PaneerBagStatus lotId={activeMilkLot.id}/><MixedPaneerCases lotId={activeMilkLot.id}/><PaneerTrayRetentionPanel lotId={activeMilkLot.id}/><PaneerScrambleReconciliation lotId={activeMilkLot.id} open={showPan111Modal} onClose={()=>setShowPan111Modal(false)}/></>}
+
       {/* Paneer Tab Content */}
       {activeTab === 'paneer' && (
         <>
@@ -2072,6 +1983,10 @@ export default function ProductionBoard() {
       </div>
 
       {/* Production board grouped by shift */}
+      <div className="grid min-w-0 grid-cols-2 gap-2 rounded-xl border border-violet-200 bg-violet-50 p-3 md:hidden" aria-label="Find a paneer round on phone">
+        <label className="min-w-0 text-xs font-semibold text-violet-900">Find round<input aria-label="Find paneer round on phone" value={filters.query} onChange={e=>setFilters({...filters,query:e.target.value})} placeholder="e.g. S1/R2" className="mt-1 w-full min-w-0 rounded-lg border border-violet-200 bg-white px-2 py-2 text-base"/></label>
+        <label className="min-w-0 text-xs font-semibold text-violet-900">Shift<select aria-label="Phone shift filter" value={filters.shift} onChange={e=>setFilters({...filters,shift:e.target.value})} className="mt-1 w-full min-w-0 rounded-lg border border-violet-200 bg-white px-2 py-2 text-base"><option value="all">All shifts</option>{productionShifts.filter(s=>s.milkLotId===selectedMilkLotId).map(s=><option key={s.id} value={s.id}>Shift {s.shiftNumber}</option>)}</select></label>
+      </div>
       <div className="space-y-4">
         {activeShifts.map((shift) => {
           const rounds = groupedByShift[shift.id] || [];
@@ -2172,7 +2087,7 @@ export default function ProductionBoard() {
                         </div>
                       </div>
 
-                      <div className="min-w-0 space-y-4 p-3">
+                      <div className="phone-paneer-card min-w-0 space-y-4 p-3">
                         <section>
                           <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Current stage</p>
                           <div className="flex flex-wrap items-center gap-2">
@@ -2192,7 +2107,6 @@ export default function ProductionBoard() {
                           </div>}
                           {getStageActionButtons(round)}
                         </section>
-
                         <section className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-2.5">
                           <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Milk quantity
                             <input type="number" min="1" value={(round.actualInput > 0 ? round.actualInput : round.plannedInput) || ''} onChange={(event) => { const quantity = Math.max(1, parseInt(event.target.value) || 1); updateProductionRound(round.id, { plannedInput: quantity, actualInput: quantity }); }} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-medium text-slate-700" aria-label={`Milk quantity for round ${round.roundNumber}`} />
@@ -2201,6 +2115,8 @@ export default function ProductionBoard() {
                           <div><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Blocks</p>{round.blockWeights?.length ? <button onClick={() => openBlockWeights(round.id)} className="mt-1 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-2 text-left text-sm font-semibold text-indigo-700">{blockCount} blocks · review</button> : <p className="mt-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-500">{blockCount || '—'}</p>}</div>
                           <div><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Block weight</p><p className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-sm font-bold text-emerald-700">{round.outputWeight > 0 ? `${round.outputWeight.toFixed(2)} kg` : '—'}</p></div>
                         </section>
+                          <PaneerTraceReview round={round} lot={milkLots.find(l=>l.id===round.milkLotId)}/>
+
 
                         <section>
                           <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Type &amp; cream</p>
@@ -2209,8 +2125,8 @@ export default function ProductionBoard() {
                             {canRequestTypeChange && (round.type === 'D' || round.type === 'C/S') && round.typeChangeRequest?.status === 'pending' && !canForceStage && <span className="flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-800"><Clock className="h-3 w-3" /> Change pending</span>}
                             {canRequestTypeChange && (round.type === 'D' || round.type === 'C/S') && round.typeChangeRequest?.status !== 'pending' && <button type="button" onClick={() => openTypeChangeModal(round.id)} className="flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-xs font-semibold text-indigo-700"><ArrowLeftRight className="h-3 w-3" /> Request type change</button>}
                             {round.creamRecovered !== undefined && <button type="button" onClick={() => openCreamDetails(round.id)} className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-700">Cream {round.creamRecovered.toFixed(2)} kg{round.creamRecoveredBy ? ` · ${round.creamRecoveredBy}` : ''}</button>}
-                            {renderCreamAction(round)}
                           </div>
+                          {renderCreamAction(round)}
                         </section>
 
                         <section>
@@ -2220,6 +2136,8 @@ export default function ProductionBoard() {
                             {round.cutBy && <span className="text-xs text-slate-500">By {round.cutBy}</span>}
                           </div>
                           {getCutActionButtons(round)}
+                          <PaneerAfterCutting round={round}/>
+                          <RoundTrayStatus round={round} rounds={productionRounds}/>
                         </section>
 
                         <section>
@@ -2229,15 +2147,16 @@ export default function ProductionBoard() {
                             const recordedBy = pack.recordedBy || historyEvent?.recordedBy || 'Recorder not captured';
                             const recordedAtValue = pack.recordedAt || historyEvent?.occurredAt;
                             const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB') : 'timestamp not captured';
-                            const packLabel = pack.weightKg !== undefined ? `${pack.sku}: ${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.sku}: ${pack.cases}c × ${(pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku])).toFixed(2)} kg + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.sku}: ${pack.cases}c + ${pack.loose || 0} loose`;
+                            const packLabel = pack.weightKg !== undefined ? `${pack.sku}: ${pack.weightKg.toFixed(2)} kg` : pack.looseWeightKg !== undefined ? `${pack.sku}: ${pack.cases}c × ${(pack.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[pack.sku])).toFixed(2)} kg + ${pack.looseWeightKg.toFixed(2)} kg loose` : `${pack.sku}: ${pack.cases}c + ${loosePackingBalance(round,pack,packIndex,traceState).remaining} loose remaining`;
                             return <div key={`${pack.sku}-${packIndex}`} className="flex flex-wrap items-center gap-1"><button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="max-w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-left text-xs font-semibold text-emerald-700">{packLabel}</button>{isOwner && <button type="button" onClick={() => openPackingCorrection(round, packIndex)} className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-700">Correct</button>}</div>;
                           })}</div> : <p className="text-sm text-slate-400">Nothing packed yet</p>}
+                          <RoundLooseStatus round={round} state={traceState}/>
                           {round.pan111ApprovalStatus === 'pending' && <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
-                          {remainingBalance !== undefined && <div className={`mt-2 inline-flex rounded-lg border px-2 py-1.5 text-xs font-bold ${remainingBalance > 0.01 ? 'border-amber-200 bg-amber-50 text-amber-600' : remainingBalance < -0.01 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>Balance {remainingBalance.toFixed(2)} kg</div>}
+                          {remainingBalance !== undefined && remainingBalance < -0.01 && <p className="mt-2 text-xs font-semibold text-red-700">Overpacked difference: {(-remainingBalance).toFixed(2)} kg · review source records</p>}
                           {['cut', 'chiller_storage', 'frozen', 'packed'].includes(round.status) && !round.locked && round.pan111ApprovalStatus !== 'pending' && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm(emptyPackForm); setShowPackModal(true); }} className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"><Package className="h-3.5 w-3.5" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
                         </section>
 
-                        {!round.locked && <section className="border-t border-slate-100 pt-3"><div className="flex flex-wrap gap-2">{getActionButtons(round)}{canForceStage && round.status === 'scheduled' && <button onClick={() => handleDeleteRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs font-semibold text-red-700"><Trash2 className="h-3 w-3" />Cancel</button>}{canForceStage && round.status !== 'scheduled' && <button onClick={() => handleCancelRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs font-semibold text-red-700"><XCircle className="h-3 w-3" />Cancel</button>}</div></section>}
+                        {!round.locked && <section><p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Actions</p><div className="flex flex-wrap gap-2">{getActionButtons(round)}{canForceStage && round.status === 'scheduled' && <button onClick={() => handleDeleteRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs font-semibold text-red-700"><Trash2 className="h-3 w-3" />Cancel</button>}{canForceStage && round.status !== 'scheduled' && <button onClick={() => handleCancelRound(round.id)} className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs font-semibold text-red-700"><XCircle className="h-3 w-3" />Cancel</button>}</div></section>}
                       </div>
                     </article>
                     );
@@ -2344,6 +2263,8 @@ export default function ProductionBoard() {
                               <span className="inline-flex rounded-lg border border-pink-200 bg-pink-50 px-2 py-1 text-xs font-medium text-pink-600">Clingwrapped</span>
                             ) : '—'}
                             {getCutActionButtons(round)}
+                            <PaneerAfterCutting round={round}/>
+                            <RoundTrayStatus round={round} rounds={productionRounds}/>
                           </td>
                           <td className="px-2 py-1.5 text-sm">
                             {round.packedSkus && round.packedSkus.length > 0 ? (
@@ -2355,13 +2276,14 @@ export default function ProductionBoard() {
                                   const recordedAt = recordedAtValue ? new Date(recordedAtValue).toLocaleString('en-GB') : 'timestamp not captured';
                                   const auditLabel = `${p.sku} · ${recordedBy} · ${recordedAt}`;
                                   return <div key={i} className="flex flex-wrap items-center gap-1">
-                                    <button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c × ${(p.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[p.sku])).toFixed(2)} kg + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${p.loose} loose`}<span className="sr-only"> ({auditLabel})</span></button>
+                                    <button type="button" onClick={() => setPackingAuditSelection({ roundId: round.id, packIndex: i })} title={`Packed by ${recordedBy} on ${recordedAt}`} className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-left text-xs font-semibold text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300">{p.sku}: {p.weightKg !== undefined ? `${p.weightKg.toFixed(2)} kg` : p.looseWeightKg !== undefined ? `${p.cases}c × ${(p.caseWeightKg ?? getDefaultPaneerCaseWeightKg(paneerSkuByCode[p.sku])).toFixed(2)} kg + ${p.looseWeightKg.toFixed(2)} kg loose` : `${p.cases}c + ${loosePackingBalance(round,p,i,traceState).remaining} loose remaining`}<span className="sr-only"> ({auditLabel})</span></button>
                                     {isOwner && <button type="button" onClick={() => openPackingCorrection(round, i)} className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100">Correct</button>}
                                   </div>;
                                 })}
                               </div>
                             ) : <span className="text-slate-400">—</span>}
-                            {round.pan111ApprovalStatus === 'pending' && <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
+                            <RoundLooseStatus round={round} state={traceState}/>
+                          {round.pan111ApprovalStatus === 'pending' && <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
                             {round.remainingBalance !== undefined && (() => {
                               const balance = getPaneerRoundRemainingBalance(round) ?? 0;
                               return <div className={`mt-1 inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold ${balance > 0 ? 'border-amber-200 bg-amber-50 text-amber-600' : balance < 0 ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>Balance {balance.toFixed(2)} kg</div>;
@@ -2387,6 +2309,7 @@ export default function ProductionBoard() {
                             </div>
                           </td>
                         </tr>
+                        <tr><td colSpan={11}><PaneerTraceReview round={round} lot={milkLots.find(l=>l.id===round.milkLotId)}/></td></tr>
                         </Fragment>
                       ))}
                     </tbody>
@@ -2526,8 +2449,10 @@ export default function ProductionBoard() {
               </div>
             </div>
           )}
+          <PaneerCutDetailsForm packetBatchCode={(()=>{const r=productionRounds.find(r=>r.id===selectedRound);return r?retentionPacketBatchCode(r,milkLots.find(l=>l.id===r.milkLotId),traceState):'';})()} value={cuttingStorageDefaults(productionRounds.find(r=>r.id===selectedRound)?.milkLotCode||'',cutTraceForm)} onChange={value=>{setCutTraceForm(value);setCutCheckWarning(false);setCutPendingAcknowledged(false);}} blockKg={cutForm.blockWeights.reduce((sum,w)=>sum+w,0)}/>
+          {cutCheckWarning&&<div className="trace-cut-warning" role="alert"><strong>Before saving: these checks are still missing</strong><ul>{cuttingSaveDecision(cutTraceForm,false,'weighing').missing.map(item=><li key={item}>{item}</li>)}</ul><p>Complete them above, or explicitly leave them pending so production can continue. The missing checks and recorder will remain in the audit history.</p><label><input type="checkbox" checked={cutPendingAcknowledged} onChange={e=>setCutPendingAcknowledged(e.target.checked)}/> Leave the listed checks pending</label></div>}
           <div className="flex gap-2 pt-2">
-            <button onClick={() => selectedRound && handleCut(selectedRound)} className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600">Save</button>
+            <button onClick={() => selectedRound && handleCut(selectedRound)} className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600">{cutCheckWarning&&cutPendingAcknowledged?'Save with pending checks':'Save cutting'}</button>
             <button onClick={() => setShowCutModal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
           </div>
         </div>
@@ -2679,9 +2604,10 @@ export default function ProductionBoard() {
               setPackForm({ ...packForm, sku, caseWeightKg: definition?.packMode === 'weight_loose' ? getDefaultPaneerCaseWeightKg(definition) : 0 });
             }} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
               <option value="">Select SKU</option>
-              {allowedPackSkus.map(definition => <option key={definition.sku} value={definition.sku}>{definition.sku} - {definition.productName}{definition.packMode === 'weight_only' ? ' (weight only)' : definition.packMode === 'weight_loose' ? ' (loose by weight)' : ` (${(definition.unitsPerCase || 0) * definition.unitWeightKg} kg/case)`}</option>)}
+              {allowedPackSkus.map(definition => <option key={definition.sku} value={definition.sku}>{definition.sku} - {definition.productName}{definition.packMode === 'weight_only' ? ' (weight only)' : definition.packMode === 'weight_loose' ? ' (loose by weight)' : ` (${((definition.unitsPerCase || 0) * definition.unitWeightKg).toFixed(2)} kg/case)`}</option>)}
             </select>
           </div>
+          <PackingLabelPreview key={`${selectedRound}:${packForm.sku}:${editingPackIndex}`} round={selectedPackRound} lot={milkLots.find(l=>l.id===selectedPackRound?.milkLotId)} sku={packForm.sku} savedPack={editingPackIndex!==null?selectedPackRound?.packedSkus?.[editingPackIndex]:undefined}/>
           {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode === 'weight_loose' && <div>
             <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Case weight (kg)</label>
             <input type="number" value={packForm.caseWeightKg || ''} onChange={(e) => setPackForm({ ...packForm, caseWeightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0.01" step="0.01" />
@@ -2701,6 +2627,7 @@ export default function ProductionBoard() {
             </div>}
           </div>}
           {packForm.sku && paneerSkuByCode[packForm.sku]?.packMode === 'weight_only' && <div className="space-y-3"><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">PAN111 weight (kg)</span><input type="number" value={packForm.weightKg || ''} onChange={(e) => setPackForm({ ...packForm, weightKg: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" min="0" step="0.01" /></label><label className="block"><span className="text-xs font-medium text-slate-600 uppercase tracking-wide">Reason (required for approval)</span><textarea value={packForm.reason} onChange={(e) => setPackForm({ ...packForm, reason: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" rows={2} placeholder="Explain why this paneer is being recorded as PAN111" /></label></div>}
+          {editingPackIndex!==null&&paneerSkuByCode[packForm.sku]?.packMode!=='weight_only'&&<label className="block text-sm">Correction reason (required when linked to mixed cases)<input value={packForm.reason} onChange={e=>setPackForm({...packForm,reason:e.target.value})} className="mt-1 w-full rounded border border-slate-200 p-2"/></label>}
           {packForm.sku && selectedRound && (() => {
             const round = productionRounds.find(r => r.id === selectedRound);
             const balance = round
@@ -2735,28 +2662,7 @@ export default function ProductionBoard() {
         </div>
       </Modal>
 
-      {/* PAN111 Modal */}
-      <Modal isOpen={showPan111Modal} onClose={() => setShowPan111Modal(false)} title="Record PAN111 (Once per Milk Lot)">
-        <div className="space-y-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-            <p className="text-xs text-amber-700">
-              <strong>Note:</strong> PAN111 is recorded once per milk lot by the supervisor after all production is complete.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Weight (kg)</label>
-            <input type="number" value={pan111Form.weight || ''} onChange={(e) => setPan111Form({ ...pan111Form, weight: parseFloat(e.target.value) || 0 })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" step="0.1" min="0" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Recorded By (Supervisor)</label>
-            <input type="text" value={pan111Form.recordedBy} onChange={(e) => setPan111Form({ ...pan111Form, recordedBy: e.target.value })} className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Supervisor name" />
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button onClick={handleRecordPan111} className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record PAN111</button>
-            <button onClick={() => setShowPan111Modal(false)} className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
-          </div>
-        </div>
-      </Modal>
+
 
       {/* Cream details */}
       <Modal isOpen={showCreamDetailsModal} onClose={() => setShowCreamDetailsModal(false)} title="Cream recovery details">

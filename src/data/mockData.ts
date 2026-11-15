@@ -69,6 +69,11 @@ export interface ProductionReconciliation {
 }
 
 export interface PackedSku {
+  packetBatchCode?: string;
+  caseBatchCode?: string;
+  traceabilityProductionDate?: string;
+  traceabilityPrefixVersion?: string;
+  traceabilityGap?: string;
   sku: string;
   cases: number;
   loose?: number;
@@ -222,6 +227,7 @@ export type DistributionHandoverSource = 'finished_stock' | 'halloumi_pool' | 'p
 export type ProductionRemainderLocation = 'Dairy Container (Finished Stock)' | 'Chiller';
 
 export interface DistributionHandover {
+  stockAllocations?:Array<{stockId:string;packingRunId:string;cases:number;loosePackets:number;sourceBatchCodes:string[];mixedCaseId?:string;mixedCaseParts?:import('../traceability/mixedPaneerCases').MixedCasePart[]}>;
   id: string;
   sourceType: DistributionHandoverSource;
   sourceId?: string;
@@ -289,6 +295,7 @@ export function getAmassiBatchCode(milkLotCode: string) {
 }
 
 export interface MilkLot {
+  traceabilityProductionDate?: string;
   id: string;
   lotCode: string; // e.g. "160626" (date-based)
   receiptDate: string;
@@ -512,6 +519,12 @@ export interface ProductionShift {
 }
 
 export interface ProductionRound {
+  paneerTrayPackingHistory?: import('../traceability/paneerTrays').TrayPackingEntry[];
+  paneerCuttingDetails?: import('../traceability/domain').CuttingTrace;
+  paneerCuttingHistory?: import('../traceability/paneerJourney').PaneerCutSnapshot[];
+  paneerAutomaticTrace?: import('../traceability/automaticPaneer').AutomaticPaneerTrace;
+  paneerBagCorrections?: import('../traceability/automaticPaneer').PaneerBagCorrection[];
+  traceabilityProductionDate?: string;
   // Append-only standard ingredient issue and correction snapshots. Only the
   // latest snapshot is the current total; never sum snapshots as new issues.
   paneerIngredientIssues?: import('../lib/paneerRecipe').PaneerIngredientIssue[];
@@ -696,6 +709,16 @@ export interface IntermediateLot {
 }
 
 export interface FinishedStockLot {
+  mixedCaseId?:string;
+  mixedCaseCount?:number;
+  mixedCaseParts?: import('../traceability/mixedPaneerCases').MixedCasePart[];
+  sourceStockId?:string;
+
+  packetBatchCode?: string;
+  caseBatchCode?: string;
+  traceabilityProductionDate?: string;
+  traceabilityPrefixVersion?: string;
+  traceabilityGap?: string;
   id: string;
   sku: string;
   productName: string;

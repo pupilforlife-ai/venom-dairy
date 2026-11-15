@@ -1,4 +1,10 @@
+import PaneerScrambleReconciliation from '../traceability/PaneerScrambleReconciliation';
+import { useTraceability } from '../traceability/useTraceability';
+import { lotScrambleSummary } from '../traceability/pan111Reconciliation';
+import LotTracePanel from '../traceability/LotTracePanel';
+import { milkCode } from '../traceability/domain';
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { useToast } from '../components/Toast';
@@ -15,6 +21,10 @@ import { createExternalCreamLotCode } from '../lib/creamLotCode';
 import { parseAdditiveQuantity } from '../lib/additiveQuantity';
 
 export default function MilkReceiving() {
+  const {state:traceState}=useTraceability();
+  const [searchParams,setSearchParams]=useSearchParams();
+  const section=searchParams.get('section')==='planning'?'planning':'receiving';
+  const selectSection=(value:'planning'|'receiving')=>setSearchParams(previous=>{const next=new URLSearchParams(previous);next.set('section',value);return next;});
   const { milkLots, creamLots, productionRounds, cipRecords, addMilkLot, updateMilkLot, addCreamLot, addCipRecord } = useApp();
   const { showToast } = useToast();
   // Read-only subscription: this page never writes crumbing records.
@@ -62,10 +72,13 @@ export default function MilkReceiving() {
       setExpandedLots((current) => current.has(newestLot.id) ? current : new Set(current).add(newestLot.id));
     }
   }, [milkLots, newestLot, selectedLot]);
-  
+
+  useEffect(()=>{ if(newestLot) setSelectedLot(newestLot.id); }, [newestLot?.id]);
+
   // New lot form
   const [newLot, setNewLot] = useState({
-    lotCode: '',
+    lotCode: milkCode(new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Johannesburg'})),
+    productionDate: new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Johannesburg'}),
     supplier: 'Green Valley Dairy',
     litresReceived: 25000,
     receiptStatus: 'received' as 'planned' | 'received',
@@ -93,6 +106,7 @@ export default function MilkReceiving() {
   const creamReceiptQuantity = parseAdditiveQuantity(creamReceipt.quantity);
 
   const handleCreateLot = () => {
+    if (milkLots.some(lot=>lot.lotCode===newLot.lotCode.trim())) { showToast('error','This milk lot already exists. Select it instead of creating a duplicate.'); return; }
     if (!newLot.lotCode) {
       showToast('error', 'Please enter a lot code');
       return;
@@ -105,6 +119,7 @@ export default function MilkReceiving() {
     const createdAt = new Date().toISOString();
     addMilkLot({
       lotCode: newLot.lotCode,
+      traceabilityProductionDate: newLot.productionDate,
       receiptDate: newLot.receiptDate,
       receiptTime: newLot.receiptTime,
       receiptStatus: newLot.receiptStatus,
@@ -133,10 +148,11 @@ export default function MilkReceiving() {
       packedSkus: [],
       milkSales: [],
     });
+    selectSection(isPlanned?'planning':'receiving');
     showToast('success', `Milk lot ${newLot.lotCode} created`);
     setShowNewLotModal(false);
-    setNewLot({ 
-      lotCode: '', supplier: 'Green Valley Dairy', litresReceived: 25000, 
+    setNewLot({
+      lotCode: '', productionDate: new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Johannesburg'}), supplier: 'Green Valley Dairy', litresReceived: 25000,
       receiptStatus: 'received',
       receiptDate: new Date().toISOString().split('T')[0],
       receiptTime: new Date().toTimeString().slice(0, 5),
@@ -155,8 +171,8 @@ export default function MilkReceiving() {
   };
 
   const packedSkuSummary = useMemo(() => {
-    return displayedLot ? buildMilkLotPackedSummary(displayedLot, productionRounds, crumbingBatches) : null;
-  }, [displayedLot, productionRounds, crumbingBatches]);
+    return displayedLot ? buildMilkLotPackedSummary(displayedLot, productionRounds, crumbingBatches,traceState) : null;
+  }, [displayedLot, productionRounds, crumbingBatches,traceState]);
 
   const totals = displayedLot ? {
     received: displayedLot.litresReceived,
@@ -201,6 +217,7 @@ export default function MilkReceiving() {
   const openEditLot = (lot: typeof milkLots[number]) => {
     setEditingLotId(lot.id);
     setEditLot({
+      productionDate: lot.traceabilityProductionDate || lot.receiptDate,
       lotCode: lot.lotCode,
       supplier: lot.supplier,
       litresReceived: lot.litresReceived,
@@ -432,11 +449,11 @@ export default function MilkReceiving() {
       {/* Page Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Milk and cream lots</h1>
-          <p className="text-sm text-slate-500 mt-1">Record each receipt as a traceable source lot.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Milk Receiving</h1>
+          <p className="text-sm text-slate-500 mt-1">Plan ingredients before milk arrives, then record the actual receipt against the same lot.</p>
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
-          {isExportOwner && (
+          {section==='receiving' && isExportOwner && (
             <button
               type="button"
               onClick={handleExport}
@@ -448,6 +465,7 @@ export default function MilkReceiving() {
             </button>
           )}
           <button
+            hidden={section!=='receiving'}
             onClick={() => setShowReceiveCreamModal(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors shadow-sm"
           >
@@ -455,13 +473,23 @@ export default function MilkReceiving() {
             Receive cream
           </button>
           <button
-            onClick={() => setShowNewLotModal(true)}
+            hidden={section!=='planning'}
+            onClick={() => { setNewLot(current=>({...current,receiptStatus:'planned',litresReceived:0})); setShowNewLotModal(true); }}
+            className="px-4 py-2.5 rounded-lg text-sm font-medium border border-emerald-300 text-emerald-700"
+          >Plan future milk</button>
+          <button
+            hidden={section!=='receiving'}
+            onClick={() => { setNewLot(current=>({...current,receiptStatus:'received',litresReceived:current.litresReceived||25000})); setShowNewLotModal(true); }}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            Receive source lot
+            Receive milk
           </button>
         </div>
+      </div>
+
+      <div role="tablist" aria-label="Milk Receiving sections" className="flex gap-2 border-b border-slate-200 pb-2">
+        {(['receiving','planning'] as const).map(value=><button type="button" key={value} id={`milk-${value}-tab`} role="tab" aria-selected={section===value} aria-controls={`milk-${value}-panel`} onClick={()=>selectSection(value)} className={`rounded-lg px-5 py-3 text-sm font-semibold ${section===value?'bg-emerald-600 text-white':'bg-slate-100 text-slate-700'}`}>{value==='planning'?'Planning':'Receiving'}</button>)}
       </div>
 
       {/* Lot selector: four newest lots plus an older-lots dropdown */}
@@ -474,8 +502,8 @@ export default function MilkReceiving() {
               key={lot.id}
               onClick={() => { setSelectedLot(lot.id); setExpandedLots(current => new Set(current).add(lot.id)); }}
               className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium whitespace-nowrap transition-all ${
-                selectedLot === lot.id 
-                  ? 'bg-slate-900 text-white border-slate-900 shadow-md' 
+                selectedLot === lot.id
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-md'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
               }`}
             >
@@ -506,6 +534,11 @@ export default function MilkReceiving() {
       </div>
 
       {/* Recent Receipts Table - MAIN FOCUS */}
+      <section id={`milk-${section}-panel`} role="tabpanel" aria-labelledby={`milk-${section}-tab`}>
+        <div hidden={section!=='planning'}>
+          {displayedLot?<LotTracePanel key={displayedLot.id} lot={displayedLot}/>:<div className="trace-card"><h2>Production plan & Ingredient checklist</h2><p>Use Plan future milk to create a planned lot, then enter its production quantities to prepare the ingredient list.</p></div>}
+        </div>
+      <div hidden={section!=='receiving'}>
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
           <h2 className="text-lg font-semibold text-slate-900">Recent receipts</h2>
@@ -538,7 +571,7 @@ export default function MilkReceiving() {
                   ? { vessels: [], ruleShortfallLitres: 0 }
                   : getMilkLotVesselBalances(lot, productionRounds);
                 const milkLeft = lotAccounting.remaining;
-                
+
                 return (
                   <React.Fragment key={lot.id}>
                     {/* Main Row */}
@@ -664,7 +697,7 @@ export default function MilkReceiving() {
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">PAN111</p>
                                     <p className="text-xl font-bold text-slate-900 mt-1">
-                                      {lotReconciliation.pan111.toFixed(2)} kg
+                                      {(traceState.pan111Reconciliations?.[lot.id]?.measuredKg??(lotScrambleSummary(productionRounds,lot.id,traceState).sources.some(s=>s.kg!==null)?lotScrambleSummary(productionRounds,lot.id,traceState).totalKg:lotReconciliation.pan111)).toFixed(2)} kg
                                     </p>
                                   </div>
                                   <div className="border-l-4 border-slate-300 pl-3">
@@ -685,6 +718,7 @@ export default function MilkReceiving() {
                               </div>
                             </div>
 
+                            <PaneerScrambleReconciliation lotId={lot.id}/>
                             <div className="bg-white rounded-lg border-2 border-slate-200 p-5 shadow-sm">
                               <h3 className="text-sm font-bold text-slate-900 mb-3">Common product pools · {lot.lotCode}</h3>
                               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -834,6 +868,9 @@ export default function MilkReceiving() {
         </div>
       </div>
 
+      </div>
+      </section>
+
       {/* New Milk Lot Modal */}
       <Modal isOpen={showNewLotModal} onClose={() => setShowNewLotModal(false)} title="Create Milk Lot">
         <div className="space-y-4">
@@ -850,13 +887,14 @@ export default function MilkReceiving() {
               placeholder="e.g. 230626"
             />
           </div>
+          <label className="block text-sm">Start of production date (usually Shift 1 date)<input type="date" value={newLot.productionDate} onChange={e=>setNewLot({...newLot,productionDate:e.target.value})} className="mt-1 w-full border rounded-lg px-3 py-2"/><span className="text-xs text-slate-500">The date production starts for this milk lot. Production can continue over several days. Separate from receiving; used in production and packet codes.</span></label>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">Receipt Date</label>
               <input
                 type="date"
                 value={newLot.receiptDate}
-                onChange={(e) => setNewLot({ ...newLot, receiptDate: e.target.value })}
+                onChange={(e) => setNewLot({ ...newLot, receiptDate: e.target.value, lotCode: e.target.value ? milkCode(e.target.value) : '' })}
                 className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
               />
             </div>

@@ -1,3 +1,5 @@
+import type { TraceState } from '../traceability/domain';
+import { paneerCaseSummary } from '../traceability/mixedPaneerCases';
 import type { MilkLot, PackedSku, ProductionRound } from '../data/mockData';
 import type { CrumbingBatch } from '../pages/CrumbingTab';
 import { crumbingSkuByCode, getCrumbingPackWeight, getGheePackWeight, getPaneerPackWeight, gheeSkuByCode, normalizeFinishedGoodsSku, paneerSkuByCode } from '../data/skuConfig';
@@ -36,7 +38,7 @@ function packingWeight(pack: PackedSku): number | undefined {
 }
 
 /** Read-only production totals, not stock-on-hand. No transfer subtraction or writes. */
-export function buildMilkLotPackedSummary(lot: MilkLot, rounds: ProductionRound[], batches: CrumbingBatch[] = []) {
+export function buildMilkLotPackedSummary(lot: MilkLot, rounds: ProductionRound[], batches: CrumbingBatch[] = [], traceState?:TraceState) {
   const belongs = (round: ProductionRound) => round.milkLotId ? round.milkLotId === lot.id : round.milkLotCode === lot.lotCode;
   const lotRounds = rounds.filter(round => belongs(round) && !['cancelled', 'spoiled'].includes(round.status)
     && round.creamSource !== 'external' && !round.sourceCreamLotId);
@@ -108,9 +110,16 @@ export function buildMilkLotPackedSummary(lot: MilkLot, rounds: ProductionRound[
       add(pack);
     }
   }
+  const sharedPaneerCases:{sku:string;caseCode:string;cases:number;packetsFromLot:number}[]=[];
+  if(traceState)for(const row of rows.values()){
+    const composition=paneerCaseSummary(rounds,[lot],traceState,row.sku,lot.id);
+    if(!composition)continue;
+    row.cases=composition.totalCases;row.loose=composition.looseRemaining;
+    for(const c of composition.sharedCases)sharedPaneerCases.push({sku:row.sku,caseCode:c.caseBatchCode,cases:c.caseCount,packetsFromLot:c.parts.filter(p=>p.source.lotId===lot.id).reduce((n,p)=>n+p.packets,0)});
+  }
   const groups: MilkLotPackedGroup[] = categories.map(category => {
     const lines = [...rows.values()].filter(row => row.category === category.id).sort((a, b) => a.sku.localeCompare(b.sku));
     return { ...category, lines, weightKg: roundKg(lines.reduce((sum, line) => sum + line.weightKg, 0)), missingWeight: lines.some(line => line.missingWeight) };
   }).filter(group => group.id !== 'other' || group.lines.length > 0);
-  return { groups, mixedLotPackingEntries };
+  return { groups, mixedLotPackingEntries, sharedPaneerCases };
 }

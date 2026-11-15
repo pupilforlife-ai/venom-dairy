@@ -113,6 +113,11 @@ export function reconcileFinishedStock(
       claimedStockIds.add(linkedStock.id);
       return {
         ...linkedStock,
+        packetBatchCode: linkedStock.packetBatchCode || entry.pack.packetBatchCode,
+        caseBatchCode: linkedStock.caseBatchCode || entry.pack.caseBatchCode,
+        traceabilityProductionDate: linkedStock.traceabilityProductionDate || entry.pack.traceabilityProductionDate,
+        traceabilityPrefixVersion: linkedStock.traceabilityPrefixVersion || entry.pack.traceabilityPrefixVersion,
+        traceabilityGap: linkedStock.traceabilityGap || entry.pack.traceabilityGap,
         sku: normalizeFinishedGoodsSku(linkedStock.sku),
         persisted: true,
         sourceRoundId: entry.round.id,
@@ -130,6 +135,11 @@ export function reconcileFinishedStock(
       sku: entry.pack.sku,
       productName: definition?.productName || entry.pack.sku,
       packingRunId: entry.packingRunId,
+      packetBatchCode: entry.pack.packetBatchCode,
+      caseBatchCode: entry.pack.caseBatchCode,
+      traceabilityProductionDate: entry.pack.traceabilityProductionDate,
+      traceabilityPrefixVersion: entry.pack.traceabilityPrefixVersion,
+      traceabilityGap: entry.pack.traceabilityGap,
       cases: entry.pack.cases || 0,
       loosePackets: entry.pack.loose || 0,
       totalPackets,

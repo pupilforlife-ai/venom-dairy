@@ -1,3 +1,7 @@
+import {runTraceCommand} from '../traceability/transport';
+import type {BagCorrectionRequest} from '../traceability/automaticPaneer';
+import type {AfterCuttingRequest} from '../traceability/afterCutting';
+import type {TrayPackingRequest} from '../traceability/paneerTrays';
 import { createContext, useContext, ReactNode } from 'react';
 import { useSupabaseState } from '../hooks/useSupabaseState';
 import { returnHcpBalanceToPool, reconcileHcpChillerReturns } from '../lib/hcpCrumbing';
@@ -72,6 +76,9 @@ interface AppContextType extends AppState {
   removeProductionRound: (id: string) => boolean;
   cancelProductionRound: (id: string, reason?: string) => boolean;
   updateProductionRound: (id: string, updates: Partial<ProductionRound>) => void;
+  recordPaneerBagCorrection: (request:BagCorrectionRequest)=>Promise<void>;
+  recordPaneerAfterCutting: (request:AfterCuttingRequest)=>Promise<void>;
+  recordPaneerTrayPacking: (request:TrayPackingRequest)=>Promise<void>;
   commitPaneerPacking: (request: PaneerPackingRequest) => Promise<ProductionRound | null>;
   createGheeRound: (request: GheeRoundRequest) => Promise<ProductionRound | null>;
   recordGheeAfOil: (request: RecordGheeAfOilRequest) => Promise<void>;
@@ -81,8 +88,9 @@ interface AppContextType extends AppState {
   recordProductionRoundActivity: (
     id: string,
     updates: Partial<ProductionRound>,
-    event: Omit<ProductionRoundHistoryEvent, 'id' | 'occurredAt'> & { occurredAt?: string }
-  ) => void;
+    event: Omit<ProductionRoundHistoryEvent, 'id' | 'occurredAt'> & { occurredAt?: string },
+    attempt?: {operationId:string;expectedRound:ProductionRound}
+  ) => Promise<void>;
   requestProductionRoundTypeChange: (id: string, newType: 'D' | 'C/S', reason: string) => Promise<boolean>;
   reviewProductionRoundTypeChange: (id: string, decision: 'approve' | 'reject', decisionReason?: string) => Promise<boolean>;
   advanceRoundStatus: (id: string) => void;
@@ -445,7 +453,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const recordProductionRoundActivity: AppContextType['recordProductionRoundActivity'] = (id, updates, event) => {
+  const recordProductionRoundActivity: AppContextType['recordProductionRoundActivity'] = async (id, updates, event, attempt) => {
+    const current=productionRounds.find(round=>round.id===id);
+    if(supabase&&current&&['D','C/S'].includes(current.type)){
+      await runTraceCommand('activity',{roundId:id,updates,event,expectedRound:attempt?.expectedRound||current},attempt?`${attempt.operationId}:${event.type}`:undefined);
+      if(attempt)attempt.expectedRound={...attempt.expectedRound,...updates};return;
+    }
     setProductionRounds(currentRounds => currentRounds.map(round => {
       if (round.id !== id) return round;
       const occurredAt = event.occurredAt || new Date().toISOString();
@@ -464,6 +477,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         round.status === 'scheduled' && updates.status === 'in_production' && Boolean(updates.vat));
     }));
   };
+
+  const recordPaneerBagCorrection=async(request:BagCorrectionRequest)=>{await runTraceCommand('bag',request,request.id);};
+  const recordPaneerAfterCutting=async(request:AfterCuttingRequest)=>{await runTraceCommand('after_cutting',request,request.id);};
+  const recordPaneerTrayPacking=async(request:TrayPackingRequest)=>{await runTraceCommand('trays',request,request.id);};
 
   const requestProductionRoundTypeChange = async (id: string, newType: 'D' | 'C/S', reason: string) => {
     const round = productionRounds.find(item => item.id === id);
@@ -768,6 +785,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cancelProductionRound,
     updateProductionRound,
     commitPaneerPacking,
+    recordPaneerBagCorrection,
+    recordPaneerAfterCutting,
+    recordPaneerTrayPacking,
     createGheeRound,
     recordGheeAfOil,
     reviewGheeAfOil,

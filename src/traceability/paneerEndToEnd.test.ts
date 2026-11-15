@@ -1,0 +1,31 @@
+import { describe,it,expect } from 'vitest';
+import { makePaneerQaFixture } from './testing/qaFixture';
+import { getRoundMilkInput } from '../data/mockData';
+import { roundIngredientSources } from './automaticPaneer';
+import { paneerJourney } from './paneerJourney';
+import { loosePacketSources } from './mixedPaneerCases';
+import { assembleMixedCaseStock,mixedCaseStockIssues } from './mixedCaseStock';
+import { saveTrayPacking,trayPackingFingerprint,trayPackingProgress } from './paneerTrays';
+import { retentionStorage,transferRetentionSamples } from './paneerStorage';
+import { splitUnitStock,stockTransferAllocation } from './unitStockTransfer';
+import { reconcileFinishedStock,isOnSiteFinishedStock } from '../lib/finishedStock';
+describe('complete paneer traceability scenario',()=>{
+ it('retains milk→ingredient bag→round→cutting→tray→packets→mixed case→handover links with a closed-lot sample transfer',()=>{
+  const qa=makePaneerQaFixture(),lot=qa.lots[0],sourceBefore=JSON.stringify(qa.rounds);
+  expect(qa.rounds.reduce((n,r)=>n+getRoundMilkInput(r),0)).toBe(1500);
+  expect(qa.rounds.map(r=>r.paneerAutomaticTrace!.code)).toEqual(['80-1011A1','80-1011A2','90-1011A3']);
+  expect(roundIngredientSources(qa.rounds[0],'gdl').map(s=>s.batchCodes)).toEqual([['QA-GDL-FLOOR'],['QA-gdl-LOT1']]);
+  expect(qa.rounds[2].paneerAutomaticTrace!.ingredients.find(i=>i.id==='fis')).toMatchObject({quantity:835,unit:'g'});expect(qa.rounds[2].paneerAutomaticTrace!.ingredients.find(i=>i.id==='af_oil')).toMatchObject({quantity:20,unit:'kg'});
+  const sources=loosePacketSources(qa.rounds,qa.lots,qa.state),req={id:'journey-case',sku:'MPAN100',caseCount:1,parts:[{key:sources[0].key,packets:13,expectedFingerprint:sources[0].fingerprint},{key:sources[1].key,packets:2,expectedFingerprint:sources[1].fingerprint}]};
+  const assembled=assembleMixedCaseStock(qa.state,[],req,qa.rounds,qa.lots,'QA packer','now');expect(JSON.stringify(qa.rounds)).toBe(sourceBefore);
+  const lines=reconcileFinishedStock(qa.rounds,assembled.stock);expect(lines.reduce((n,s)=>n+s.cases,0)).toBe(9);expect(lines.reduce((n,s)=>n+s.loosePackets,0)).toBe(9);expect(lines.reduce((n,s)=>n+s.totalPackets,0)).toBe(144);
+  expect(paneerJourney(qa.rounds[0],lot,assembled.state).packedKg).toBe(73);
+  const trays=saveTrayPacking(qa.rounds,{id:'trays',roundId:qa.rounds[0].id,expectedFingerprint:trayPackingFingerprint(qa.rounds[0]),packedNumbers:[1,3],reason:''},'QA shift end','staff','later');expect(trayPackingProgress(trays[0]).pending).toEqual([12]);
+  const mixed=assembled.stock.find(s=>s.mixedCaseId)!,plan=splitUnitStock(mixed,1,0,15),allocation=stockTransferAllocation(mixed,plan.transferred.cases,0);
+  expect(allocation.mixedCaseParts!.map(p=>[p.source.roundId,p.packets,p.source.packetBatchCode])).toEqual([['qa-r1',13,'11-1011A1'],['qa-r2',2,'11-1011A2']]);
+  const transferred=assembled.stock.map(s=>s.id===mixed.id?{...s,...plan.transferred,status:'handed_over' as const,storageLocation:'Distribution Coldroom'}:s);
+  expect(reconcileFinishedStock(qa.rounds,transferred).filter(isOnSiteFinishedStock).reduce((n,s)=>n+s.totalPackets,0)).toBe(129);expect(mixedCaseStockIssues(assembled.state,qa.rounds,qa.lots,transferred)).toEqual([]);
+  const closed={...lot,productionClosed:true},samples=retentionStorage(trays,closed,assembled.state),final=transferRetentionSamples(assembled.state,{id:'samples',lotId:lot.id,expectedSamples:samples.fingerprint},trays,[closed],'QA owner','later');
+  expect(retentionStorage(trays,closed,final)).toMatchObject({crateCode:'RS-091126',coldroomPieces:18,containerPieces:0});expect(final.retentionTransfers!.samples.samples[0].batchCode).toBe('80-1011A1');
+ });
+});

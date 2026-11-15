@@ -42,7 +42,7 @@ export default function Cutting() {
     notes: '',
   });
 
-  const handleCut = () => {
+  const handleCut = async () => {try {
     if (!cutForm.batchId || !cutForm.cutBy) {
       showToast('error', 'Please fill in all required fields');
       return;
@@ -52,7 +52,7 @@ export default function Cutting() {
     if (!round) return;
 
     // Update round status to 'cut'
-    recordProductionRoundActivity(round.id, {
+    await recordProductionRoundActivity(round.id, {
       status: 'cut',
       cutBy: cutForm.cutBy,
       cuttingType: cutForm.cutType,
@@ -109,6 +109,7 @@ export default function Cutting() {
     showToast('success', `Cutting recorded: ${cutForm.outputWeight} kg cut, ${cutForm.pan111Weight} kg PAN111`);
     setShowCutModal(false);
     setCutForm({ batchId: '', cutBy: '', cutType: '400g blocks', outputWeight: 0, pan111Weight: 0, wasteWeight: 0, notes: '' });
+  }catch(error){showToast('error',(error as Error).message);}
   };
 
   // Freeze action: persist the stock movement so Packing can see it.

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { DistributionHandover } from '../data/mockData';
 
 export type DistributionRecordGroups = Array<[string, DistributionHandover[]]>;
@@ -18,7 +19,7 @@ export function DistributionRecords({ groups, discrepancy = false }: { groups: D
           </tr></thead>
           <tbody className="divide-y divide-slate-100">{[...records].sort((a, b) => b.handedOverAt.localeCompare(a.handedOverAt)).map(record => <tr key={record.id} className="align-top hover:bg-slate-50">
             <td className="px-3 py-3 font-medium text-slate-900">{record.productName}{record.sku && <div className="mt-1 font-mono text-xs text-indigo-700">{record.sku}</div>}</td>
-            <td className="px-3 py-3 text-xs"><div className="font-mono font-semibold text-emerald-700">{record.finishedGoodsBatchCode || 'Finished batch not assigned'}</div><div className="mt-1 text-slate-500">Source: {(record.sourceBatchCodes?.length ? record.sourceBatchCodes : [record.batchCode]).join(', ')}</div>{record.finishedGoodsBatchCodeReviewedBy && <div className="mt-1 text-indigo-700">Batch code reviewed by {record.finishedGoodsBatchCodeReviewedBy}</div>}</td>
+            <td className="px-3 py-3 text-xs"><div className="font-mono font-semibold text-emerald-700">{record.finishedGoodsBatchCode || 'Finished batch not assigned'}</div><div className="mt-1 text-slate-500">Source: {(record.sourceBatchCodes?.length ? record.sourceBatchCodes : [record.batchCode]).join(', ')}</div>{record.stockAllocations?.filter(a=>a.mixedCaseId).map(a=><div key={a.stockId} className="mt-1"><Link to={`/traceability?q=${encodeURIComponent(a.mixedCaseId!)}`}>{a.cases} mixed case(s) · source history</Link>{a.mixedCaseParts?.map(p=><div key={p.source.key}>{p.source.lotCode} · S{p.source.shift}/R{p.source.round} · {p.packets} packets · {p.source.packetBatchCode||'Label not recorded'}</div>)}</div>)}{record.finishedGoodsBatchCodeReviewedBy && <div className="mt-1 text-indigo-700">Batch code reviewed by {record.finishedGoodsBatchCodeReviewedBy}</div>}</td>
             <td className={`px-3 py-3 font-semibold ${discrepancy ? 'text-red-700' : 'text-slate-900'}`}>
               {(discrepancy ? record.partialRemainderQuantity || 0 : record.quantity).toFixed(record.unit === 'kg' ? 2 : 0)} {record.unit}
               {!discrepancy && record.cases !== undefined && <div className="text-xs font-normal text-slate-500">{record.cases} cases · {record.looseQuantity || 0} loose</div>}
