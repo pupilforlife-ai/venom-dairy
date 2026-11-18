@@ -13,3 +13,19 @@ Verification: full frontend/type build; 419 source tests, including new authenti
 Operational setup: for the next milk lot, enter start-of-production date and prepare the Ingredient checklist before selecting the first vat. Existing rounds without those source records remain explicitly incomplete. Do not copy fictional preview data into production.
 
 Code rollback: return the frontend to the baseline commit if required. Preserve all newer production records, trace metadata, command receipts and audit history; never restore an old collection over subsequent staff work. Review the additive backend separately rather than dropping source history.
+
+
+18 November hotfix: the original `commit_paneer_traceability` saved existing
+collections with `INSERT ... ON CONFLICT DO UPDATE`. PostgreSQL runs BEFORE
+INSERT guards before resolving that conflict, so unchanged historical butter
+settlement/loss receipts were evaluated without an OLD row. The butter guard
+correctly rejected the apparent new history and blocked an unrelated paneer
+vat start. The new function uses UPDATE for existing version-checked, locked
+collections and INSERT only when the collection is absent. No guard is disabled
+or relaxed, and this definitions-only migration changes no operational rows.
+
+The regression fails with the former function with the user's exact
+late-butter error. With the fix, the same vat start succeeds, leaves both
+historical butter records and other collections identical, writes once, and
+replays without a second write. Attempts to edit either historical settlement
+or loss receipts still fail. Test artifacts remain inside this project folder.
