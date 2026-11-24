@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { ProductionRound } from '../data/mockData';
 import { Modal } from '../components/Modal';
 import { useApp } from '../store/AppContext';
@@ -9,7 +9,7 @@ import { cuttingStorageDefaults } from './paneerStorage';
 import { cuttingSaveDecision, retentionPacketBatchCode } from './paneerJourney';
 import PaneerCutDetailsForm from './PaneerCutDetailsForm';
 
-export default function PaneerAfterCutting({round}:{round:ProductionRound}) {
+function PaneerAfterCutting({round}:{round:ProductionRound}) {
  const {recordPaneerAfterCutting,milkLots,productionRounds}=useApp(),{state}=useTraceability();
  const [open,setOpen]=useState(false),[draft,setDraft]=useState(emptyRoundTrace().cutting),[expected,setExpected]=useState(''),[id,setId]=useState('');
  const [warning,setWarning]=useState(false),[ack,setAck]=useState(false),[reason,setReason]=useState(''),[message,setMessage]=useState('');
@@ -35,3 +35,5 @@ export default function PaneerAfterCutting({round}:{round:ProductionRound}) {
   </Modal>
  </div>;
 }
+
+export default memo(PaneerAfterCutting);

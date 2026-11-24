@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { ProductionRound } from '../data/mockData';
 import { Modal } from '../components/Modal';
 import { useApp } from '../store/AppContext';
 import { paneerTrayConflicts } from './paneerStorage';
 import { trayPackingFingerprint,trayPackingProgress } from './paneerTrays';
-export default function RoundTrayStatus({round,rounds}:{round:ProductionRound;rounds:ProductionRound[]}) {
+function RoundTrayStatus({round,rounds}:{round:ProductionRound;rounds:ProductionRound[]}) {
  const {recordPaneerTrayPacking}=useApp();
  const [open,setOpen]=useState(false),[selected,setSelected]=useState<number[]>([]),[id,setId]=useState(''),[expected,setExpected]=useState(''),[reason,setReason]=useState(''),[message,setMessage]=useState('');
  const progress=trayPackingProgress(round),numbers=progress.assignment.numbers;
@@ -34,3 +34,5 @@ export default function RoundTrayStatus({round,rounds}:{round:ProductionRound;ro
   </Modal>
  </div>;
 }
+
+export default memo(RoundTrayStatus);

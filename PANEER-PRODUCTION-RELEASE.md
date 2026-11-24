@@ -29,3 +29,32 @@ late-butter error. With the fix, the same vat start succeeds, leaves both
 historical butter records and other collections identical, writes once, and
 replays without a second write. Attempts to edit either historical settlement
 or loss receipts still fail. Test artifacts remain inside this project folder.
+
+
+24 November performance release: paneer countdown ticks now update only their
+small display components. The parent board no longer redraws every second,
+including when no timers are active. Initial rendering mounts only the current
+phone/desktop view at the existing 768 px boundary; a previously visited view
+stays mounted during resizing to preserve open forms and unsaved drafts. No
+styles, stage durations, permissions, calculations or source records change.
+Closed Owner/Admin manual correction content is created when expanded, and
+unchanged per-round trace/cutting/tray components can reuse their render.
+
+Shared guard performance: previous rounds are indexed once rather than scanned
+repeatedly. Identical paneer rows require no transformation; every changed/new
+row retains the original checks. The numeric and AF-oil guards retain all their
+conditions and use indexed lookups. No trigger is disabled or removed. The
+migration replaces only these three definitions and does not update app_state.
+
+Validation: 421 tests in 48 files, typecheck, production build and a React
+lifecycle regression. Five countdown ticks produce one parent-board render;
+expired timers stop, hidden views are not initially mounted, and both phone and
+desktop unsaved drafts survive view switches. A private read-only 294-round
+snapshot was used for rollback-only TEMP-table SQL benchmarks. The measured
+save fell from 1857.539 ms to 192.883 ms; production latency also includes network
+and Edge processing. Initial 62-round markup fell from 17,571 HTML elements to
+8,932 desktop / 8,965 phone elements. SQL regressions retain atomic saves,
+labels, stale-write rejection, retries, lot isolation, old-client metadata,
+butter settlement/loss protection, AF-oil/source protection and numeric checks.
+Chrome interactive profiling was unavailable because its browser host was not
+connected; no other apps or browsers were accessed.

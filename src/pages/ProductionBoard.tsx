@@ -1,3 +1,6 @@
+import { PaneerCountdown } from '../components/PaneerCountdown';
+import { formatCountdownTime as formatTime } from '../lib/paneerCountdown';
+import { PaneerBoardView, usePhonePaneerBoard } from '../components/PaneerBoardView';
 import PaneerScrambleReconciliation from '../traceability/PaneerScrambleReconciliation';
 import { loosePackingBalance } from '../traceability/mixedPaneerCases';
 import { correctMixedSourceStock,hasMixedCaseSourceHistory } from '../traceability/mixedCaseStock';
@@ -135,6 +138,7 @@ function cipCycleLabel(record: CipRecord) {
 }
 
 export default function ProductionBoard() {
+  const phoneBoard = usePhonePaneerBoard();
   const {state:traceState}=useTraceability();
   const { 
     productionRounds, productionShifts, intermediateLots, milkLots, finishedStock,
@@ -206,9 +210,6 @@ export default function ProductionBoard() {
   const [blockWeightsRoundId, setBlockWeightsRoundId] = useState<string | null>(null);
   const [blockWeightsMode, setBlockWeightsMode] = useState<'review' | 'correct'>('review');
   const [blockWeightsDraft, setBlockWeightsDraft] = useState<number[]>([]);
-  
-  // Timer state
-  const [timers, setTimers] = useState<Record<string, number>>({});
   
   // Cut form state
   const [cutForm, setCutForm] = useState({
@@ -309,39 +310,6 @@ export default function ProductionBoard() {
       setFilters(current => ({ ...current, milkLot: selectedMilkLotId, shift: 'all' }));
     }
   }, [filters.milkLot, selectedMilkLotId]);
-
-  // Update timers every second
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimers(prev => {
-        const updated = { ...prev };
-        productionRounds.forEach(round => {
-          if (round.status === 'pressing' && round.pressingStartedAt) {
-            const elapsed = Math.floor((Date.now() - new Date(round.pressingStartedAt).getTime()) / 1000);
-            updated[round.id] = Math.max(0, 1800 - elapsed); // 30 minutes
-          } else if (round.status === 'cooling' && round.coolingStartedAt && round.coolingLocation) {
-            const elapsed = Math.floor((Date.now() - new Date(round.coolingStartedAt).getTime()) / 1000);
-            const duration = round.coolingLocation === 'tank' ? 5400 : 7200; // 90min or 120min
-            updated[round.id] = Math.max(0, duration - elapsed);
-          } else if (round.status === 'cooling') {
-            updated[round.id] = 0;
-          } else if (round.status === 'resting' && round.restingStartedAt) {
-            const elapsed = Math.floor((Date.now() - new Date(round.restingStartedAt).getTime()) / 1000);
-            updated[round.id] = Math.max(0, 5400 - elapsed); // 90 minutes
-          }
-        });
-        return updated;
-      });
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [productionRounds]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   // Filter rounds
   const filteredRounds = productionRounds.filter((round) => {
@@ -1545,8 +1513,7 @@ export default function ProductionBoard() {
       return <div className="mt-1 flex flex-wrap gap-1"><button onClick={() => handleStartPressing(round.id)} className="rounded bg-purple-500 px-2 py-1 text-xs text-white hover:bg-purple-600">Start Pressing</button></div>;
     }
     if (round.status === 'pressing') {
-      const timer = timers[round.id] || 0;
-      return <div className="mt-1 flex flex-wrap items-center gap-2">
+      return <PaneerCountdown round={round}>{timer => <div className="mt-1 flex flex-wrap items-center gap-2">
         <Timer className="h-4 w-4 text-purple-500" />
         <span className="font-mono text-xs font-bold">{formatTime(timer)}</span>
         {timer === 0 && <>
@@ -1554,7 +1521,7 @@ export default function ProductionBoard() {
           <button onClick={() => handleStartCooling(round.id, 'tank')} className="rounded bg-cyan-600 px-2 py-1 text-xs text-white hover:bg-cyan-700">Cooling Tank (90 min)</button>
           <button onClick={() => handleStartCooling(round.id, 'chiller')} className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700">Chiller (120 min)</button>
         </>}
-      </div>;
+      </div>}</PaneerCountdown>;
     }
     if (round.status === 'cooling' && (!round.coolingLocation || !round.coolingStartedAt)) {
       return <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -1564,15 +1531,14 @@ export default function ProductionBoard() {
       </div>;
     }
     if (round.status === 'resting') {
-      const timer = timers[round.id] || 0;
-      return <div className="mt-1 flex flex-wrap items-center gap-2">
+      return <PaneerCountdown round={round}>{timer => <div className="mt-1 flex flex-wrap items-center gap-2">
         <Timer className="h-4 w-4 text-teal-500" />
         <span className="font-mono text-xs font-bold">{formatTime(timer)}</span>
         {timer === 0 && <>
           <span className="text-xs font-bold text-emerald-600">✓ Ready for Cutting</span>
           <button onClick={() => handleReadyForCutting(round.id)} className="rounded bg-amber-500 px-2 py-1 text-xs text-white hover:bg-amber-600">Start Cutting</button>
         </>}
-      </div>;
+      </div>}</PaneerCountdown>;
     }
     if (round.status === 'cut' && round.cuttingType !== 'SPP pieces') {
       return <div className="mt-1 flex flex-wrap gap-1">
@@ -2070,6 +2036,7 @@ export default function ProductionBoard() {
               {/* Rounds table */}
               {!isCollapsed && rounds.length > 0 ? (
                 <>
+                <PaneerBoardView active={phoneBoard}>
                 <div className="space-y-3 bg-slate-50 p-3 md:hidden">
                   {rounds.map((round) => {
                     const blockCount = round.numberOfBlocks ?? round.blockWeights?.length ?? 0;
@@ -2100,11 +2067,11 @@ export default function ProductionBoard() {
                           </div>
                           <div className="mt-3 max-w-full overflow-x-auto overscroll-x-contain pb-1"><StatusPipeline currentStatus={round.status} /></div>
                           {round.startTime && <div className="mt-2 text-[10px] text-slate-500">Started {new Date(round.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
-                          {round.status === 'cooling' && round.coolingStartedAt && round.coolingLocation && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                            <span className="font-mono font-bold">{formatTime(timers[round.id] || 0)}</span>
+                          {round.status === 'cooling' && round.coolingStartedAt && round.coolingLocation && <PaneerCountdown round={round}>{timer => <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                            <span className="font-mono font-bold">{formatTime(timer)}</span>
                             <span className="text-slate-500">{round.coolingLocation === 'tank' ? 'Cooling Tank · 90 min' : 'Chiller · 120 min'}</span>
-                            {(timers[round.id] || 0) === 0 && <button onClick={() => handleStartResting(round.id)} className="rounded bg-teal-500 px-2 py-1 font-medium text-white">Start Resting</button>}
-                          </div>}
+                            {timer === 0 && <button onClick={() => handleStartResting(round.id)} className="rounded bg-teal-500 px-2 py-1 font-medium text-white">Start Resting</button>}
+                          </div>}</PaneerCountdown>}
                           {getStageActionButtons(round)}
                         </section>
                         <section className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-2.5">
@@ -2163,6 +2130,8 @@ export default function ProductionBoard() {
                   })}
                 </div>
 
+                </PaneerBoardView>
+                <PaneerBoardView active={!phoneBoard}>
                 <div className="hidden w-full min-w-0 max-w-full overflow-x-auto md:block">
                   <table className="production-board-table w-full text-xs">
                     <colgroup>
@@ -2238,12 +2207,12 @@ export default function ProductionBoard() {
                               </select>
                             ) : <div className="inline-flex rounded-lg border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">{statusLabels[round.status] || round.status}</div>}
                             {round.startTime && <div className="mt-1 text-[10px] text-slate-500">{new Date(round.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
-                            {round.status === 'cooling' && round.coolingStartedAt && round.coolingLocation && <div className="mt-1 flex items-center gap-2 text-[10px]">
-                              <span className="font-mono font-bold">{formatTime(timers[round.id] || 0)}</span>
+                            {round.status === 'cooling' && round.coolingStartedAt && round.coolingLocation && <PaneerCountdown round={round}>{timer => <div className="mt-1 flex items-center gap-2 text-[10px]">
+                              <span className="font-mono font-bold">{formatTime(timer)}</span>
                               <span className="text-slate-500">{round.coolingLocation === 'tank' ? 'Cooling Tank · 90 min' : 'Chiller · 120 min'}</span>
-                              {(timers[round.id] || 0) === 0 && <span className="font-bold text-emerald-600">✓ Ready for Resting</span>}
-                              {(timers[round.id] || 0) === 0 && <button onClick={() => handleStartResting(round.id)} className="rounded bg-teal-500 px-2 py-1 text-white font-medium hover:bg-teal-600">Start Resting</button>}
-                            </div>}
+                              {timer === 0 && <span className="font-bold text-emerald-600">✓ Ready for Resting</span>}
+                              {timer === 0 && <button onClick={() => handleStartResting(round.id)} className="rounded bg-teal-500 px-2 py-1 text-white font-medium hover:bg-teal-600">Start Resting</button>}
+                            </div>}</PaneerCountdown>}
                             {getStageActionButtons(round)}
                           </td>
                           <td className="px-2 py-1.5 text-slate-600 text-sm">{round.blockWeights?.length ? <button onClick={() => openBlockWeights(round.id)} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-medium text-indigo-700 hover:bg-indigo-100" aria-haspopup="dialog" title="Review individual block weights">{round.blockWeights.length} blocks</button> : '—'}</td>
@@ -2315,6 +2284,7 @@ export default function ProductionBoard() {
                     </tbody>
                   </table>
                 </div>
+                </PaneerBoardView>
                 </>
               ) : (
                 <div className="p-6 text-center text-slate-400 text-sm">

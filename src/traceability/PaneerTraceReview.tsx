@@ -1,5 +1,5 @@
 import PaneerJourneyView from './PaneerJourneyView';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { MilkLot,ProductionRound } from '../data/mockData';
 import { Modal } from '../components/Modal';
 import { latestPaneerIngredientIssue } from '../lib/paneerRecipe';
@@ -8,8 +8,8 @@ import { agreedPrefixes,safeCode } from './domain';
 import { roundIngredientSources } from './automaticPaneer';
 import RoundTracePanel from './RoundTracePanel';
 
-export default function PaneerTraceReview({round,lot}:{round:ProductionRound;lot?:MilkLot}) {
-  const [open,setOpen]=useState(false),{state}=useTraceability();
+function PaneerTraceReview({round,lot}:{round:ProductionRound;lot?:MilkLot}) {
+  const [open,setOpen]=useState(false),[manualOpen,setManualOpen]=useState(false),{state}=useTraceability();
   const trace=round.paneerAutomaticTrace,issue=latestPaneerIngredientIssue(round),manual=state.rounds[round.id]?.value;
   const date=trace?.productionDate||round.traceabilityProductionDate||state.lots[round.milkLotId]?.value.productionDate||lot?.traceabilityProductionDate||'';
   const code=trace?.code||safeCode(state.prefixes[round.type]?.value||agreedPrefixes[round.type],date,round.shiftNumber,round.roundNumber).code;
@@ -35,6 +35,8 @@ export default function PaneerTraceReview({round,lot}:{round:ProductionRound;lot
       <div className="hidden md:block"><PaneerJourneyView round={round} lot={lot} state={state}/></div>
       <p className="trace-help">Continue recording temperatures, cutting, weights and packing through the normal board buttons. You do not need to fill in a separate traceability form for each round.</p>
     </div></Modal>
-    {owner&&<details><summary>Owner/Admin · earlier manual records and corrections</summary><RoundTracePanel round={round} lot={lot}/></details>}
+    {owner&&<details onToggle={event=>setManualOpen(event.currentTarget.open)}><summary>Owner/Admin · earlier manual records and corrections</summary>{manualOpen&&<RoundTracePanel round={round} lot={lot}/>}</details>}
   </div>;
 }
+
+export default memo(PaneerTraceReview);

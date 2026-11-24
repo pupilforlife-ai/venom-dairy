@@ -104,3 +104,32 @@ begin
  if (select value from pg_temp.state_test where key='vejoy_productionRounds') is distinct from after_rounds then raise exception 'Rejected edits changed records';end if;
 end $$;
 select 'vat start with historical butter settlement/loss receipts / exact source preservation / single write / retry / active guards passed' as result;
+
+-- Shared-index optimization must preserve Ghee / butter numeric protections.
+select set_config('app.atomic_ghee_round','on',true);
+select set_config('app.atomic_ghee_af_oil','on',true);
+update pg_temp.state_test set value=value||'[
+ {"id":"ghee-guard-fixture","type":"Ghee","status":"scheduled","butterInput":92.5,"actualInput":105,"plannedInput":105,"afOilInput":12.5,"expectedYield":73.5,"gheeInputVersion":1,"afOilConfirmationRequired":true,"afOilRecord":{"actualKg":12.5,"confirmedBy":"owner"},"afOilAuditHistory":[{"id":"confirmed"}]},
+ {"id":"butter-numeric-fixture","type":"Butter","butterOutput":25,"remainingBalance":25,"usedInGhee":0,"status":"churned"}
+]'::jsonb where key='vejoy_productionRounds';
+select set_config('app.atomic_ghee_round','off',true);
+select set_config('app.atomic_ghee_af_oil','off',true);
+do $$
+declare before_value jsonb;
+begin
+ select value into before_value from pg_temp.state_test where key='vejoy_productionRounds';
+ begin
+  update pg_temp.state_test set value=(select jsonb_agg(case when r->>'id'='ghee-guard-fixture' then r||'{"afOilRecord":{"actualKg":99}}'::jsonb else r end) from jsonb_array_elements(value) r) where key='vejoy_productionRounds';
+  raise exception 'AF oil receipt overwrite accepted';
+ exception when others then if sqlerrm not like '%AF oil confirmations and approvals%' then raise;end if;end;
+ begin
+  update pg_temp.state_test set value=(select jsonb_agg(case when r->>'id'='ghee-guard-fixture' then r||'{"butterInput":90}'::jsonb else r end) from jsonb_array_elements(value) r) where key='vejoy_productionRounds';
+  raise exception 'Confirmed ghee source edit accepted';
+ exception when others then if sqlerrm not like '%Confirmed AF oil source and butter input%' then raise;end if;end;
+ begin
+  update pg_temp.state_test set value=(select jsonb_agg(case when r->>'id'='butter-numeric-fixture' then r||'{"remainingBalance":-1}'::jsonb else r end) from jsonb_array_elements(value) r) where key='vejoy_productionRounds';
+  raise exception 'Negative butter balance accepted';
+ exception when others then if sqlerrm not like '%Invalid remainingBalance%' then raise;end if;end;
+ if (select value from pg_temp.state_test where key='vejoy_productionRounds') is distinct from before_value then raise exception 'Rejected numeric/source changes wrote records';end if;
+end $$;
+select 'indexed shared guards retain ghee AF oil/source and butter numeric protections' as result;
