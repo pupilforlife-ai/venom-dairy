@@ -15,6 +15,11 @@ describe('read-only packet label estimate', () => {
   const r=round({remainingBalance:999,sppRecordedWeight:2,packedSkus:[{sku:'MPAN100',cases:1,loose:0},{sku:'PAN111',cases:0,weightKg:1}]});
   expect(packetLabelPlan(r,'MPAN200')).toMatchObject({weightKg:54,packets:270});
  });
+ it('estimates packet labels from paneer after cloth, including subsequent packing',()=>{
+  const r=round({paneerCuttingDetails:{clothKg:2} as ProductionRound['paneerCuttingDetails']});
+  expect(packetLabelPlan(r,'MPAN200')).toMatchObject({balanceKg:70,packets:350});
+  expect(packetLabelPlan({...r,packedSkus:[{sku:'MPAN200',cases:1,loose:1}]},'MPAN200')).toMatchObject({balanceKg:65,packets:325});
+ });
  it('supports partial weights, SKU changes and accurate decimal division',()=>{
   expect(packetLabelPlan(round(),'MPAN200',72.4)).toMatchObject({packets:362,exceedsBalance:true});
   expect(packetLabelPlan(round(),'MPAN200',20.19)).toMatchObject({packets:100,remainderKg:0.19});

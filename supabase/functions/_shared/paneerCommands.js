@@ -98,6 +98,27 @@ function getPaneerPackWeight(definition, cases, loose, looseWeightKg, weightKg, 
   return Math.max(0, cases) * caseWeight + looseWeight;
 }
 
+// src/lib/paneerBalance.ts
+function calculatePaneerRemainingBalance(outputWeight, sppRecordedWeight = 0, packedSkus = [], clothWeightKg = 0) {
+  const packedWeight = packedSkus.reduce((total, pack) => {
+    const weight = pack.weightKg !== void 0 ? pack.weightKg : getPaneerPackWeight(
+      paneerSkuByCode[pack.sku],
+      pack.cases || 0,
+      pack.loose || 0,
+      pack.looseWeightKg || 0,
+      0,
+      pack.caseWeightKg
+    );
+    return total + weight;
+  }, 0);
+  return Math.round((outputWeight - Math.max(0, clothWeightKg) - Math.max(0, sppRecordedWeight) - packedWeight) * 1e9) / 1e9;
+}
+function getPaneerRoundRemainingBalance(round) {
+  if (round.type !== "D" && round.type !== "C/S") return round.remainingBalance ?? round.outputWeight;
+  if (round.remainingBalance === void 0 && round.sppRecordedWeight === void 0 && !round.packedSkus?.length && round.paneerCuttingDetails?.clothKg == null) return void 0;
+  return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || [], round.paneerCuttingDetails?.clothKg ?? 0);
+}
+
 // src/lib/paneerRecipe.ts
 var PANEER_RECIPE_VERSION = "paneer-2026-10-28-v1";
 var PANEER_RECIPE_BASIS_LITRES = 500;
@@ -345,27 +366,6 @@ function labelsForPacking(round, sku, lot, state, previous) {
     traceabilityPrefixVersion: previous.traceabilityPrefixVersion || calculated.traceabilityPrefixVersion,
     traceabilityGap: previous.traceabilityGap || ""
   };
-}
-
-// src/lib/paneerBalance.ts
-function calculatePaneerRemainingBalance(outputWeight, sppRecordedWeight = 0, packedSkus = []) {
-  const packedWeight = packedSkus.reduce((total, pack) => {
-    const weight = pack.weightKg !== void 0 ? pack.weightKg : getPaneerPackWeight(
-      paneerSkuByCode[pack.sku],
-      pack.cases || 0,
-      pack.loose || 0,
-      pack.looseWeightKg || 0,
-      0,
-      pack.caseWeightKg
-    );
-    return total + weight;
-  }, 0);
-  return outputWeight - Math.max(0, sppRecordedWeight) - packedWeight;
-}
-function getPaneerRoundRemainingBalance(round) {
-  if (round.type !== "D" && round.type !== "C/S") return round.remainingBalance ?? round.outputWeight;
-  if (round.remainingBalance === void 0 && round.sppRecordedWeight === void 0 && !round.packedSkus?.length) return void 0;
-  return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || []);
 }
 
 // src/lib/finishedStock.ts
@@ -1226,6 +1226,10 @@ function prepareTraceCommand(d, request, actor, role, at) {
       updated = recordPaneerIngredientAllocation(updated, at, actor, p.event.details, old.status === "scheduled" && p.updates.status === "in_production" && !!p.updates.vat);
       if (old.status === "scheduled" && p.updates.status === "in_production") updated = captureAutomaticPaneer(updated, r, s, actor, at);
       else if (["cut", "clingwrapped"].includes(p.event.type) && p.updates.paneerCuttingDetails) updated = capturePaneerCutting(updated, { ...event, phase: "weighing", sequence: Math.max(0, ...r.flatMap((x) => (x.paneerCuttingHistory || []).map((h) => h.sequence || 0))) + 1 });
+      if (["outputWeight", "paneerCuttingDetails", "sppRecordedWeight", "remainingBalance"].some((key) => key in (p.updates || {})) && updated.paneerCuttingDetails?.clothKg != null) {
+        const balance = getPaneerRoundRemainingBalance(updated);
+        if (balance !== void 0) updated = { ...updated, remainingBalance: balance };
+      }
       next.vejoy_productionRounds = r.map((x) => x.id === old.id ? updated : x);
       break;
     }

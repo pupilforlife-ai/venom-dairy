@@ -9,6 +9,7 @@ export function calculatePaneerRemainingBalance(
   outputWeight: number,
   sppRecordedWeight = 0,
   packedSkus: PackedSku[] = [],
+  clothWeightKg = 0,
 ): number {
   const packedWeight = packedSkus.reduce((total, pack) => {
     const weight = pack.weightKg !== undefined
@@ -24,7 +25,8 @@ export function calculatePaneerRemainingBalance(
     return total + weight;
   }, 0);
 
-  return outputWeight - Math.max(0, sppRecordedWeight) - packedWeight;
+  // Keep gross block measurements intact; cloth is tare, deducted exactly once.
+  return Math.round((outputWeight - Math.max(0, clothWeightKg) - Math.max(0, sppRecordedWeight) - packedWeight) * 1e9) / 1e9;
 }
 
 export function getPaneerRoundRemainingBalance(round: {
@@ -33,10 +35,11 @@ export function getPaneerRoundRemainingBalance(round: {
   sppRecordedWeight?: number;
   packedSkus?: PackedSku[];
   remainingBalance?: number;
+  paneerCuttingDetails?: { clothKg: number | null };
 }): number | undefined {
   if (round.type !== 'D' && round.type !== 'C/S') return round.remainingBalance ?? round.outputWeight;
-  if (round.remainingBalance === undefined && round.sppRecordedWeight === undefined && !round.packedSkus?.length) return undefined;
-  return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || []);
+  if (round.remainingBalance === undefined && round.sppRecordedWeight === undefined && !round.packedSkus?.length && round.paneerCuttingDetails?.clothKg == null) return undefined;
+  return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || [], round.paneerCuttingDetails?.clothKg ?? 0);
 }
 
 /** A recovered-cream lot can share a source round ID without representing its paneer. */

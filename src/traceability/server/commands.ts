@@ -1,3 +1,4 @@
+import {getPaneerRoundRemainingBalance} from '../../lib/paneerBalance';
 import {paneerSkuByCode,getAllowedPaneerSkus,getPaneerPackWeight} from '../../data/skuConfig';
 import {labelsForPacking} from '../labels';
 import {preparePaneerHandover} from './handover';
@@ -79,6 +80,12 @@ export function prepareTraceCommand(d:TraceDocuments,request:TraceCommand,actor:
   updated=recordPaneerIngredientAllocation(updated,at,actor,p.event.details,old.status==='scheduled'&&p.updates.status==='in_production'&&!!p.updates.vat);
   if(old.status==='scheduled'&&p.updates.status==='in_production')updated=captureAutomaticPaneer(updated,r,s,actor,at);
   else if(['cut','clingwrapped'].includes(p.event.type)&&p.updates.paneerCuttingDetails)updated=capturePaneerCutting(updated,{...event,phase:'weighing',sequence:Math.max(0,...r.flatMap(x=>(x.paneerCuttingHistory||[]).map(h=>h.sequence||0)))+1});
+  // Source weights stay gross. Refresh only this action's derived balance when
+  // weighing/cloth/SPP values change, including a late owner correction.
+  if (['outputWeight','paneerCuttingDetails','sppRecordedWeight','remainingBalance'].some(key=>key in (p.updates||{})) && updated.paneerCuttingDetails?.clothKg != null) {
+   const balance=getPaneerRoundRemainingBalance(updated);
+   if(balance!==undefined)updated={...updated,remainingBalance:balance};
+  }
   next.vejoy_productionRounds=r.map(x=>x.id===old.id?updated:x);break;
  }
  default:throw Error('Unknown paneer traceability command.');

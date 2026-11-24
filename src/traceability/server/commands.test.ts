@@ -42,3 +42,18 @@ it('rejects staff stage skipping and starts lacking a recorded temperature',()=>
  expect(()=>prepareTraceCommand(d,{id:'skip',kind:'activity',payload:{roundId:r.id,expectedRound:r,updates:{status:'frozen'},event:{source:'workflow'}}},'packer','staff',at)).toThrow('review');
  expect(()=>prepareTraceCommand(d,{id:'start',kind:'activity',payload:{roundId:r.id,expectedRound:r,updates:{status:'in_production',vat:'vat2'},event:{source:'workflow'}}},'packer','staff',at)).toThrow('temperature');
 });
+
+it('uses net cloth weight during cutting and late owner corrections without editing raw measurements or packing',()=>{
+ const d=fixture(),old={...d.vejoy_productionRounds[0],status:'ready_cutting' as const,packedSkus:[]};d.vejoy_productionRounds=[old,...d.vejoy_productionRounds.slice(1)];
+ const details={clothKg:2,trays:null,scrambleKg:null,samplePieces:null,sampleLocation:'Container',scrambleLocation:'Container'};
+ const command={id:'cloth-cut',kind:'activity',payload:{roundId:old.id,expectedRound:old,updates:{status:'cut',outputWeight:72,blockWeights:[12,12,12,12,12,12],numberOfBlocks:6,remainingBalance:72,paneerCuttingDetails:details},event:{type:'cut',stage:'Cut',source:'workflow'}}};
+ const saved=prepareTraceCommand(d,command,'cutter','staff',at).documents.vejoy_productionRounds[0];
+ expect(saved).toMatchObject({remainingBalance:70,outputWeight:72,blockWeights:[12,12,12,12,12,12]});
+ expect(saved.paneerCuttingHistory?.at(-1)?.netKg).toBe(70);
+ const packed={...saved,packedSkus:[{sku:'MPAN100',cases:4,loose:0}],remainingBalance:10};d.vejoy_productionRounds=[packed,...d.vejoy_productionRounds.slice(1)];
+ const corrected=prepareTraceCommand(d,{id:'cloth-correct',kind:'activity',payload:{roundId:packed.id,expectedRound:packed,updates:{paneerCuttingDetails:{...details,clothKg:1}},event:{type:'weights_corrected',source:'correction'}}},'owner','owner',at).documents;
+ expect(corrected.vejoy_productionRounds[0]).toMatchObject({remainingBalance:11,outputWeight:72,packedSkus:packed.packedSkus});
+ expect(corrected.vejoy_productionRounds[1]).toBe(d.vejoy_productionRounds[1]);
+ expect(packed.remainingBalance).toBe(10);
+ expect(()=>prepareTraceCommand(d,{...command,payload:{...command.payload,expectedRound:old}},'cutter','staff',at)).toThrow('moved on');
+});

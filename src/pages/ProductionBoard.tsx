@@ -595,7 +595,7 @@ export default function ProductionBoard() {
     const round = productionRounds.find(item => item.id === roundId);
     if (!round) return;
     const totalWeight = (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
-    const balance = totalWeight - sppForm.recordedWeight;
+    const balance = calculatePaneerRemainingBalance(totalWeight, sppForm.recordedWeight, [], round.paneerCuttingDetails?.clothKg ?? 0);
     if (!sppForm.cutBy || sppForm.numberOfBlocks <= 0 || sppForm.recordedWeight <= 0 || balance < -0.01) {
       showToast('error', 'Enter a valid SPP weight not greater than the round total');
       return;
@@ -770,6 +770,7 @@ export default function ProductionBoard() {
       editingPackIndex !== null
         ? existingPacked.filter((_, index) => index !== editingPackIndex)
         : existingPacked,
+      round.paneerCuttingDetails?.clothKg ?? 0,
     );
     const newBalance = currentBalance - totalWeightPacked;
 
@@ -1441,8 +1442,8 @@ export default function ProductionBoard() {
       return;
     }
     const totalWeight = blockWeightsDraft.reduce((sum, weight) => sum + weight, 0);
-    const sppBalance = round.sppRecordedWeight !== undefined ? Math.max(0, totalWeight - round.sppRecordedWeight) : undefined;
-    const remainingBalance = calculatePaneerRemainingBalance(totalWeight, round.sppRecordedWeight, round.packedSkus || []);
+    const sppBalance = round.sppRecordedWeight !== undefined ? Math.max(0, calculatePaneerRemainingBalance(totalWeight, round.sppRecordedWeight, [], round.paneerCuttingDetails?.clothKg ?? 0)) : undefined;
+    const remainingBalance = calculatePaneerRemainingBalance(totalWeight, round.sppRecordedWeight, round.packedSkus || [], round.paneerCuttingDetails?.clothKg ?? 0);
     const previousBlockCount = round.numberOfBlocks || round.blockWeights?.length || 0;
     const previousTotalWeight = (round.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
     await recordProductionRoundActivity(blockWeightsRoundId, {
@@ -2494,7 +2495,7 @@ export default function ProductionBoard() {
         {selectedRound && (() => {
           const round = productionRounds.find(item => item.id === selectedRound);
           const totalWeight = (round?.blockWeights || []).reduce((sum, weight) => sum + weight, 0);
-          const balance = Math.max(0, totalWeight - sppForm.recordedWeight);
+          const balance = Math.max(0, calculatePaneerRemainingBalance(totalWeight, sppForm.recordedWeight, [], round?.paneerCuttingDetails?.clothKg ?? 0));
           return <div className="space-y-4">
             <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 text-xs text-pink-900">
               Total Paneer for this round: <strong>{totalWeight.toFixed(2)} kg</strong>
@@ -2541,6 +2542,7 @@ export default function ProductionBoard() {
                 editingPackIndex !== null
                   ? existingPacking.filter((_, index) => index !== editingPackIndex)
                   : existingPacking,
+                round.paneerCuttingDetails?.clothKg ?? 0,
               )
               : 0;
             return (
@@ -2549,6 +2551,7 @@ export default function ProductionBoard() {
                   <p className="text-xs text-amber-800">
                     <strong>{editingPackIndex !== null ? 'Available after correcting this entry:' : 'Available Balance:'}</strong> {balance.toFixed(2)} kg
                   </p>
+                  {round?.paneerCuttingDetails?.clothKg != null && <p className="mt-1 text-xs text-amber-800">Blocks {round.outputWeight.toFixed(3)} kg − cloth {round.paneerCuttingDetails.clothKg.toFixed(3)} kg = {(round.outputWeight-round.paneerCuttingDetails.clothKg).toFixed(3)} kg net, before SPP and packing deductions.</p>}
                   {editingPackIndex !== null && <p className="mt-1 text-[11px] text-amber-700">Owner correction: set cases and loose quantity to zero to void this packing entry. The original entry remains in the audit history.</p>}
                 </div>
                 {existingPacking.length > 0 && (
@@ -2607,6 +2610,7 @@ export default function ProductionBoard() {
                 editingPackIndex !== null
                   ? (round.packedSkus || []).filter((_, index) => index !== editingPackIndex)
                   : round.packedSkus || [],
+                round.paneerCuttingDetails?.clothKg ?? 0,
               )
               : 0;
             const totalWeightPacked = getPaneerPackWeight(paneerSkuByCode[packForm.sku], packForm.cases, packForm.loose, packForm.looseWeightKg, packForm.weightKg, packForm.caseWeightKg);

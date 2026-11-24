@@ -7,7 +7,7 @@ export function packetLabelPlan(round: ProductionRound, sku: string, requestedKg
   const definition = paneerSkuByCode[sku];
   if (!definition || definition.packMode !== 'units') return null;
   if (!Number.isFinite(round.outputWeight) || round.outputWeight < 0) throw Error('Record the round weight before calculating packet labels.');
-  const balanceKg = calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || []);
+  const balanceKg = calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || [], round.paneerCuttingDetails?.clothKg ?? 0);
   const weightKg = requestedKg === undefined ? Math.max(0, balanceKg) : requestedKg;
   if (!Number.isFinite(weightKg) || weightKg < 0) throw Error('Enter a valid weight of zero or more.');
   // Integer milligrams avoid 72.4 / 0.2 rounding down to 361 due to floating point.

@@ -133,3 +133,28 @@ begin
  if (select value from pg_temp.state_test where key='vejoy_productionRounds') is distinct from before_value then raise exception 'Rejected numeric/source changes wrote records';end if;
 end $$;
 select 'indexed shared guards retain ghee AF oil/source and butter numeric protections' as result;
+
+-- Cloth is tare, not paneer. Exercise the actual atomic path and retry on TEMP records.
+do $$
+declare response jsonb; saved jsonb; prior jsonb; actor uuid;
+begin
+ select id into actor from pg_temp.profiles_test;
+ perform set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',actor)::text,true);
+ perform set_config('request.jwt.claim.sub',actor::text,true);
+ perform set_config('app.paneer_traceability','on',true);
+ update pg_temp.state_test set value=value||'[{"id":"cloth-packing","type":"C/S","milkLotId":"test-milk","milkLotCode":"151126","shiftNumber":1,"roundNumber":5,"plannedInput":500,"status":"cut","outputWeight":72,"blockWeights":[12,12,12,12,12,12],"remainingBalance":72,"paneerCuttingDetails":{"clothKg":1.789},"packedSkus":[]}]'::jsonb where key='vejoy_productionRounds';
+ perform set_config('app.paneer_traceability','off',true);
+ select value into prior from pg_temp.state_test where key='vejoy_productionRounds';
+ response:=pg_temp.commit_paneer_packing('{"operationId":"cloth-pack","roundId":"cloth-packing","sku":"RPAN100","cases":4,"loose":12}');
+ saved:=response->'round';
+ if (saved->>'remainingBalance')::numeric<>-1.789 then raise exception 'Cloth missing/deducted twice: %',saved;end if;
+ if saved->'outputWeight'<>'72'::jsonb or saved->'blockWeights'<>'[12,12,12,12,12,12]'::jsonb or saved->'paneerCuttingDetails'->'clothKg'<>'1.789'::jsonb then raise exception 'Gross weights or source cloth changed';end if;
+ if response->'stock'->>'cases'<>'4' or response->'stock'->>'loosePackets'<>'12' then raise exception 'Cloth changed packed case counts';end if;
+ response:=pg_temp.commit_paneer_packing('{"operationId":"cloth-pack","roundId":"cloth-packing","sku":"RPAN100","cases":4,"loose":12}');
+ if (response->'round'->>'remainingBalance')::numeric<>-1.789 or jsonb_array_length(response->'round'->'packedSkus')<>1 then raise exception 'Retry deducted cloth again';end if;
+ response:=pg_temp.commit_paneer_packing(jsonb_build_object('operationId','cloth-correct','roundId','cloth-packing','packIndex',0,'expectedPack',saved->'packedSkus'->0,'sku','RPAN100','cases',0,'loose',0));
+ if (response->'round'->>'remainingBalance')::numeric<>70.211 then raise exception 'Correction failed to return packed weight with cloth retained';end if;
+ if exists(select 1 from jsonb_array_elements(prior) b join pg_temp.state_test st on st.key='vejoy_productionRounds' cross join lateral jsonb_array_elements(st.value) a where a->>'id'=b->>'id' and b->>'id'<>'cloth-packing' and a is distinct from b) then raise exception 'Cloth packing altered unrelated records';end if;
+ if (pg_temp.prepare_paneer_packing('{"id":"legacy-cloth","type":"D","status":"cut","outputWeight":72,"paneerCuttingDetails":{"clothKg":null}}','[]','{"operationId":"legacy","roundId":"legacy-cloth","sku":"MPAN100","cases":4,"loose":12}','owner','owner',now())->'round'->>'remainingBalance')::numeric<>0 then raise exception 'Legacy/no-cloth packing changed';end if;
+end $$;
+select 'cloth net balance / exact source preservation / atomic retry / owner correction / old client packing / lot isolation passed' as result;

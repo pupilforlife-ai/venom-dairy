@@ -35,6 +35,27 @@ describe('calculatePaneerRemainingBalance', () => {
   });
 });
 
+describe('cloth tare in paneer packing', () => {
+  it('deducts recorded cloth once for the reported lot 171126 examples', () => {
+    expect(calculatePaneerRemainingBalance(72, 0, [{sku:'RPAN100',cases:4,loose:12}], 1.789)).toBe(-1.789);
+    expect(calculatePaneerRemainingBalance(72, 0, [{sku:'RPAN100',cases:60,loose:0}], 2.987)).toBe(-830.987);
+  });
+  it('uses current source cloth and packing rather than stale balance and leaves sources intact', () => {
+    const source={type:'D',outputWeight:80,remainingBalance:999,sppRecordedWeight:5,
+      paneerCuttingDetails:{clothKg:2},packedSkus:[{sku:'MPAN100',cases:2,loose:0},{sku:'PAN111',cases:0,loose:0,weightKg:3}]};
+    const before=JSON.stringify(source);
+    expect(getPaneerRoundRemainingBalance(source)).toBe(40);
+    expect(JSON.stringify(source)).toBe(before);
+    expect(getPaneerRoundRemainingBalance({...source,paneerCuttingDetails:{clothKg:1}})).toBe(41);
+    expect(getPaneerRoundRemainingBalance({...source,packedSkus:source.packedSkus.slice(1)})).toBe(70);
+  });
+  it('preserves legacy/no-cloth and non-paneer behavior', () => {
+    for(const details of [undefined,{clothKg:null},{clothKg:0}])expect(getPaneerRoundRemainingBalance({type:'D',outputWeight:72,remainingBalance:72,paneerCuttingDetails:details})).toBe(72);
+    expect(getPaneerRoundRemainingBalance({type:'D',outputWeight:72,paneerCuttingDetails:{clothKg:2}})).toBe(70);
+    expect(getPaneerRoundRemainingBalance({type:'Butter',outputWeight:30,remainingBalance:12,paneerCuttingDetails:{clothKg:2}})).toBe(12);
+  });
+});
+
 describe('reconcileFrozenRoundBalances', () => {
   it('subtracts overpacked round stock from positive frozen balances', () => {
     expect(reconcileFrozenRoundBalances([30, -5])).toEqual({

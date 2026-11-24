@@ -52,6 +52,18 @@ function productionRound(overrides: Partial<ProductionRound>): ProductionRound {
 }
 
 describe('Production Board Excel export', () => {
+  it('exports the same cloth-adjusted paneer balance as the board without editing raw source weights', () => {
+    const round=productionRound({outputWeight:72,blockWeights:[12,12,12,12,12,12],remainingBalance:999,
+      paneerCuttingDetails:{clothKg:1.789,trays:null,scrambleKg:null,samplePieces:null,sampleLocation:'Container',scrambleLocation:'Container'},
+      packedSkus:[{sku:'MPAN100',cases:4,loose:12}]});
+    const before=JSON.stringify(round);
+    for(const workbook of [buildProductionBoardWorkbook({lot,shifts:[shift],rounds:[round],cipRecords:[]}),buildMilkReceivingWorkbook(lot,[round])]) {
+      const balances=workbook.sheets.flatMap(sheet=>sheet.rows).filter(row=>typeof row.remainingKg==='number');
+      expect(balances.length).toBeGreaterThan(0);
+      for(const row of balances)expect(row.remainingKg).toBe(-1.789);
+    }
+    expect(JSON.stringify(round)).toBe(before);
+  });
   it('exports actual AF oil, its recommendation and pending approval without changing packed figures', () => {
     const round = productionRound({ type: 'Ghee', butterInput: 92.5, afOilInput: 10, expectedYield: 71.75,
       afOilRecord: { id: 'oil', recommendedKg: 12.5, actualKg: 10, butterInputKg: 92.5, mode: 'changed', reason: 'Availability adjustment',

@@ -26,6 +26,7 @@ import { getProductionPackingEntries } from './finishedStock';
 import { excelDate, ExcelCellValue, ExcelSheet, ExcelWorkbookExport, exportDateStamp, exportExcelWorkbook } from './excelExport';
 import { getMilkLotVesselBalances, getMilkSaleVesselSource } from './milkVesselAllocation';
 import { comparePaneerBlockToPackedWeight } from './paneerWeightReconciliation';
+import { getPaneerRoundRemainingBalance } from './paneerBalance';
 import { latestPaneerIngredientIssue } from './paneerRecipe';
 import { getCoatingBalanceReport, getCreamCheeseUsage, type CoatingBalanceRecord } from './crumbingIngredientBalances';
 import { butterLossRecords, butterLossReasonLabels } from './butterLoss';
@@ -192,7 +193,7 @@ function productionSummarySheet(rounds: ProductionRound[], metadata: ExcelSheet[
         packedLoose: packs.reduce((total, pack) => total + Math.max(0, pack.loose || 0), 0),
         packedWeightKg: packs.reduce((total, pack) => total + packWeight(pack), 0),
         amassiBottles: (round.amassiPacked || []).reduce((total, pack) => total + Math.max(0, pack.bottles || 0), 0),
-        remainingKg: round.remainingBalance ?? '',
+        remainingKg: (['D','C/S'].includes(round.type) ? getPaneerRoundRemainingBalance(round) : round.remainingBalance) ?? '',
         started: excelDate(round.startTime),
         completed: excelDate(round.completedAt),
         team: (round.team || []).join(', '),
@@ -243,7 +244,7 @@ function cuttingSheet(rounds: ProductionRound[], metadata: ExcelSheet['metadata'
       finalWeights: (round.blockWeights || []).map(value => value.toFixed(2)).join(', '),
       sppKg: round.sppRecordedWeight || 0,
       balanceKg: round.balancePaneerWeight || 0,
-      remainingKg: round.remainingBalance ?? '',
+      remainingKg: (['D','C/S'].includes(round.type) ? getPaneerRoundRemainingBalance(round) : round.remainingBalance) ?? '',
       cutBy: round.cutBy || '',
       storedBy: round.storedCutBy || '',
       clingwrappedAt: excelDate(round.clingwrappedAt),
@@ -895,7 +896,7 @@ function paneerWorkbookSheet(
     packedKg: (round.packedSkus || []).reduce((total, pack) => total + packWeight(pack), 0),
     pan111Kg: roundPan111Weight(round),
     sppKg: round.sppRecordedWeight || 0,
-    remainingKg: round.remainingBalance ?? '',
+    remainingKg: (['D','C/S'].includes(round.type) ? getPaneerRoundRemainingBalance(round) : round.remainingBalance) ?? '',
     started: excelDate(round.startTime),
     completed: excelDate(round.completedAt),
     team: (round.team || []).join(', '),
@@ -1056,7 +1057,7 @@ function roundLedgerSheet(
           creamKg: round.creamRecovered || 0,
           pan111Kg,
           sppKg: round.sppRecordedWeight || 0,
-          remainingKg: round.remainingBalance ?? null,
+          remainingKg: (['D','C/S'].includes(round.type) ? getPaneerRoundRemainingBalance(round) : round.remainingBalance) ?? null,
           team: (round.team || []).join(', '),
           locked: round.locked,
           notes: round.notes || '',
@@ -1540,7 +1541,7 @@ function milkLotAuditSheet(
         verifiedWeightKg: packing.hasVerification ? packing.verifiedWeightKg : '',
         pan111Kg: roundPan111Weight(round),
         sppKg: round.sppRecordedWeight || 0,
-        remainingKg: round.remainingBalance ?? '',
+        remainingKg: (['D','C/S'].includes(round.type) ? getPaneerRoundRemainingBalance(round) : round.remainingBalance) ?? '',
         started: excelDate(round.startTime),
         completed: excelDate(round.completedAt),
         team: (round.team || []).join(', '),
@@ -1627,7 +1628,7 @@ function weightReconciliationSheet(
         packingBasis: packing.hasVerification ? 'Owner-verified' : 'Recorded on board',
         pan111Kg,
         sppKg,
-        remainingKg: round.remainingBalance ?? '',
+        remainingKg: (['D','C/S'].includes(round.type) ? getPaneerRoundRemainingBalance(round) : round.remainingBalance) ?? '',
         accountedOutputKg,
         varianceKg: hasBlocks ? blockWeightKg - accountedOutputKg : '',
         packedSkus: packing.description,
