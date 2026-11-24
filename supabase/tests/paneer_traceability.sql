@@ -158,3 +158,51 @@ begin
  if (pg_temp.prepare_paneer_packing('{"id":"legacy-cloth","type":"D","status":"cut","outputWeight":72,"paneerCuttingDetails":{"clothKg":null}}','[]','{"operationId":"legacy","roundId":"legacy-cloth","sku":"MPAN100","cases":4,"loose":12}','owner','owner',now())->'round'->>'remainingBalance')::numeric<>0 then raise exception 'Legacy/no-cloth packing changed';end if;
 end $$;
 select 'cloth net balance / exact source preservation / atomic retry / owner correction / old client packing / lot isolation passed' as result;
+
+-- New rejected-milk receipts use the existing atomic transaction and survive old clients.
+insert into pg_temp.state_test(key,value) values('unused-milk-test','[]');
+update pg_temp.state_test set value=value||'[{"id":"reject-test","lotCode":"191126","receiptStatus":"received","status":"completed","litresReceived":26000,"litresConsumed":0,"litresRemaining":26000,"litresRejected":0,"litresSpilled":0}]'::jsonb where key='vejoy_milkLots';
+do $$
+declare actor uuid; actor_name text; before_value jsonb; expected jsonb; changed jsonb; target jsonb; receipt jsonb; response jsonb; saved jsonb; version_after bigint;
+begin
+ select id,username into actor,actor_name from pg_temp.profiles_test;
+ select value into before_value from pg_temp.state_test where key='vejoy_milkLots';
+ select x into target from jsonb_array_elements(before_value) x where x->>'id'='reject-test';
+ receipt:=jsonb_build_object('id','milk-rejection-test','kind','milk_rejection','eventDate','2026-11-19','rejectedLitres',26000,'reviewedAt',now(),'reviewedBy',actor_name,'reviewerRole','owner','reason','Milk quality rejected','before',jsonb_build_object('rejected',0,'remaining',26000),'after',jsonb_build_object('rejected',26000,'remaining',0),'roundCorrections','[]'::jsonb);
+ target:=target||jsonb_build_object('status','rejected','litresRejected',26000,'litresRemaining',0,'milkBalanceReviews',jsonb_build_array(receipt));
+ select jsonb_agg(case when x->>'id'='reject-test' then target else x end order by ord) into changed from jsonb_array_elements(before_value) with ordinality t(x,ord);
+ select jsonb_agg(jsonb_build_object('key',k,'version',s.version)) into expected from unnest(array['vejoy_distributionHandovers','vejoy_finishedStock','vejoy_intermediateLots','vejoy_milkLots','vejoy_productionRounds','vejoy_traceability']) k left join pg_temp.state_test s on s.key=k;
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ response:=pg_temp.commit_paneer_traceability(actor,'{"id":"reject-milk-op","kind":"milk_rejection","_role":"owner"}',expected,jsonb_build_object('vejoy_milkLots',changed),'null');
+ select value,version into saved,version_after from pg_temp.state_test where key='vejoy_milkLots';
+ if saved is distinct from changed then raise exception 'Rejection not stored exactly';end if;
+ if exists(select 1 from jsonb_array_elements(before_value) b join jsonb_array_elements(saved) a on a->>'id'=b->>'id' where b->>'id'<>'reject-test' and a is distinct from b) then raise exception 'Rejection changed another milk lot';end if;
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ response:=pg_temp.commit_paneer_traceability(actor,'{"id":"reject-milk-op","kind":"milk_rejection","_role":"owner"}','[]','{}','null');
+ if (select version from pg_temp.state_test where key='vejoy_milkLots')<>version_after then raise exception 'Retry duplicated rejection';end if;
+ perform set_config('app.paneer_traceability','off',true);
+ begin
+  update pg_temp.state_test set value=before_value where key='vejoy_milkLots';
+  raise exception 'Stale client erased rejection';
+ exception when others then if sqlerrm not like '%Milk rejection history is protected%' then raise;end if;end;
+ begin
+  update pg_temp.state_test set value=(select jsonb_agg(case when x->>'id'='reject-test' then x||'{"litresRejected":0,"litresRemaining":26000}'::jsonb else x end) from jsonb_array_elements(value) x) where key='vejoy_milkLots';
+  raise exception 'Stale balance reset rejection';
+ exception when others then if sqlerrm not like '%cannot be reset%' then raise;end if;end;
+ begin
+  update pg_temp.state_test set value=value||'[{"id":"start-rejected","type":"D","milkLotId":"reject-test","milkLotCode":"191126","plannedInput":500,"actualInput":500,"status":"in_production"}]'::jsonb where key='vejoy_productionRounds';
+  raise exception 'Production started on rejected milk';
+ exception when others then if sqlerrm not like '%milk lot is rejected%' then raise;end if;end;
+ begin
+  update pg_temp.state_test set value=(select jsonb_agg(case when x->>'id'='reject-test' then x||jsonb_build_object('milkBalanceReviews',(x->'milkBalanceReviews')||jsonb_build_array(receipt||'{"id":"forged"}'::jsonb)) else x end) from jsonb_array_elements(value) x) where key='vejoy_milkLots';
+  raise exception 'Snapshot forged new rejection receipt';
+ exception when others then if sqlerrm not like '%Owner/Admin Reject milk action%' then raise;end if;end;
+ -- Older code marks the previous latest lot completed when receiving a new one.
+ update pg_temp.state_test set value=(select jsonb_agg(case when x->>'id'='reject-test' then x||'{"status":"completed","isLatest":false}'::jsonb else x end) from jsonb_array_elements(value) x) where key='vejoy_milkLots';
+ if not exists(select 1 from pg_temp.state_test s cross join lateral jsonb_array_elements(s.value) x where s.key='vejoy_milkLots' and x->>'id'='reject-test' and x->>'status'='rejected') then raise exception 'New receipt relabeled a rejected lot';end if;
+ -- Existing Owner/Admin balance-review corrections remain usable and retain history.
+ receipt:=jsonb_build_object('id','owner-rejection-correction','reviewedBy',actor_name,'reviewerRole','owner','reason','Correct physical rejection total','before',jsonb_build_object('rejected',26000),'after',jsonb_build_object('rejected',25000));
+ update pg_temp.state_test set value=(select jsonb_agg(case when x->>'id'='reject-test' then x||jsonb_build_object('litresRejected',25000,'litresRemaining',1000,'milkBalanceReviews',(x->'milkBalanceReviews')||jsonb_build_array(receipt)) else x end) from jsonb_array_elements(value) x) where key='vejoy_milkLots';
+ if not exists(select 1 from pg_temp.state_test s cross join lateral jsonb_array_elements(s.value) x where s.key='vejoy_milkLots' and x->>'id'='reject-test' and x->>'status'='completed' and x->>'litresRejected'='25000' and jsonb_array_length(x->'milkBalanceReviews')=2) then raise exception 'Owner rejection correction failed';end if;
+end $$;
+select 'milk rejection atomic save / retries / stale writes / immutable receipts / rejected-source gate / owner corrections / lot isolation passed' as result;

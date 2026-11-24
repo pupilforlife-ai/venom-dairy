@@ -57,3 +57,15 @@ it('uses net cloth weight during cutting and late owner corrections without edit
  expect(packed.remainingBalance).toBe(10);
  expect(()=>prepareTraceCommand(d,{...command,payload:{...command.payload,expectedRound:old}},'cutter','staff',at)).toThrow('moved on');
 });
+
+it('records rejection only for the selected milk lot, with server-backed actor/time and no production changes',()=>{
+ const d=fixture();d.vejoy_milkLots=[{id:'rejected-lot',lotCode:'191126',receiptStatus:'received',status:'completed',litresReceived:26000,litresConsumed:0,litresRemaining:26000,litresRejected:0,litresSpilled:0} as TraceDocuments['vejoy_milkLots'][number],...d.vejoy_milkLots];
+ const p={lotId:'rejected-lot',expected:{received:26000,consumed:0,rejected:0,spilled:0,sold:0,remaining:26000,overdraw:0},quantity:26000,rejectionDate:'2026-11-19',reason:'Tanker rejected on arrival'};
+ const command={id:'reject-lot',kind:'milk_rejection',payload:p},before=JSON.stringify(d);
+ expect(()=>prepareTraceCommand(d,command,'staff','staff',at)).toThrow('Owner/Admin');
+ const saved=prepareTraceCommand(d,command,'sa','owner',at).documents;
+ expect(saved.vejoy_milkLots[0]).toMatchObject({status:'rejected',litresRejected:26000});
+ expect(saved.vejoy_milkLots[0].milkBalanceReviews?.[0]).toMatchObject({reviewedAt:at,reviewedBy:'sa',reviewerRole:'owner'});
+ for(const key of ['vejoy_productionRounds','vejoy_finishedStock','vejoy_distributionHandovers','vejoy_intermediateLots','vejoy_traceability'] as const)expect(saved[key]).toBe(d[key]);
+ expect(saved.vejoy_milkLots[1]).toBe(d.vejoy_milkLots[1]);expect(JSON.stringify(d)).toBe(before);
+});

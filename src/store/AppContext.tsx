@@ -214,7 +214,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setMilkLots(currentLots => [
       ...currentLots.map(existingLot => (
         existingLot.status === 'active' || existingLot.isLatest
-          ? { ...existingLot, status: 'completed' as MilkLot['status'], isLatest: false }
+          ? { ...existingLot, status: (existingLot.status==='rejected'?'rejected':'completed') as MilkLot['status'], isLatest: false }
           : existingLot
       )),
       { ...newLot, status: 'active', isLatest: true },

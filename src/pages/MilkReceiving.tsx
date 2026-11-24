@@ -1,3 +1,4 @@
+import {MilkRejectionModal} from '../components/MilkRejectionModal';
 import PaneerScrambleReconciliation from '../traceability/PaneerScrambleReconciliation';
 import { useTraceability } from '../traceability/useTraceability';
 import { lotScrambleSummary } from '../traceability/pan111Reconciliation';
@@ -40,6 +41,8 @@ export default function MilkReceiving() {
   })[0];
   const [selectedLot, setSelectedLot] = useState(newestLot?.id || '');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(() => newestLot?.id ? new Set([newestLot.id]) : new Set());
+  const [rejectionLotId,setRejectionLotId]=useState<string|null>(null);
+  const rejectionLot=milkLots.find(l=>l.id===rejectionLotId);
   const [showNewLotModal, setShowNewLotModal] = useState(false);
   const [showEditLotModal, setShowEditLotModal] = useState(false);
   const [showMilkSaleModal, setShowMilkSaleModal] = useState(false);
@@ -623,21 +626,22 @@ export default function MilkReceiving() {
                           lot.status === 'completed' ? 'bg-slate-100 text-slate-700 border border-slate-200' :
                           'bg-red-100 text-red-800 border border-red-200'
                         }`}>
-                          {lot.productionClosed ? 'Closed' : lot.receiptStatus === 'planned' ? 'Planned · receipt pending' : lot.status === 'active' ? 'Accepted' : lot.status === 'completed' ? 'Completed' : 'Rejected'}
+                          {lot.status==='rejected' ? 'Rejected' : lot.productionClosed ? 'Closed' : lot.receiptStatus === 'planned' ? 'Planned · receipt pending' : lot.status === 'active' ? 'Accepted' : lot.status === 'completed' ? 'Completed' : 'Rejected'}
                         </span>
                       </td>
                       <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1">
+                        <div className="flex flex-wrap items-center justify-center gap-1">
                           <button onClick={() => toggleExpand(lot.id)} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
                             {isExpanded ? '− Hide' : '+ Show'}
                           </button>
                           <button onClick={() => openEditLot(lot)} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors">
                             Edit
                           </button>
-                          <button onClick={() => openMilkSale(lot)} disabled={lot.productionClosed || lot.receiptStatus === 'planned'} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                          {canEditLotCode && <button onClick={() => setRejectionLotId(lot.id)} disabled={lot.receiptStatus==='planned'||lot.status==='rejected'||lotAccounting.remaining<=0} className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-300 rounded hover:bg-rose-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Reject milk</button>}
+                          <button onClick={() => openMilkSale(lot)} disabled={lot.productionClosed || lot.receiptStatus === 'planned' || lot.status === 'rejected'} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             + Milk sale
                           </button>
-                          <button onClick={() => openCloseLot(lot)} disabled={Boolean(lot.productionClosed) || lot.receiptStatus === 'planned'} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                          <button onClick={() => openCloseLot(lot)} disabled={Boolean(lot.productionClosed) || lot.receiptStatus === 'planned' || lot.status === 'rejected'} className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             Close
                           </button>
                         </div>
@@ -760,6 +764,7 @@ export default function MilkReceiving() {
                                   <div><span className="text-slate-500">Spilled</span><div className="font-bold text-amber-600">{lot.litresSpilled.toLocaleString()} L</div></div>
                                   <div><span className="text-slate-500">Received</span><div className="font-bold text-slate-900">{receiptPending ? 'Pending' : `${lot.litresReceived.toLocaleString()} L`}</div></div>
                                   <div><span className="text-slate-500">Unallocated</span><div className="font-bold text-emerald-600">{receiptPending ? 'Pending' : `${lotAccounting.remaining.toLocaleString()} L`}</div></div>
+                                {(lot.milkBalanceReviews||[]).filter(review=>review.kind==='milk_rejection').map(review=><div key={review.id} className="col-span-full rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-900"><strong>Milk rejected · {review.rejectedLitres?.toLocaleString()} L · {review.eventDate}</strong><p>{review.reason}</p><p>Recorded by {review.reviewedBy} · {new Date(review.reviewedAt).toLocaleString()}</p></div>)}
                                 </div>
                                 {!receiptPending && lotAccounting.overdraw > 0.01 && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Overdraw detected: {lotAccounting.overdraw.toFixed(2)} L. Review round input and waste records before closing this lot.</div>}
                               </div>
@@ -973,6 +978,7 @@ export default function MilkReceiving() {
         </div>
       </Modal>
 
+      {rejectionLot&&<MilkRejectionModal key={rejectionLot.id} lot={rejectionLot} rounds={productionRounds} onClose={()=>setRejectionLotId(null)}/>}
       <Modal isOpen={showEditLotModal} onClose={() => setShowEditLotModal(false)} title="Edit original milk receipt">
         <div className="space-y-4">
           <p className="text-xs text-slate-500">Add receipt details after offloading. Recorded production, sales, rejected, and spilled quantities are preserved.</p>

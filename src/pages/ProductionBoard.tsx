@@ -971,6 +971,7 @@ export default function ProductionBoard() {
     }
     const milkLot = milkLots.find(m => m.id === milkLotId);
     if (!milkLot) return;
+    if (milkLot.status==='rejected') {showToast('error','This milk lot is rejected. Select another milk lot.');return;}
     if (milkLot.productionClosed) {
       showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
       return;
@@ -1346,6 +1347,7 @@ export default function ProductionBoard() {
       return;
     }
     const milkLot = milkLots.find(m => m.id === shift.milkLotId);
+    if (milkLot?.status==='rejected') {showToast('error','This milk lot is rejected. Select another milk lot.');return;}
     if (milkLot?.productionClosed) {
       showToast('error', `Production for milk lot ${milkLot.lotCode} is closed`);
       return;

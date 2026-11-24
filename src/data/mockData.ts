@@ -46,6 +46,9 @@ export interface MilkBalanceWasteCorrection {
 }
 
 export interface MilkBalanceReview {
+  kind?: 'milk_rejection';
+  eventDate?: string;
+  rejectedLitres?: number;
   id: string;
   reviewedAt: string;
   reviewedBy: string;

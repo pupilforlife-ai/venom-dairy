@@ -1,3 +1,4 @@
+import {recordMilkRejection} from '../../lib/milkRejection';
 import {getPaneerRoundRemainingBalance} from '../../lib/paneerBalance';
 import {paneerSkuByCode,getAllowedPaneerSkus,getPaneerPackWeight} from '../../data/skuConfig';
 import {labelsForPacking} from '../labels';
@@ -24,6 +25,7 @@ export function prepareTraceCommand(d:TraceDocuments,request:TraceCommand,actor:
  const lot=(id:string)=>{if(!l.some(x=>x.id===id))throw Error('Milk lot not found.');};
  if(request.kind==='handover')return preparePaneerHandover(d,request,actor,role,at);
  switch(request.kind){
+ case 'milk_rejection': owner();next.vejoy_milkLots=recordMilkRejection(l,r,p,actor,role,at,request.id);break;
  case 'save':{
   if(!['lots','rounds','prefixes'].includes(p.kind))throw Error('Invalid traceability record.');
   if(p.kind==='prefixes'){owner();const previous=s.prefixes[p.id];if((previous?.audit[previous.audit.length-1]?.id||'')!==p.expectedRevision)throw Error('The prefix changed. Reopen it before saving.');}else if(p.kind==='lots'){
