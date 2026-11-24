@@ -3,7 +3,7 @@ import {getPaneerRoundRemainingBalance} from '../../lib/paneerBalance';
 import {paneerSkuByCode,getAllowedPaneerSkus,getPaneerPackWeight} from '../../data/skuConfig';
 import {labelsForPacking} from '../labels';
 import {preparePaneerHandover} from './handover';
-import { changeRecord,emptyTraceState,planRevision,recordChecklist,recordReadiness,validDate,checklistForecast,type TraceState } from '../domain';
+import { changeRecord,emptyTraceState,planRevision,recordChecklist,recordReadiness,validDate,checklistForecast,plannedMilkTotal,type TraceState } from '../domain';
 import { assembleMixedCaseStock,cancelMixedCaseStock,linkExistingMixedCaseStock,returnMixedCaseStock } from '../mixedCaseStock';
 import { reconcilePan111 } from '../pan111Reconciliation';
 import { transferRetentionSamples,reviewRetentionTransfer } from '../paneerStorage';
@@ -30,12 +30,12 @@ export function prepareTraceCommand(d:TraceDocuments,request:TraceCommand,actor:
   if(!['lots','rounds','prefixes'].includes(p.kind))throw Error('Invalid traceability record.');
   if(p.kind==='prefixes'){owner();const previous=s.prefixes[p.id];if((previous?.audit[previous.audit.length-1]?.id||'')!==p.expectedRevision)throw Error('The prefix changed. Reopen it before saving.');}else if(p.kind==='lots'){
    lot(p.id);if(planRevision(s.lots[p.id])!==p.expectedRevision)throw Error('The plan changed. Reopen it before saving.');
-   if(!validDate(p.value.productionDate))throw Error('Confirm the start of production date.');checklistForecast(p.value.planCsLitres,p.value.planDirectLitres);
+   if(!validDate(p.value.productionDate))throw Error('Confirm the start of production date.');plannedMilkTotal(p.value);checklistForecast(p.value.planCsLitres,p.value.planDirectLitres,p.value.planHalloumiLitres??0,p.value.halloumiSaltGPer240L);
   }else {owner();if(!r.some(x=>x.id===p.id))throw Error('Paneer round not found.');if((s.rounds[p.id]?.audit[s.rounds[p.id].audit.length-1]?.id||'')!==p.expectedRevision)throw Error('Round details changed. Reopen before correcting.');}
   const entry=changeRecord((s as any)[p.kind][p.id],p.value,actor,role,p.reason,at,request.id,p.kind==='rounds');
   next.vejoy_traceability={...s,[p.kind]:{...(s as any)[p.kind],[p.id]:entry}};result=entry.audit[entry.audit.length-1]?.id||request.id;break;
  }
- case 'checklist':lot(p.lotId);next.vejoy_traceability=recordChecklist(s,p.lotId,p.entries,p.revision,actor,role,at,request.id);break;
+ case 'checklist':lot(p.lotId);next.vejoy_traceability=recordChecklist(s,p.lotId,p.entries,p.revision,actor,role,at,request.id,p.liquidEntries||[]);break;
  case 'readiness':lot(p.lotId);next.vejoy_traceability=recordReadiness(s,p.lotId,p.ingredientId,p.draft,p.revision,p.checkId,actor,role,at,request.id);break;
  case 'assemble':{const a=assembleMixedCaseStock(s,stock,p,r,l,actor,at);next.vejoy_traceability=a.state;next.vejoy_finishedStock=a.stock;break;}
  case 'cancel_assembly':{const a=cancelMixedCaseStock(s,stock,p.id,p.reason,actor,role,at);next.vejoy_traceability=a.state;next.vejoy_finishedStock=a.stock;break;}

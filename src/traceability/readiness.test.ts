@@ -167,3 +167,15 @@ describe('save incomplete checklist progress without claiming readiness',()=>{
   expect(()=>recordReadiness(next,'future','calcium_chloride',partial,'p1','','staff','staff','later','stale')).toThrow(/changed elsewhere/);
  });
 });
+
+import {plannedMilkTotal} from './domain';
+describe('Halloumi planning volumes',()=>{
+ it('includes Halloumi milk without changing older paneer-only plans',()=>{
+  expect(plannedMilkTotal({productionDate:'2026-11-24',planCsLitres:4000,planDirectLitres:1000})).toBe(5000);
+  expect(plannedMilkTotal({productionDate:'2026-11-24',planCsLitres:4000,planDirectLitres:1000,planHalloumiLitres:2400})).toBe(7400);
+  expect(plannedMilkTotal({productionDate:'2026-11-24',planCsLitres:0,planDirectLitres:0,planHalloumiLitres:2400})).toBe(2400);
+ });
+ it('rejects invalid Halloumi milk volumes',()=>{
+  for(const planHalloumiLitres of [-240,NaN,Infinity])expect(()=>plannedMilkTotal({...plan,planHalloumiLitres})).toThrow('volumes');
+ });
+});

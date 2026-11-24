@@ -180,6 +180,62 @@ function getPaneerRoundRemainingBalance(round) {
   return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || [], round.paneerCuttingDetails?.clothKg ?? 0);
 }
 
+// src/lib/halloumiRecipe.ts
+var HALLOUMI_RECIPE_MILK_LITRES = 240;
+var HALLOUMI_DEFAULT_SALT_G = 750;
+var quantity = (n) => Math.round(n * 1e9) / 1e9;
+function halloumiPlanningRecipe(milkLitres, saltGPer240L = HALLOUMI_DEFAULT_SALT_G) {
+  if (![milkLitres, saltGPer240L].every((n) => Number.isFinite(n) && n >= 0)) throw Error("Halloumi milk and salt allowance must be zero or positive.");
+  const rounds = milkLitres / HALLOUMI_RECIPE_MILK_LITRES;
+  return { milkLitres, rounds, calciumChlorideKg: quantity(rounds * 0.192), rennetMl: quantity(rounds * 15), saltKg: quantity(rounds * saltGPer240L / 1e3), calciumWaterLitres: quantity(rounds * 3.8), rennetWaterLitres: quantity(rounds * 0.5), saltGPer240L };
+}
+
+// src/traceability/liquidIngredients.ts
+var ml = (n) => Math.round(n * 1e9) / 1e9;
+function liquidChecklistForecast(plan) {
+  const recipe = halloumiPlanningRecipe(plan.planHalloumiLitres ?? 0, plan.halloumiSaltGPer240L);
+  return recipe.milkLitres > 0 ? [{ id: "rennet", name: "Rennet", unit: "mL", total: recipe.rennetMl }] : [];
+}
+function liquidPrepared(row) {
+  if (row.floorBalanceMl === null || row.containers.some((c) => c.volumeMl === null)) return null;
+  return ml(row.floorBalanceMl + row.containers.reduce((n, c) => n + (c.volumeMl ?? 0), 0));
+}
+function liquidGaps(row, requiredMl) {
+  const gaps = [];
+  if (!row.responsible.trim()) gaps.push("Enter the responsible person\u2019s name.");
+  if (row.floorBalanceMl === null) gaps.push("Enter the floor balance in mL, or 0 if none.");
+  else if (row.floorBalanceMl > 0 && !row.floorBatchCodes.trim()) gaps.push("Enter the floor bottle\u2019s batch/lot code.");
+  if (row.containers.some((c) => c.volumeMl === null || !c.batchCode.trim())) gaps.push("Enter the volume and batch/lot code of each bottle brought from storage.");
+  const prepared = liquidPrepared(row);
+  if (prepared !== null && prepared < requiredMl) gaps.push(`Shortfall: ${ml(requiredMl - prepared)} mL (${prepared} mL prepared / ${requiredMl} mL required).`);
+  return gaps;
+}
+function recordLiquidReadiness(state, lotId, entry, expectedRevision, actor, role, at, id) {
+  const plan = state.lots[lotId], revision = plan?.audit[plan.audit.length - 1]?.id || "";
+  if (!plan || !revision || revision !== expectedRevision) throw Error("The production plan changed. Reload the checklist.");
+  const required = liquidChecklistForecast(plan.value).find((r) => r.id === entry.ingredientId);
+  if (!required) throw Error("This liquid ingredient is not required by the latest plan.");
+  const previous = state.liquidReadiness?.[lotId]?.[entry.ingredientId], draft = entry.draft;
+  if ((previous?.audit[previous.audit.length - 1]?.id || "") !== entry.expectedCheckId) throw Error("This ingredient check changed elsewhere. Reload before saving.");
+  if (!draft || !Array.isArray(draft.containers) || typeof draft.responsible !== "string" || typeof draft.floorBatchCodes !== "string" || typeof draft.supplier !== "string" || typeof draft.onSite !== "boolean") throw Error("Enter valid liquid preparation details.");
+  for (const n of [draft.floorBalanceMl, ...draft.containers.map((c) => c.volumeMl)]) if (n !== null && (!Number.isFinite(n) || n < 0)) throw Error("Liquid quantities must be zero or positive, in mL.");
+  if (new Set(draft.containers.map((c) => c.id)).size !== draft.containers.length || draft.containers.some((c) => !c.id || typeof c.batchCode !== "string" || c.volumeMl === 0)) throw Error("Each storage bottle needs its own entry and a positive volume.");
+  if (!["owner", "admin"].includes(role) && draft.supplier !== (previous?.value.supplier || "")) throw Error("Only Owner/Admin can change the supplier.");
+  if (previous && previous.value.checkedBy !== actor && previous.value.planRevision === revision && !["owner", "admin"].includes(role)) throw Error("Only the original checker or Owner/Admin may revise this check.");
+  const gaps = liquidGaps(draft, required.total);
+  if (draft.onSite && gaps.length) throw Error(`Rennet: ${gaps.join(" ")}`);
+  const value = { ...draft, planRevision: revision, requiredMl: required.total, checkedBy: actor, checkedAt: at };
+  const physical = (v) => ({ ...v, supplier: "", checkedBy: "", checkedAt: "" });
+  if (previous && JSON.stringify(physical(previous.value)) === JSON.stringify(physical(value))) {
+    value.checkedBy = previous.value.checkedBy;
+    value.checkedAt = previous.value.checkedAt;
+  }
+  if (previous && JSON.stringify(previous.value) === JSON.stringify(value)) return state;
+  const audit = { id, at, actor, role, reason: draft.onSite ? "Confirmed ready at factory" : "Readiness progress recorded", before: previous?.value ?? null, after: value };
+  const saved = { value, audit: [...previous?.audit || [], audit] };
+  return { ...state, liquidReadiness: { ...state.liquidReadiness, [lotId]: { ...state.liquidReadiness?.[lotId], [entry.ingredientId]: saved } } };
+}
+
 // src/lib/paneerRecipe.ts
 var PANEER_RECIPE_VERSION = "paneer-2026-10-28-v1";
 var PANEER_RECIPE_BASIS_LITRES = 500;
@@ -226,8 +282,8 @@ function recordPaneerIngredientAllocation(round, recordedAt, recordedBy, reason,
   const changes = [...ids].flatMap((id) => {
     const next = recipe.lines.find((line) => line.id === id);
     const old = previous?.lines.find((line) => line.id === id);
-    const quantity = Math.round(((next?.quantity || 0) - (old?.quantity || 0)) * 1e6) / 1e6;
-    return quantity === 0 ? [] : [{ ...next || old, quantity }];
+    const quantity2 = Math.round(((next?.quantity || 0) - (old?.quantity || 0)) * 1e6) / 1e6;
+    return quantity2 === 0 ? [] : [{ ...next || old, quantity: quantity2 }];
   });
   const issue = {
     ...recipe,
@@ -281,6 +337,12 @@ var emptyTraceState = { schema: 1, lots: {}, rounds: {}, prefixes: {} };
 function emptyRoundTrace(date = "") {
   return { productionDate: date, vessels: [], ingredients: [], cutting: { clothKg: null, trays: null, scrambleKg: null, samplePieces: null, sampleLocation: "", scrambleLocation: "" }, note: "" };
 }
+function plannedMilkTotal(plan) {
+  const values = [plan.planCsLitres, plan.planDirectLitres, plan.planHalloumiLitres ?? 0];
+  if (!values.every((n) => Number.isFinite(n) && n >= 0)) throw Error("Planned milk volumes must be zero or positive.");
+  halloumiPlanningRecipe(plan.planHalloumiLitres ?? 0, plan.halloumiSaltGPer240L);
+  return Math.round(values.reduce((sum, n) => sum + n, 0) * 1e6) / 1e6;
+}
 function forecast(cs, direct) {
   if (![cs, direct].every((n) => Number.isFinite(n) && n >= 0)) throw Error("Milk quantities must be zero or positive.");
   const rows = /* @__PURE__ */ new Map();
@@ -295,12 +357,22 @@ function forecast(cs, direct) {
   }
   return [...rows.values()];
 }
-function checklistForecast(cs, direct) {
-  return forecast(cs, direct).map((row) => {
+function checklistForecast(cs, direct, halloumi = 0, saltGPer240L) {
+  const rows = forecast(cs, direct).map((row) => {
     const factor = row.unit === "g" ? 1e-3 : 1;
     const kg3 = (value) => Math.round(value * factor * 1e9) / 1e9;
-    return { ...row, unit: "kg", cs: kg3(row.cs), direct: kg3(row.direct), total: kg3(row.total) };
+    return { ...row, unit: "kg", cs: kg3(row.cs), direct: kg3(row.direct), halloumi: 0, total: kg3(row.total) };
   });
+  const recipe = halloumiPlanningRecipe(halloumi, saltGPer240L);
+  if (halloumi > 0) for (const [id, name, amount] of [["calcium_chloride", "Calcium chloride", recipe.calciumChlorideKg], ["salt", "Salt", recipe.saltKg]]) {
+    if (amount === 0) continue;
+    const row = rows.find((r) => r.id === id);
+    if (row) {
+      row.halloumi = amount;
+      row.total = Math.round((row.total + amount) * 1e9) / 1e9;
+    } else rows.push({ id, name, unit: "kg", cs: 0, direct: 0, halloumi: amount, total: amount });
+  }
+  return rows;
 }
 function planRevision(plan) {
   return plan?.audit[plan.audit.length - 1]?.id || "";
@@ -351,9 +423,9 @@ function recordReadiness(state, lotId, ingredientId, draft, expectedPlanRevision
   if (!plan || !revision || revision !== expectedPlanRevision) throw Error("The production plan changed. Reload the checklist and check the latest requirements.");
   const previous = state.readiness?.[lotId]?.[ingredientId];
   if ((previous?.audit[previous.audit.length - 1]?.id || "") !== expectedCheckId) throw Error("This ingredient check changed elsewhere. Reload before saving.");
-  const required = checklistForecast(plan.value.planCsLitres, plan.value.planDirectLitres).find((r) => r.id === ingredientId);
+  const required = checklistForecast(plan.value.planCsLitres, plan.value.planDirectLitres, plan.value.planHalloumiLitres ?? 0, plan.value.halloumiSaltGPer240L).find((r) => r.id === ingredientId);
   if (!required) throw Error("This ingredient is not required by the latest plan.");
-  for (const quantity of [draft.availableKg, draft.floorBalanceKg, draft.broughtFromStorageKg]) if (quantity !== null && quantity !== void 0 && (!Number.isFinite(quantity) || quantity < 0)) throw Error("Ingredient weights must be zero or positive, in kg.");
+  for (const quantity2 of [draft.availableKg, draft.floorBalanceKg, draft.broughtFromStorageKg]) if (quantity2 !== null && quantity2 !== void 0 && (!Number.isFinite(quantity2) || quantity2 < 0)) throw Error("Ingredient weights must be zero or positive, in kg.");
   if (draft.storageBags !== void 0) {
     if (new Set(draft.storageBags.map((b) => b.id)).size !== draft.storageBags.length) throw Error("Each bag must have a separate entry.");
     const numbers = draft.storageBags.flatMap((b) => b.number === void 0 ? [] : [b.number]);
@@ -378,8 +450,9 @@ function recordReadiness(state, lotId, ingredientId, draft, expectedPlanRevision
   const entry = { value, audit: [...previous?.audit || [], audit] };
   return { ...state, readiness: { ...state.readiness, [lotId]: { ...state.readiness?.[lotId], [ingredientId]: entry } } };
 }
-function recordChecklist(state, lotId, entries, revision, actor, role, at, id) {
-  return entries.reduce((next, entry, index) => recordReadiness(next, lotId, entry.ingredientId, entry.draft, revision, entry.expectedCheckId, actor, role, at, `${id}:${index}`), state);
+function recordChecklist(state, lotId, entries, revision, actor, role, at, id, liquidEntries = []) {
+  const weighed = entries.reduce((next, entry, index) => recordReadiness(next, lotId, entry.ingredientId, entry.draft, revision, entry.expectedCheckId, actor, role, at, `${id}:${index}`), state);
+  return liquidEntries.reduce((next, entry, index) => recordLiquidReadiness(next, lotId, entry, revision, actor, role, at, `${id}:liquid:${index}`), weighed);
 }
 function onlyCompletesMissing(before, after) {
   if (before === null || before === void 0 || before === "") return true;
@@ -1190,7 +1263,8 @@ function prepareTraceCommand(d, request, actor, role, at) {
         lot(p.id);
         if (planRevision(s.lots[p.id]) !== p.expectedRevision) throw Error("The plan changed. Reopen it before saving.");
         if (!validDate(p.value.productionDate)) throw Error("Confirm the start of production date.");
-        checklistForecast(p.value.planCsLitres, p.value.planDirectLitres);
+        plannedMilkTotal(p.value);
+        checklistForecast(p.value.planCsLitres, p.value.planDirectLitres, p.value.planHalloumiLitres ?? 0, p.value.halloumiSaltGPer240L);
       } else {
         owner();
         if (!r.some((x) => x.id === p.id)) throw Error("Paneer round not found.");
@@ -1203,7 +1277,7 @@ function prepareTraceCommand(d, request, actor, role, at) {
     }
     case "checklist":
       lot(p.lotId);
-      next.vejoy_traceability = recordChecklist(s, p.lotId, p.entries, p.revision, actor, role, at, request.id);
+      next.vejoy_traceability = recordChecklist(s, p.lotId, p.entries, p.revision, actor, role, at, request.id, p.liquidEntries || []);
       break;
     case "readiness":
       lot(p.lotId);

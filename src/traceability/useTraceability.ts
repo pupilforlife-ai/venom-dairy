@@ -15,7 +15,7 @@ export function useTraceability(){
  const context=useContext(TraceContext);if(!context)throw Error('Traceability provider is missing.');const {state,loaded}=context;
  const save=(kind:'lots'|'rounds'|'prefixes',id:string,value:LotTrace|RoundTrace|string,reason:string,expectedRevision?:string)=>runTraceCommand('save',{kind,id,value,reason,expectedRevision:expectedRevision??(state.prefixes[id]?.audit[state.prefixes[id].audit.length-1]?.id||'')}) as Promise<string>;
  const saveReadiness=(lotId:string,ingredientId:string,draft:IngredientReadiness,revision:string,checkId:string)=>runTraceCommand('readiness',{lotId,ingredientId,draft,revision,checkId});
- const saveChecklist=(lotId:string,entries:unknown[],revision:string)=>runTraceCommand('checklist',{lotId,entries,revision});
+ const saveChecklist=(lotId:string,entries:unknown[],revision:string,liquidEntries:import('./liquidIngredients').LiquidCheckRequest[]=[])=>runTraceCommand('checklist',{lotId,entries,revision,liquidEntries});
  const saveMixedCase=(p:MixedCaseRequest)=>runTraceCommand('assemble',p,p.id);
  const cancelMixedCase=(id:string,reason:string)=>runTraceCommand('cancel_assembly',{id,reason});
  const linkMixedCaseStock=(id:string)=>runTraceCommand('link_assembly',{id});

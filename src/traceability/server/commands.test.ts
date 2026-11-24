@@ -69,3 +69,13 @@ it('records rejection only for the selected milk lot, with server-backed actor/t
  for(const key of ['vejoy_productionRounds','vejoy_finishedStock','vejoy_distributionHandovers','vejoy_intermediateLots','vejoy_traceability'] as const)expect(saved[key]).toBe(d[key]);
  expect(saved.vejoy_milkLots[1]).toBe(d.vejoy_milkLots[1]);expect(JSON.stringify(d)).toBe(before);
 });
+
+it('saves planned Halloumi litres independently of real production and preserves earlier plans',()=>{
+ const d=fixture();d.vejoy_traceability=emptyTraceState;
+ const value={productionDate:'2026-11-24',planCsLitres:4000,planDirectLitres:1000,planHalloumiLitres:2400};
+ const command={id:'halloumi-plan',kind:'save',payload:{kind:'lots',id:d.vejoy_milkLots[0].id,value,expectedRevision:'',reason:''}};
+ const result=prepareTraceCommand(d,command,'owner','owner',at).documents;
+ expect(result.vejoy_traceability.lots[d.vejoy_milkLots[0].id].value).toEqual(value);
+ expect(result.vejoy_productionRounds).toBe(d.vejoy_productionRounds);expect(result.vejoy_milkLots).toBe(d.vejoy_milkLots);
+ expect(()=>prepareTraceCommand(d,{...command,payload:{...command.payload,value:{...value,planHalloumiLitres:-240}}},'owner','owner',at)).toThrow('volumes');
+});

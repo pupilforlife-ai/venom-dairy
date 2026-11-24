@@ -206,3 +206,24 @@ begin
  if not exists(select 1 from pg_temp.state_test s cross join lateral jsonb_array_elements(s.value) x where s.key='vejoy_milkLots' and x->>'id'='reject-test' and x->>'status'='completed' and x->>'litresRejected'='25000' and jsonb_array_length(x->'milkBalanceReviews')=2) then raise exception 'Owner rejection correction failed';end if;
 end $$;
 select 'milk rejection atomic save / retries / stale writes / immutable receipts / rejected-source gate / owner corrections / lot isolation passed' as result;
+
+-- Additive Halloumi plan + mL preparation persists through the same shared RPC.
+do $$
+declare actor uuid; expected jsonb; before_trace jsonb; prepared jsonb; response jsonb; before_other jsonb; after_other jsonb; saved_version bigint;
+begin
+ select id into actor from pg_temp.profiles_test;
+ select value into before_trace from pg_temp.state_test where key='vejoy_traceability';
+ prepared:=before_trace||'{"liquidReadiness":{"test-milk":{"rennet":{"value":{"planRevision":"hall-plan","requiredMl":150,"floorBalanceMl":500,"floorBatchCodes":"R1","containers":[],"responsible":"Test preparer","supplier":"","onSite":true,"checkedBy":"Test preparer","checkedAt":"2026-11-24T10:00:00Z"},"audit":[]}}}}'::jsonb;
+ select jsonb_agg(jsonb_build_object('key',key,'value',value,'version',version) order by key) into before_other from pg_temp.state_test where key<>'vejoy_traceability';
+ select jsonb_agg(jsonb_build_object('key',k,'version',s.version)) into expected from unnest(array['vejoy_distributionHandovers','vejoy_finishedStock','vejoy_intermediateLots','vejoy_milkLots','vejoy_productionRounds','vejoy_traceability']) k left join pg_temp.state_test s on s.key=k;
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ response:=pg_temp.commit_paneer_traceability(actor,'{"id":"halloumi-checklist-rpc","kind":"checklist","_role":"owner"}',expected,jsonb_build_object('vejoy_traceability',prepared),'null');
+ if (select value from pg_temp.state_test where key='vejoy_traceability') is distinct from prepared then raise exception 'Liquid preparation not stored exactly';end if;
+ select version into saved_version from pg_temp.state_test where key='vejoy_traceability';
+ select jsonb_agg(jsonb_build_object('key',key,'value',value,'version',version) order by key) into after_other from pg_temp.state_test where key<>'vejoy_traceability';
+ if before_other is distinct from after_other then raise exception 'Halloumi planning changed production/source records';end if;
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ response:=pg_temp.commit_paneer_traceability(actor,'{"id":"halloumi-checklist-rpc","kind":"checklist","_role":"owner"}','[]','{}','null');
+ if (select version from pg_temp.state_test where key='vejoy_traceability')<>saved_version then raise exception 'Checklist retry wrote twice';end if;
+end $$;
+select 'Halloumi liquid checklist stored exactly / idempotent retry / no production or source changes passed' as result;

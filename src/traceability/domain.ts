@@ -1,3 +1,5 @@
+import { halloumiPlanningRecipe } from '../lib/halloumiRecipe';
+import {recordLiquidReadiness,type LiquidCheckRequest} from './liquidIngredients';
 import { finishedGoodsBatchCodeDefinitions } from '../data/skuConfig';
 import { getPaneerRecipe, type PaneerRecipeType } from '../lib/paneerRecipe';
 
@@ -29,14 +31,20 @@ export interface IngredientUse { id: string; ingredientId: string; name: string;
 export interface VesselDraw { vessel: string; litres: number }
 export interface CuttingTrace { pendingAcknowledged?:boolean; trayNumbers?:number[];sampleCrateCode?:string;samplePacketBatchCode?:string; clothKg: number | null; trays: number | null; scrambleKg: number | null; samplePieces: number | null; sampleLocation: string; scrambleLocation: string }
 export interface RoundTrace { productionDate: string; vessels: VesselDraw[]; ingredients: IngredientUse[]; cutting: CuttingTrace; note: string }
-export interface LotTrace { productionDate: string; planCsLitres: number; planDirectLitres: number }
+export interface LotTrace { productionDate: string; planCsLitres: number; planDirectLitres: number; planHalloumiLitres?: number; halloumiSaltGPer240L?:number }
 export interface Audit { id: string; at: string; actor: string; role: string; reason: string; before: unknown; after: unknown }
 export interface RecordEntry<T> { value: T; audit: Audit[] }
 export interface IngredientBag { id:string; number?:number; weightKg:number|null; batchCode:string; caseGroupId?:string }
 export interface IngredientReadiness { planRevision: string; requiredKg: number; availableKg: number | null; floorBalanceKg?: number | null; floorBatchCodes?: string; storageBags?: IngredientBag[]; nextBagNumber?:number; broughtFromStorageKg?: number | null; supplier: string; supplierProductCode: string; supplierBatches: string; responsible: string; onSite: boolean; checkedBy: string; checkedAt: string }
-export interface TraceState { pan111Reconciliations?:Record<string,import('./pan111Reconciliation').Pan111Reconciliation>; stockEvents?:Record<string,import('./mixedCaseStock').TraceStockEvent>; retentionTransfers?:Record<string,import('./paneerStorage').RetentionTransfer>; mixedCases?:Record<string,import('./mixedPaneerCases').MixedPaneerCase>; schema: 1; lots: Record<string,RecordEntry<LotTrace>>; rounds: Record<string,RecordEntry<RoundTrace>>; prefixes: Record<string,RecordEntry<string>>; readiness?: Record<string,Record<string,RecordEntry<IngredientReadiness>>> }
+export interface TraceState { liquidReadiness?:Record<string,Record<string,RecordEntry<import('./liquidIngredients').LiquidIngredientReadiness>>>; pan111Reconciliations?:Record<string,import('./pan111Reconciliation').Pan111Reconciliation>; stockEvents?:Record<string,import('./mixedCaseStock').TraceStockEvent>; retentionTransfers?:Record<string,import('./paneerStorage').RetentionTransfer>; mixedCases?:Record<string,import('./mixedPaneerCases').MixedPaneerCase>; schema: 1; lots: Record<string,RecordEntry<LotTrace>>; rounds: Record<string,RecordEntry<RoundTrace>>; prefixes: Record<string,RecordEntry<string>>; readiness?: Record<string,Record<string,RecordEntry<IngredientReadiness>>> }
 export const emptyTraceState: TraceState = {schema:1,lots:{},rounds:{},prefixes:{}};
 export function emptyRoundTrace(date = ''): RoundTrace { return { productionDate:date,vessels:[],ingredients:[],cutting:{clothKg:null,trays:null,scrambleKg:null,samplePieces:null,sampleLocation:'',scrambleLocation:''},note:'' }; }
+export function plannedMilkTotal(plan:LotTrace) {
+  const values=[plan.planCsLitres,plan.planDirectLitres,plan.planHalloumiLitres??0];
+  if(!values.every(n=>Number.isFinite(n)&&n>=0))throw Error('Planned milk volumes must be zero or positive.');
+  halloumiPlanningRecipe(plan.planHalloumiLitres??0,plan.halloumiSaltGPer240L);
+  return Math.round(values.reduce((sum,n)=>sum+n,0)*1e6)/1e6;
+}
 export function forecast(cs: number, direct: number) {
   if (![cs,direct].every(n=>Number.isFinite(n)&&n>=0)) throw Error('Milk quantities must be zero or positive.');
   const rows = new Map<string,{id:string;name:string;unit:'g'|'kg';cs:number;direct:number;total:number}>();
@@ -49,13 +57,21 @@ export function forecast(cs: number, direct: number) {
   }
   return [...rows.values()];
 }
-// Checklist units are always kg. Individual round recipes retain their g/kg units.
-export function checklistForecast(cs: number, direct: number) {
-  return forecast(cs,direct).map(row=>{
+// Weighed ingredients stay in kg. Liquid rennet is tracked separately in mL.
+export function checklistForecast(cs:number,direct:number,halloumi=0,saltGPer240L?:number) {
+  const rows=forecast(cs,direct).map(row=>{
     const factor=row.unit==='g'?0.001:1;
     const kg=(value:number)=>Math.round(value*factor*1e9)/1e9;
-    return {...row,unit:'kg' as const,cs:kg(row.cs),direct:kg(row.direct),total:kg(row.total)};
+    return {...row,unit:'kg' as const,cs:kg(row.cs),direct:kg(row.direct),halloumi:0,total:kg(row.total)};
   });
+  const recipe=halloumiPlanningRecipe(halloumi,saltGPer240L);
+  if(halloumi>0)for(const [id,name,amount] of [['calcium_chloride','Calcium chloride',recipe.calciumChlorideKg],['salt','Salt',recipe.saltKg]] as const) {
+    if(amount===0)continue;
+    const row=rows.find(r=>r.id===id);
+    if(row){row.halloumi=amount;row.total=Math.round((row.total+amount)*1e9)/1e9;}
+    else rows.push({id,name,unit:'kg',cs:0,direct:0,halloumi:amount,total:amount});
+  }
+  return rows;
 }
 export function planRevision(plan:RecordEntry<LotTrace>|undefined) { return plan?.audit[plan.audit.length-1]?.id||''; }
 export function storageTopUp(requiredKg:number,floorBalanceKg:number|null) {
@@ -146,7 +162,7 @@ export function recordReadiness(state:TraceState,lotId:string,ingredientId:strin
   if(!plan||!revision||revision!==expectedPlanRevision)throw Error('The production plan changed. Reload the checklist and check the latest requirements.');
   const previous=state.readiness?.[lotId]?.[ingredientId];
   if((previous?.audit[previous.audit.length-1]?.id||'')!==expectedCheckId)throw Error('This ingredient check changed elsewhere. Reload before saving.');
-  const required=checklistForecast(plan.value.planCsLitres,plan.value.planDirectLitres).find(r=>r.id===ingredientId);
+  const required=checklistForecast(plan.value.planCsLitres,plan.value.planDirectLitres,plan.value.planHalloumiLitres??0,plan.value.halloumiSaltGPer240L).find(r=>r.id===ingredientId);
   if(!required)throw Error('This ingredient is not required by the latest plan.');
   for(const quantity of [draft.availableKg,draft.floorBalanceKg,draft.broughtFromStorageKg])if(quantity!==null&&quantity!==undefined&&(!Number.isFinite(quantity)||quantity<0))throw Error('Ingredient weights must be zero or positive, in kg.');
   if(draft.storageBags!==undefined) {
@@ -173,9 +189,10 @@ export function recordReadiness(state:TraceState,lotId:string,ingredientId:strin
   const entry={value,audit:[...(previous?.audit||[]),audit]};
   return {...state,readiness:{...state.readiness,[lotId]:{...state.readiness?.[lotId],[ingredientId]:entry}}};
 }
-export function recordChecklist(state:TraceState,lotId:string,entries:{ingredientId:string;draft:IngredientReadiness;expectedCheckId:string}[],revision:string,actor:string,role:string,at:string,id:string) {
+export function recordChecklist(state:TraceState,lotId:string,entries:{ingredientId:string;draft:IngredientReadiness;expectedCheckId:string}[],revision:string,actor:string,role:string,at:string,id:string,liquidEntries:LiquidCheckRequest[]=[]) {
   // Build every change before publishing: one invalid/stale row aborts the whole save.
-  return entries.reduce((next,entry,index)=>recordReadiness(next,lotId,entry.ingredientId,entry.draft,revision,entry.expectedCheckId,actor,role,at,`${id}:${index}`),state);
+  const weighed=entries.reduce((next,entry,index)=>recordReadiness(next,lotId,entry.ingredientId,entry.draft,revision,entry.expectedCheckId,actor,role,at,`${id}:${index}`),state);
+  return liquidEntries.reduce((next,entry,index)=>recordLiquidReadiness(next,lotId,entry,revision,actor,role,at,`${id}:liquid:${index}`),weighed);
 }
 export function ingredientTemplate(type: PaneerRecipeType,milk: number): IngredientUse[] {
   return getPaneerRecipe(type,milk).lines.map(line=>({ id:line.id+'-first', ingredientId:line.id,name:line.name,quantity:null,unit:line.unit,supplier:'',supplierProductCode:'',supplierBatch:'' }));

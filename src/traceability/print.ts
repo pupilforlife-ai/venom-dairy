@@ -1,32 +1,45 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {halloumiPlanningRecipe} from '../lib/halloumiRecipe';
+import {liquidChecklistForecast,liquidBrought,liquidStatus,type LiquidIngredientReadiness} from './liquidIngredients';
 import { bagEntryGroups, bagGroupLabel, numberedBags, checklistForecast, readinessStatus, storageBagTotal, storageTopUp, type IngredientReadiness, type RecordEntry, type LotTrace } from './domain';
-export interface ChecklistPrintOptions { revision:string; revisionNumber:number; checks:Record<string,RecordEntry<IngredientReadiness>> }
+export interface ChecklistPrintOptions { revision:string; revisionNumber:number; checks:Record<string,RecordEntry<IngredientReadiness>>;liquidChecks?:Record<string,RecordEntry<LiquidIngredientReadiness>> }
 export function buildForecastPdf(lotCode:string,plan:LotTrace,options?:ChecklistPrintOptions) {
   const doc=new jsPDF();doc.setFontSize(17);doc.text('Ingredient checklist',14,18);
-  const names=[...new Set(Object.values(options?.checks||{}).map(c=>c.value.responsible).filter(Boolean))];
-  doc.setFontSize(11);doc.text(doc.splitTextToSize(`Person: ${names.join(', ')||'____________________________'}`,181),14,27);
-  doc.setFontSize(10);doc.text(`Milk lot ${lotCode} | Start of production date ${plan.productionDate || 'Not confirmed'}`,14,39);
-  doc.text(`C/S ${plan.planCsLitres.toLocaleString()} L + Direct ${plan.planDirectLitres.toLocaleString()} L | Plan revision ${options?.revisionNumber||'Draft'}`,14,46);
-  doc.text(`Printed ${new Date().toLocaleString('en-GB',{timeZone:'Africa/Johannesburg'})} SAST | All weights in kg`,14,53);
-  const rows=checklistForecast(plan.planCsLitres,plan.planDirectLitres);
-  autoTable(doc,{startY:61,head:[['Ready','Ingredient','Required\n(kg)','Floor balance\n(kg)','Minimum extra\n(kg)','Actually brought\n(kg)']],
-    body:rows.map(r=>{const c=options?.checks[r.id]?.value,status=readinessStatus(c,options?.revision||'',r.total);return [status==='Ready'?'[X]':'[  ]',r.name,String(r.total),c?.floorBalanceKg??'',storageTopUp(r.total,c?.floorBalanceKg??null)??'',c?.storageBags!==undefined?(storageBagTotal(c.storageBags)??''):c?.broughtFromStorageKg??''];}),styles:{fontSize:9},headStyles:{fillColor:[32,62,80]}});
+  const names=[...new Set([...Object.values(options?.checks||{}),...Object.values(options?.liquidChecks||{})].map(c=>c.value.responsible).filter(Boolean))];
+  let y=27;doc.setFontSize(10);
+  const line=(text:string)=>{const lines=doc.splitTextToSize(text,181);doc.text(lines,14,y);y+=lines.length*4.5+3;};
+  line(`Person: ${names.join(', ')||'____________________________'}`);
+  line(`Milk lot ${lotCode} | Start of production date ${plan.productionDate||'Not confirmed'}`);
+  line(`C/S ${plan.planCsLitres.toLocaleString()} L + Direct ${plan.planDirectLitres.toLocaleString()} L + Halloumi ${(plan.planHalloumiLitres??0).toLocaleString()} L | Plan revision ${options?.revisionNumber||'Draft'}`);
+  const halloumi=halloumiPlanningRecipe(plan.planHalloumiLitres??0,plan.halloumiSaltGPer240L);
+  if(halloumi.milkLitres>0){line(`Halloumi salt allowance: ${halloumi.saltGPer240L} g per 240 L (editable).`);line(`Halloumi solution water: ${halloumi.calciumWaterLitres} L for calcium chloride + ${halloumi.rennetWaterLitres} L for rennet.`);}
+  line(`Printed ${new Date().toLocaleString('en-GB',{timeZone:'Africa/Johannesburg'})} SAST | Weights in kg; rennet in mL`);
+  const rows=checklistForecast(plan.planCsLitres,plan.planDirectLitres,plan.planHalloumiLitres??0,plan.halloumiSaltGPer240L),liquids=liquidChecklistForecast(plan);
+  const amount=(value:number|null|undefined,unit:string)=>value==null?'':`${value} ${unit}`;
+  const weightRows=rows.map(r=>{const c=options?.checks[r.id]?.value,status=readinessStatus(c,options?.revision||'',r.total);return [status==='Ready'?'[X]':'[  ]',r.name,amount(r.total,'kg'),amount(c?.floorBalanceKg,'kg'),amount(storageTopUp(r.total,c?.floorBalanceKg??null),'kg'),amount(c?.storageBags!==undefined?storageBagTotal(c.storageBags):c?.broughtFromStorageKg,'kg')];});
+  const liquidRows=liquids.map(r=>{const c=options?.liquidChecks?.[r.id]?.value;return [liquidStatus(c,options?.revision||'',r.total)==='Ready'?'[X]':'[  ]',r.name,amount(r.total,'mL'),amount(c?.floorBalanceMl,'mL'),amount(c?.floorBalanceMl==null?null:Math.max(0,Math.round((r.total-c.floorBalanceMl)*1e9)/1e9),'mL'),amount(c?liquidBrought(c):null,'mL')];});
+  autoTable(doc,{startY:y+2,head:[['Ready','Ingredient','Required','Floor balance','Minimum extra','Actually brought']],body:[...weightRows,...liquidRows],styles:{fontSize:9},headStyles:{fillColor:[99,58,180]}});
   const batchRows:string[][]=[];
   rows.forEach(r=>{const c=options?.checks[r.id]?.value;
-    if(!c){batchRows.push([r.name,'Bag / floor balance','________','________________']);return;}
+    if(!c){batchRows.push([r.name,'Bag / floor balance','________ kg','________________']);return;}
     if(c.storageBags!==undefined) {
-      if(c.floorBalanceKg&&c.floorBalanceKg>0)batchRows.push([r.name,'Bag 0 - already on floor',String(c.floorBalanceKg),c.floorBatchCodes||'Not recorded']);
-      bagEntryGroups(numberedBags(c.storageBags)).forEach(group=>batchRows.push([r.name,group.length>1?`${bagGroupLabel(group)} (${group.length} x ${group[0].weightKg} kg)`:bagGroupLabel(group),storageBagTotal(group)===null?'Not recorded':String(storageBagTotal(group)),group[0].batchCode||'Not recorded']));
+      if(c.floorBalanceKg&&c.floorBalanceKg>0)batchRows.push([r.name,'Bag 0 - already on floor',`${c.floorBalanceKg} kg`,c.floorBatchCodes||'Not recorded']);
+      bagEntryGroups(numberedBags(c.storageBags)).forEach(group=>batchRows.push([r.name,group.length>1?`${bagGroupLabel(group)} (${group.length} x ${group[0].weightKg} kg)`:bagGroupLabel(group),amount(storageBagTotal(group),'kg')||'Not recorded',group[0].batchCode||'Not recorded']));
       if(!c.storageBags.length&&!c.floorBalanceKg)batchRows.push([r.name,'No bags recorded','','']);
-    } else batchRows.push([r.name,'Earlier transfer - individual bags not recorded',String(c.broughtFromStorageKg??''),c.supplierBatches||'Not recorded']);
+    } else batchRows.push([r.name,'Earlier transfer - individual bags not recorded',amount(c.broughtFromStorageKg,'kg'),c.supplierBatches||'Not recorded']);
   });
-  autoTable(doc,{startY:(doc as any).lastAutoTable.finalY+10,head:[['Ingredient','Source / bag','Weight (kg)','Batch/lot code']],body:batchRows,styles:{fontSize:9,overflow:'linebreak'},headStyles:{fillColor:[32,62,80]},rowPageBreak:'avoid'});
-  const recorded=Object.values(options?.checks||{}).map(c=>`${c.value.checkedBy} - ${new Date(c.value.checkedAt).toLocaleString('en-GB',{timeZone:'Africa/Johannesburg'})} SAST`);
+  liquids.forEach(r=>{const c=options?.liquidChecks?.[r.id]?.value;if(!c){batchRows.push([r.name,'Bottle / floor balance','________ mL','________________']);return;}
+    if(c.floorBalanceMl&&c.floorBalanceMl>0)batchRows.push([r.name,'Floor bottle',amount(c.floorBalanceMl,'mL'),c.floorBatchCodes||'Not recorded']);
+    c.containers.forEach((b,i)=>batchRows.push([r.name,`Storage bottle ${i+1}`,amount(b.volumeMl,'mL')||'Not recorded',b.batchCode||'Not recorded']));
+    if(!c.containers.length&&!c.floorBalanceMl)batchRows.push([r.name,'No bottles recorded','','']);
+  });
+  autoTable(doc,{startY:(doc as any).lastAutoTable.finalY+10,head:[['Ingredient','Source / bag / bottle','Quantity','Batch/lot code']],body:batchRows,styles:{fontSize:9,overflow:'linebreak'},headStyles:{fillColor:[8,132,145]},rowPageBreak:'avoid'});
+  const recorded=[...Object.values(options?.checks||{}),...Object.values(options?.liquidChecks||{})].map(c=>`${c.value.checkedBy} - ${new Date(c.value.checkedAt).toLocaleString('en-GB',{timeZone:'Africa/Johannesburg'})} SAST`);
   let bottom=(doc as any).lastAutoTable.finalY+12;if(bottom>248){doc.addPage();bottom=18;}
-  doc.setFontSize(10);doc.text('Minimum extra = max(0, required - weighed floor balance). Whole bags can exceed this.',14,bottom);
-  doc.text('These are preparation checks; actual production consumption is recorded separately.',14,bottom+8);
-  doc.text('Recorded: '+([...new Set(recorded)].length===1?recorded[0]:'See saved checklist history for individual check times.'),14,bottom+16);
+  doc.setFontSize(9);doc.text('Minimum extra = max(0, required - floor balance). Whole bags/bottles may exceed this.',14,bottom);
+  doc.text('Preparation checklist only; actual production consumption is recorded separately.',14,bottom+8);
+  doc.text('Recorded: '+([...new Set(recorded)].length===1?recorded[0]:'See checklist history for individual check times.'),14,bottom+16);
   doc.text('Reviewed by: __________________',14,bottom+24);
   return doc;
 }
