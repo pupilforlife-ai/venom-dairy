@@ -1,3 +1,4 @@
+import {roundLossReviewWaived} from './lossAmnesty';
 import { trayPackingProgress } from './paneerTrays';
 import { retentionStorage } from './paneerStorage';
 import { Link } from 'react-router-dom';
@@ -20,6 +21,7 @@ export default function PaneerJourneyView({round,lot,state}:{round:ProductionRou
   </div>
   {!!cases.length&&<div className="trace-case-group"><strong>Loose packets used in mixed cases</strong>{cases.map(c=><p key={c.id}><Link to={`/traceability?q=${encodeURIComponent(c.id)}`}>Mixed case {c.number}</Link> · {c.parts.filter(p=>p.source.roundId===round.id).reduce((n,p)=>n+p.packets,0)} packets from this round · Case label {c.caseBatchCode}</p>)}</div>}
   {j.netKg!==null&&<p className="trace-help">Net paneer {j.netKg} kg − finished paneer {amount(j.packedKg)} − PAN111 {amount(j.pan111Kg)} − SPP {amount(j.sppKg??0)} = {amount(j.unaccountedKg)} unassigned difference. Samples have a piece count only; their mass is not invented. This is an analysis figure, not a recorded loss or a change to the board’s balance.</p>}
+  {roundLossReviewWaived(round,state)&&<p className="trace-help">Historical loss review waived. Original weight differences and stock quantities are retained.</p>}
   {round.pan111ApprovalStatus==='pending'&&<p className="trace-warning">PAN111 request {round.pan111RequestedWeight} kg is pending approval; it is not counted as approved PAN111.</p>}
   {round.balanceDisposition==='PAN111'&&<p className="trace-help">SPP cutting balance routed to PAN111: {amount(round.balanceDispositionWeight)}. This destination note is shown separately from PAN111 packing records.</p>}
   {!!j.gaps.length&&<details><summary>Missing traceability details · {j.gaps.length}</summary>{j.gaps.map(g=><p className="trace-warning" key={g}>{g}</p>)}</details>}

@@ -98,7 +98,7 @@ var finishedGoodsBatchCodeDefinitions = [
   { sku: "MPAN200", prefix: "12", mode: "receipt_date", receiptSource: "milk" },
   { sku: "VJPAN", prefix: "14", mode: "receipt_date", receiptSource: "milk" },
   { sku: "MPAN101", prefix: "15", mode: "receipt_date", receiptSource: "milk" },
-  { sku: "MPAN101 SPC CUT", prefix: "15", mode: "receipt_date", receiptSource: "milk" },
+  { sku: "MPAN101 SPC CUT", prefix: "18", mode: "receipt_date", receiptSource: "milk" },
   { sku: "MPAN010", prefix: "16", mode: "receipt_date", receiptSource: "milk" },
   { sku: "YD200", prefix: "17", mode: "receipt_date", receiptSource: "milk" },
   { sku: "RPAN100", prefix: "21", mode: "receipt_date", receiptSource: "milk" },
@@ -107,6 +107,8 @@ var finishedGoodsBatchCodeDefinitions = [
   { sku: "RPAN100 Rylands", prefix: "24", mode: "receipt_date", receiptSource: "milk" },
   { sku: "RPAN400 Rylands", prefix: "25", mode: "receipt_date", receiptSource: "milk" },
   { sku: "RPAN010", prefix: "26", mode: "receipt_date", receiptSource: "milk" },
+  { sku: "RPAN101", prefix: "27", mode: "receipt_date", receiptSource: "milk" },
+  { sku: "RPAN101 SPC CUT", prefix: "28", mode: "receipt_date", receiptSource: "milk" },
   { sku: "SPP", prefix: "31", mode: "manual" },
   { sku: "JP", prefix: "32", mode: "manual" },
   { sku: "HCP", prefix: "33", mode: "manual" },
@@ -123,6 +125,10 @@ var finishedGoodsBatchCodeDefinitions = [
   { sku: "400G", prefix: "62", mode: "receipt_date", receiptSource: "cream" },
   { sku: "GHEE-400", prefix: "62", mode: "receipt_date", receiptSource: "cream" },
   { sku: "GHEE-400-24", prefix: "62", mode: "receipt_date", receiptSource: "cream" },
+  { sku: "TN3", prefix: "71", mode: "manual" },
+  { sku: "TN5", prefix: "72", mode: "manual" },
+  { sku: "GN3", prefix: "73", mode: "manual" },
+  { sku: "GN4", prefix: "74", mode: "manual" },
   { sku: "TN3-(TBN PROMO)", prefix: "71", mode: "manual" },
   { sku: "TBN", prefix: "72", mode: "manual" },
   { sku: "GBN (PROMO)", prefix: "73", mode: "manual" },
@@ -311,7 +317,7 @@ function recordPaneerIngredientAllocation(round, recordedAt, recordedBy, reason,
 }
 
 // src/traceability/domain.ts
-var TRACE_VERSION = "proposed-20261111-v1";
+var TRACE_VERSION = "owner-approved-20261125-v1";
 var shifts = ["A", "B", "C", "D", "F", "G", "H", "J", "M", "N"];
 var agreedPrefixes = { ...Object.fromEntries(finishedGoodsBatchCodeDefinitions.map((d) => [d.sku, d.prefix])), "C/S": "90", D: "80", MPAN111: "08", RPAN111: "09", RSPP: "91", MSPP: "81", Cream: "92", Halloumi: "93", Butter: "50", PUBBB: "53", PSBBB: "54", Ghee: "60", MPAN100: "11", MPAN200: "12", MPAN400: "13", VJPAN: "14", RPAN100: "21", RPAN200: "22", RPAN400: "23", SPP: "31", "ROZ SPP": "41" };
 function validDate(date) {

@@ -1,0 +1,5 @@
+import type {ProductionRound} from '../data/mockData';import type {TraceState} from './domain';import {lotLossReviewWaived} from './lossAmnesty';
+export default function HistoricalLossAmnestyNotice({state,rounds,lotId='all'}:{state:TraceState;rounds:ProductionRound[];lotId?:string}) {
+ const entries=Object.values(state.historicalLossAmnesties||{}).filter(e=>lotId==='all'||e.lotId===lotId);if(!entries.length)return null;
+ return <details className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900"><summary className="cursor-pointer font-semibold">Historical loss review amnesty · {entries.map(e=>e.lotCode).join(', ')}</summary>{entries.map(e=><p key={e.id} className="mt-2">Lot {e.lotCode} · {lotLossReviewWaived(e.lotId,rounds,state)?'Recorded loss reviews waived':'Review waiver retained; new or changed quantities require review'} · Approved by {e.approvedBy} on {new Date(e.approvedAt).toLocaleString('en-GB',{timeZone:'Africa/Johannesburg'})} SAST. Original production, losses, loose packets and stock figures are retained.</p>)}</details>;
+}

@@ -3,7 +3,7 @@ import {recordLiquidReadiness,type LiquidCheckRequest} from './liquidIngredients
 import { finishedGoodsBatchCodeDefinitions } from '../data/skuConfig';
 import { getPaneerRecipe, type PaneerRecipeType } from '../lib/paneerRecipe';
 
-export const TRACE_VERSION = 'proposed-20261111-v1';
+export const TRACE_VERSION = 'owner-approved-20261125-v1';
 export const shifts = ['A','B','C','D','F','G','H','J','M','N'] as const;
 export const agreedPrefixes: Record<string,string> = { ...Object.fromEntries(finishedGoodsBatchCodeDefinitions.map(d=>[d.sku,d.prefix])), 'C/S':'90', D:'80', MPAN111:'08', RPAN111:'09', RSPP:'91', MSPP:'81', Cream:'92', Halloumi:'93', Butter:'50', PUBBB:'53', PSBBB:'54', Ghee:'60', MPAN100:'11', MPAN200:'12', MPAN400:'13', VJPAN:'14', RPAN100:'21', RPAN200:'22', RPAN400:'23', SPP:'31', 'ROZ SPP':'41' };
 export const ingredientPrefixes: Record<string,string> = { calcium_chloride:'C', gdl:'G', potassium_sorbate:'K', fis:'F', af_oil:'AF' };
@@ -36,7 +36,7 @@ export interface Audit { id: string; at: string; actor: string; role: string; re
 export interface RecordEntry<T> { value: T; audit: Audit[] }
 export interface IngredientBag { id:string; number?:number; weightKg:number|null; batchCode:string; caseGroupId?:string }
 export interface IngredientReadiness { planRevision: string; requiredKg: number; availableKg: number | null; floorBalanceKg?: number | null; floorBatchCodes?: string; storageBags?: IngredientBag[]; nextBagNumber?:number; broughtFromStorageKg?: number | null; supplier: string; supplierProductCode: string; supplierBatches: string; responsible: string; onSite: boolean; checkedBy: string; checkedAt: string }
-export interface TraceState { liquidReadiness?:Record<string,Record<string,RecordEntry<import('./liquidIngredients').LiquidIngredientReadiness>>>; pan111Reconciliations?:Record<string,import('./pan111Reconciliation').Pan111Reconciliation>; stockEvents?:Record<string,import('./mixedCaseStock').TraceStockEvent>; retentionTransfers?:Record<string,import('./paneerStorage').RetentionTransfer>; mixedCases?:Record<string,import('./mixedPaneerCases').MixedPaneerCase>; schema: 1; lots: Record<string,RecordEntry<LotTrace>>; rounds: Record<string,RecordEntry<RoundTrace>>; prefixes: Record<string,RecordEntry<string>>; readiness?: Record<string,Record<string,RecordEntry<IngredientReadiness>>> }
+export interface TraceState { historicalLossAmnesties?:Record<string,import('./lossAmnesty').HistoricalLossAmnesty>; liquidReadiness?:Record<string,Record<string,RecordEntry<import('./liquidIngredients').LiquidIngredientReadiness>>>; pan111Reconciliations?:Record<string,import('./pan111Reconciliation').Pan111Reconciliation>; stockEvents?:Record<string,import('./mixedCaseStock').TraceStockEvent>; retentionTransfers?:Record<string,import('./paneerStorage').RetentionTransfer>; mixedCases?:Record<string,import('./mixedPaneerCases').MixedPaneerCase>; schema: 1; lots: Record<string,RecordEntry<LotTrace>>; rounds: Record<string,RecordEntry<RoundTrace>>; prefixes: Record<string,RecordEntry<string>>; readiness?: Record<string,Record<string,RecordEntry<IngredientReadiness>>> }
 export const emptyTraceState: TraceState = {schema:1,lots:{},rounds:{},prefixes:{}};
 export function emptyRoundTrace(date = ''): RoundTrace { return { productionDate:date,vessels:[],ingredients:[],cutting:{clothKg:null,trays:null,scrambleKg:null,samplePieces:null,sampleLocation:'',scrambleLocation:''},note:'' }; }
 export function plannedMilkTotal(plan:LotTrace) {

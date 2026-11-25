@@ -227,3 +227,25 @@ begin
  if (select version from pg_temp.state_test where key='vejoy_traceability')<>saved_version then raise exception 'Checklist retry wrote twice';end if;
 end $$;
 select 'Halloumi liquid checklist stored exactly / idempotent retry / no production or source changes passed' as result;
+
+-- Approved defaults agree with the frontend, including older open packing clients.
+do $$
+declare actor uuid; item record; response jsonb; saved jsonb; before_packs jsonb; response2 jsonb;
+begin
+ select id into actor from pg_temp.profiles_test;
+ perform set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',actor)::text,true);perform set_config('request.jwt.claim.sub',actor::text,true);
+ for item in select * from (values ('prefix-mspc','D','200g cubes','MPAN101 SPC CUT','18'),('prefix-r101','C/S','400g cubes','RPAN101','27'),('prefix-rspc','C/S','200g cubes','RPAN101 SPC CUT','28'),('prefix-ry100','C/S','400g cubes','RPAN100 Rylands','24'),('prefix-ry400','C/S','400g cubes','RPAN400 Rylands','25'),('prefix-yd','D','200g cubes','YD200','17')) t(id,kind,cut,sku,prefix) loop
+  update pg_temp.state_test set value=value||jsonb_build_array(jsonb_build_object('id',item.id,'type',item.kind,'status','cut','milkLotId','test-milk','milkLotCode','151126','shiftNumber',1,'roundNumber',10,'plannedInput',500,'actualInput',500,'outputWeight',80,'cuttingType',item.cut,'packedSkus','[]'::jsonb)) where key='vejoy_productionRounds';
+  response:=pg_temp.commit_paneer_packing(jsonb_build_object('operationId',item.id||'-pack','roundId',item.id,'sku',item.sku,'cases',1,'loose',0));
+  if response->'round'->'packedSkus'->0->>'packetBatchCode'<>item.prefix||'-1511A10' then raise exception 'Wrong approved prefix for %: %',item.sku,response;end if;
+  if response->'stock'->>'caseBatchCode'<>item.prefix||'-1511A' then raise exception 'Stock label mismatch for %',item.sku;end if;
+ end loop;
+ -- A historical packet printed as 15 retains 15 when counts are corrected.
+ perform set_config('app.atomic_paneer_packing','on',true);
+ update pg_temp.state_test set value=value||'[{"id":"saved-old-prefix","type":"D","status":"cut","milkLotId":"test-milk","milkLotCode":"151126","shiftNumber":1,"roundNumber":11,"plannedInput":500,"actualInput":500,"outputWeight":80,"cuttingType":"200g cubes","packedSkus":[{"sku":"MPAN101 SPC CUT","cases":1,"loose":0,"packetBatchCode":"15-1511A11","caseBatchCode":"15-1511A","traceabilityProductionDate":"2026-11-15","traceabilityPrefixVersion":"proposed-20261111-v1","lastSaveOperationId":"historical-prefix"}]}]'::jsonb where key='vejoy_productionRounds';
+ perform set_config('app.atomic_paneer_packing','off',true);
+ select r->'packedSkus'->0 into saved from pg_temp.state_test s cross join lateral jsonb_array_elements(s.value) r where s.key='vejoy_productionRounds' and r->>'id'='saved-old-prefix';
+ response:=pg_temp.commit_paneer_packing(jsonb_build_object('operationId','correct-old-prefix','roundId','saved-old-prefix','packIndex',0,'expectedPack',saved,'sku','MPAN101 SPC CUT','cases',2,'loose',0));
+ if response->'round'->'packedSkus'->0->>'packetBatchCode'<>'15-1511A11' or response->'stock'->>'caseBatchCode'<>'15-1511A' then raise exception 'Approval relabeled a previously printed code';end if;
+end $$;
+select 'approved paneer prefixes / app-server alignment / historical printed-label preservation passed' as result;

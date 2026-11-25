@@ -18,6 +18,7 @@ import PaneerTraceReview from '../traceability/PaneerTraceReview';
 import PaneerBagStatus from '../traceability/PaneerBagStatus';
 import PackingLabelPreview from '../traceability/PackingLabelPreview';
 import { labelsForPacking } from '../traceability/labels';
+import {roundLossReviewWaived} from '../traceability/lossAmnesty';
 import { useTraceability } from '../traceability/useTraceability';
 import { Fragment, useMemo, useState, useEffect, useRef } from 'react';
 import {
@@ -2122,7 +2123,7 @@ export default function ProductionBoard() {
                           })}</div> : <p className="text-sm text-slate-400">Nothing packed yet</p>}
                           <RoundLooseStatus round={round} state={traceState}/>
                           {round.pan111ApprovalStatus === 'pending' && <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-700">PAN111 pending: {round.pan111RequestedWeight?.toFixed(2)} kg</div>}
-                          {remainingBalance !== undefined && remainingBalance < -0.01 && <p className="mt-2 text-xs font-semibold text-red-700">Overpacked difference: {(-remainingBalance).toFixed(2)} kg · review source records</p>}
+                          {remainingBalance !== undefined && remainingBalance < -0.01 && <p className={`mt-2 text-xs font-semibold ${roundLossReviewWaived(round,traceState)?'text-violet-700':'text-red-700'}`}>Overpacked difference: {(-remainingBalance).toFixed(2)} kg · {roundLossReviewWaived(round,traceState)?'Review waived':'review source records'}</p>}
                           {['cut', 'chiller_storage', 'frozen', 'packed'].includes(round.status) && !round.locked && round.pan111ApprovalStatus !== 'pending' && <button onClick={() => { setSelectedRound(round.id); setEditingPackIndex(null); setPackForm(emptyPackForm); setShowPackModal(true); }} className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"><Package className="h-3.5 w-3.5" />{round.packedSkus?.length ? '+ Add Packing' : 'Pack'}</button>}
                         </section>
 

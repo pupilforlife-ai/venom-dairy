@@ -1,3 +1,6 @@
+import {useTraceability} from '../traceability/useTraceability';
+import HistoricalLossAmnestyNotice from '../traceability/HistoricalLossAmnestyNotice';
+import {lotLossReviewWaived,roundLossReviewWaived} from '../traceability/lossAmnesty';
 import {
   Milk,
   CheckCircle2,
@@ -39,6 +42,7 @@ const emptyMilkBalanceReviewForm: MilkBalanceReviewForm = {
 };
 
 export default function Reconciliation() {
+  const {state:traceState}=useTraceability();
   const { milkLots, productionRounds, wasteEvents, updateMilkLot, updateProductionRound, updateWasteEvent } = useApp();
   const { showToast } = useToast();
   const [selectedLotCode, setSelectedLotCode] = useState('');
@@ -53,6 +57,7 @@ export default function Reconciliation() {
   })[0];
   const selectedLot = milkLots.find(lot => lot.lotCode === selectedLotCode) ?? latestMilkLot;
   const lotCode = selectedLot?.lotCode ?? '';
+  const historicalLossReviewWaived=selectedLot?lotLossReviewWaived(selectedLot.id,productionRounds,traceState):false;
   const isMilkClosed = Boolean(selectedLot?.productionClosed);
   const previousLot = selectedLot
     ? [...milkLots]
@@ -560,6 +565,7 @@ export default function Reconciliation() {
         )}
       </div>
 
+      {selectedLot&&<HistoricalLossAmnestyNotice state={traceState} rounds={productionRounds} lotId={selectedLot.id}/>}
       {/* Production outputs from this milk lot */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200">
@@ -732,9 +738,9 @@ export default function Reconciliation() {
               <p className="text-[11px] uppercase tracking-wide text-purple-700">Packed</p>
               <p className="mt-1 text-lg font-bold text-purple-900">{blockVsPackedSummary.packedWeightKg.toFixed(2)} kg</p>
             </div>
-            <div className={`rounded-lg border p-3 ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-              <p className={`text-[11px] uppercase tracking-wide ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'text-emerald-700' : 'text-amber-700'}`}>Difference</p>
-              <p className={`mt-1 text-lg font-bold ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'text-emerald-900' : 'text-amber-900'}`}>
+            <div className={`rounded-lg border p-3 ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'border-emerald-200 bg-emerald-50' : historicalLossReviewWaived?'border-violet-200 bg-violet-50':'border-amber-200 bg-amber-50'}`}>
+              <p className={`text-[11px] uppercase tracking-wide ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'text-emerald-700' : historicalLossReviewWaived?'text-violet-700':'text-amber-700'}`}>Difference</p>
+              <p className={`mt-1 text-lg font-bold ${Math.abs(blockVsPackedSummary.differenceKg) <= 0.01 ? 'text-emerald-900' : historicalLossReviewWaived?'text-violet-900':'text-amber-900'}`}>
                 {blockVsPackedSummary.differenceKg >= 0 ? '+' : ''}{blockVsPackedSummary.differenceKg.toFixed(2)} kg
               </p>
             </div>
@@ -767,12 +773,12 @@ export default function Reconciliation() {
                       <td className="px-3 py-3 text-slate-700">{comparison.pan111Kg.toFixed(2)}</td>
                       <td className="px-3 py-3 font-medium text-blue-700">{hasBlockRecord ? comparison.packableWeightKg.toFixed(2) : '—'}</td>
                       <td className="px-3 py-3 text-slate-700">{hasPackingRecord ? comparison.packedWeightKg.toFixed(2) : '—'}</td>
-                      <td className={`px-3 py-3 font-semibold ${balanced ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      <td className={`px-3 py-3 font-semibold ${balanced ? 'text-emerald-700' : roundLossReviewWaived(round,traceState)?'text-violet-700':'text-amber-700'}`}>
                         {hasBlockRecord && hasPackingRecord ? `${comparison.differenceKg >= 0 ? '+' : ''}${comparison.differenceKg.toFixed(2)}` : '—'}
                       </td>
                       <td className="px-3 py-3">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${balanced ? 'bg-emerald-100 text-emerald-700' : missingRecord ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-700'}`}>
-                          {balanced ? 'Balanced' : missingRecord ? 'Record incomplete' : comparison.differenceKg > 0 ? 'Weight not packed / investigate' : 'Packed above available / investigate'}
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${balanced ? 'bg-emerald-100 text-emerald-700' : missingRecord ? 'bg-slate-100 text-slate-600' : roundLossReviewWaived(round,traceState)?'bg-violet-100 text-violet-700':'bg-amber-100 text-amber-700'}`}>
+                          {balanced ? 'Balanced' : missingRecord ? 'Record incomplete' : roundLossReviewWaived(round,traceState)?'Review waived':comparison.differenceKg > 0 ? 'Weight not packed / investigate' : 'Packed above available / investigate'}
                         </span>
                       </td>
                     </tr>
