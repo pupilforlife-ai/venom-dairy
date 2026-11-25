@@ -1,3 +1,4 @@
+import {lotsWithRecordedProductionStart} from './productionStart';
 import { onSiteLooseBySource,mixedCaseStockIssues } from './mixedCaseStock';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -19,7 +20,8 @@ function CaseCard({item,onCancel,onLink,owner}:{item:MixedPaneerCase;onLink:(id:
  </details>;
 }
 export default function MixedPaneerCases({lotId='all',query=''}:{lotId?:string;query?:string}) {
- const {productionRounds,milkLots,finishedStock}=useApp(),{state,saveMixedCase,cancelMixedCase,linkMixedCaseStock}=useTraceability();
+ const {productionRounds,milkLots:recordedMilkLots,productionShifts,finishedStock}=useApp(),{state,saveMixedCase,cancelMixedCase,linkMixedCaseStock}=useTraceability();
+ const milkLots=useMemo(()=>lotsWithRecordedProductionStart(recordedMilkLots,productionShifts),[recordedMilkLots,productionShifts]);
  const [open,setOpen]=useState(false),[sku,setSku]=useState('MPAN100'),[caseCount,setCaseCount]=useState('1'),[operationId,setOperationId]=useState('');
  const [parts,setParts]=useState([{key:'',packets:'',expectedFingerprint:''}]);
  const [error,setError]=useState(''),[message,setMessage]=useState('');

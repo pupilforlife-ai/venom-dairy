@@ -1,62 +1,57 @@
-// src/data/mockData.ts
-var milkProductionTypes = ["D", "C/S", "Halloumi", "Amassi"];
-function isMilkProductionRound(round) {
-  return milkProductionTypes.includes(round.type);
+// src/lib/halloumiRecipe.ts
+var HALLOUMI_RECIPE_MILK_LITRES = 240;
+var HALLOUMI_DEFAULT_SALT_G = 750;
+var quantity = (n) => Math.round(n * 1e9) / 1e9;
+function halloumiPlanningRecipe(milkLitres, saltGPer240L = HALLOUMI_DEFAULT_SALT_G) {
+  if (![milkLitres, saltGPer240L].every((n) => Number.isFinite(n) && n >= 0)) throw Error("Halloumi milk and salt allowance must be zero or positive.");
+  const rounds = milkLitres / HALLOUMI_RECIPE_MILK_LITRES;
+  return { milkLitres, rounds, calciumChlorideKg: quantity(rounds * 0.192), rennetMl: quantity(rounds * 15), saltKg: quantity(rounds * saltGPer240L / 1e3), calciumWaterLitres: quantity(rounds * 3.8), rennetWaterLitres: quantity(rounds * 0.5), saltGPer240L };
 }
-function getRoundMilkInput(round) {
-  if (round.status === "scheduled" || round.status === "cancelled") return 0;
-  if (round.actualInput > 0) return round.actualInput;
-  return Math.max(0, round.plannedInput);
-}
-function getMilkLotAccounting(lot, rounds) {
-  const lotRounds = rounds.filter(
-    (round) => (round.milkLotId === lot.id || round.milkLotCode === lot.lotCode) && isMilkProductionRound(round)
-  );
-  const accountableRounds = lotRounds.filter((round) => getRoundMilkInput(round) > 0);
-  const consumed = accountableRounds.length > 0 ? accountableRounds.reduce((total, round) => total + getRoundMilkInput(round), 0) : Math.max(0, lot.litresConsumed);
-  const sold = Math.max(0, lot.litresSold || 0);
-  const accountedOther = Math.max(0, lot.litresRejected) + Math.max(0, lot.litresSpilled);
-  const rawRemaining = lot.litresReceived - consumed - sold - accountedOther;
-  const overdraw = Math.max(0, -rawRemaining);
-  const remaining = Math.max(0, rawRemaining);
-  return { consumed, sold, remaining, overdraw, rawRemaining };
-}
-var milkStorageVessels = [
-  { id: "direct-production", label: "Direct to production", capacity: 3e3 },
-  { id: "bmc-2", label: "BMC #2 (Holding Tank)", capacity: 2500 },
-  { id: "silo", label: "Silo", capacity: 1e4 },
-  { id: "bmc-1", label: "BMC #1", capacity: 3e3 },
-  { id: "bmc-3", label: "BMC #3", capacity: 3e3 },
-  { id: "auxiliary", label: "Auxiliary storage (cans / buckets)", capacity: null },
-  ...Array.from({ length: 10 }, (_, index) => ({
-    id: `ibc-${index + 1}`,
-    label: `IBC #${index + 1}`,
-    capacity: 1e3
-  }))
-];
 
-// src/lib/milkRejection.ts
-function milkRejectionQuote(lot, rounds) {
-  const a = getMilkLotAccounting(lot, rounds);
-  return { received: lot.litresReceived, consumed: a.consumed, rejected: lot.litresRejected, spilled: lot.litresSpilled, sold: a.sold, remaining: a.remaining, overdraw: a.overdraw };
+// src/traceability/liquidIngredients.ts
+var ml = (n) => Math.round(n * 1e9) / 1e9;
+function liquidChecklistForecast(plan) {
+  const recipe = halloumiPlanningRecipe(plan.planHalloumiLitres ?? 0, plan.halloumiSaltGPer240L);
+  return recipe.milkLitres > 0 ? [{ id: "rennet", name: "Rennet", unit: "mL", total: recipe.rennetMl }] : [];
 }
-var litres = (n) => Math.round(n * 1e6) / 1e6;
-function recordMilkRejection(lots, rounds, p, actor, role, at, id) {
-  if (!["owner", "admin"].includes(role)) throw Error("Only Owner/Admin can record rejected milk.");
-  const lot = lots.find((l) => l.id === p.lotId);
-  if (!lot) throw Error("Milk lot not found.");
-  if (lot.receiptStatus === "planned" || lot.litresReceived <= 0) throw Error("Record the delivered milk volume before recording a rejection.");
-  const before = milkRejectionQuote(lot, rounds);
-  if (!p.expected || Object.entries(before).some(([key, value]) => p.expected[key] !== value)) throw Error("The milk balance changed. Reopen Reject milk and check the current balance.");
-  if (!Number.isFinite(p.quantity) || p.quantity <= 0) throw Error("Enter the rejected litres, greater than zero.");
-  if (p.quantity > before.remaining) throw Error(`Only ${before.remaining.toLocaleString()} L remains unaccounted for. Review existing production, sales or rejection records first.`);
-  if (typeof p.reason !== "string" || p.reason.trim().length < 3) throw Error("Enter a reason for rejecting the milk.");
-  if (typeof p.rejectionDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(p.rejectionDate) || !Number.isFinite(Date.parse(p.rejectionDate)) || new Date(p.rejectionDate).toISOString().slice(0, 10) !== p.rejectionDate) throw Error("Enter a valid rejection date.");
-  const rejected = litres(before.rejected + p.quantity), remaining = litres(before.remaining - p.quantity);
-  const after = { ...before, rejected, remaining, overdraw: 0 };
-  const review = { id: "milk-rejection-" + id, kind: "milk_rejection", eventDate: p.rejectionDate, rejectedLitres: p.quantity, reviewedAt: at, reviewedBy: actor, reviewerRole: role, reason: p.reason.trim(), before, after, roundCorrections: [] };
-  const allRejected = Math.abs(rejected - before.received) < 1e-6 && before.consumed === 0 && before.sold === 0 && before.spilled === 0;
-  return lots.map((l) => l.id !== lot.id ? l : { ...l, litresRejected: rejected, litresRemaining: remaining, status: allRejected ? "rejected" : l.status, milkBalanceReviews: [...l.milkBalanceReviews || [], review] });
+function liquidPrepared(row) {
+  if (row.floorBalanceMl === null || row.containers.some((c) => c.volumeMl === null)) return null;
+  return ml(row.floorBalanceMl + row.containers.reduce((n, c) => n + (c.volumeMl ?? 0), 0));
+}
+function liquidGaps(row, requiredMl) {
+  const gaps = [];
+  if (!row.responsible.trim()) gaps.push("Enter the responsible person\u2019s name.");
+  if (row.floorBalanceMl === null) gaps.push("Enter the floor balance in mL, or 0 if none.");
+  else if (row.floorBalanceMl > 0 && !row.floorBatchCodes.trim()) gaps.push("Enter the floor bottle\u2019s batch/lot code.");
+  if (row.containers.some((c) => c.volumeMl === null || !c.batchCode.trim())) gaps.push("Enter the volume and batch/lot code of each bottle brought from storage.");
+  const prepared = liquidPrepared(row);
+  if (prepared !== null && prepared < requiredMl) gaps.push(`Shortfall: ${ml(requiredMl - prepared)} mL (${prepared} mL prepared / ${requiredMl} mL required).`);
+  return gaps;
+}
+function recordLiquidReadiness(state, lotId, entry, expectedRevision, actor, role, at, id) {
+  const plan = state.lots[lotId], revision = plan?.audit[plan.audit.length - 1]?.id || "";
+  if (!plan || !revision || revision !== expectedRevision) throw Error("The production plan changed. Reload the checklist.");
+  const required = liquidChecklistForecast(plan.value).find((r) => r.id === entry.ingredientId);
+  if (!required) throw Error("This liquid ingredient is not required by the latest plan.");
+  const previous = state.liquidReadiness?.[lotId]?.[entry.ingredientId], draft = entry.draft;
+  if ((previous?.audit[previous.audit.length - 1]?.id || "") !== entry.expectedCheckId) throw Error("This ingredient check changed elsewhere. Reload before saving.");
+  if (!draft || !Array.isArray(draft.containers) || typeof draft.responsible !== "string" || typeof draft.floorBatchCodes !== "string" || typeof draft.supplier !== "string" || typeof draft.onSite !== "boolean") throw Error("Enter valid liquid preparation details.");
+  for (const n of [draft.floorBalanceMl, ...draft.containers.map((c) => c.volumeMl)]) if (n !== null && (!Number.isFinite(n) || n < 0)) throw Error("Liquid quantities must be zero or positive, in mL.");
+  if (new Set(draft.containers.map((c) => c.id)).size !== draft.containers.length || draft.containers.some((c) => !c.id || typeof c.batchCode !== "string" || c.volumeMl === 0)) throw Error("Each storage bottle needs its own entry and a positive volume.");
+  if (!["owner", "admin"].includes(role) && draft.supplier !== (previous?.value.supplier || "")) throw Error("Only Owner/Admin can change the supplier.");
+  if (previous && previous.value.checkedBy !== actor && previous.value.planRevision === revision && !["owner", "admin"].includes(role)) throw Error("Only the original checker or Owner/Admin may revise this check.");
+  const gaps = liquidGaps(draft, required.total);
+  if (draft.onSite && gaps.length) throw Error(`Rennet: ${gaps.join(" ")}`);
+  const value = { ...draft, planRevision: revision, requiredMl: required.total, checkedBy: actor, checkedAt: at };
+  const physical = (v) => ({ ...v, supplier: "", checkedBy: "", checkedAt: "" });
+  if (previous && JSON.stringify(physical(previous.value)) === JSON.stringify(physical(value))) {
+    value.checkedBy = previous.value.checkedBy;
+    value.checkedAt = previous.value.checkedAt;
+  }
+  if (previous && JSON.stringify(previous.value) === JSON.stringify(value)) return state;
+  const audit = { id, at, actor, role, reason: draft.onSite ? "Confirmed ready at factory" : "Readiness progress recorded", before: previous?.value ?? null, after: value };
+  const saved = { value, audit: [...previous?.audit || [], audit] };
+  return { ...state, liquidReadiness: { ...state.liquidReadiness, [lotId]: { ...state.liquidReadiness?.[lotId], [entry.ingredientId]: saved } } };
 }
 
 // src/data/skuConfig.ts
@@ -163,83 +158,6 @@ function getPaneerPackWeight(definition, cases, loose, looseWeightKg, weightKg, 
   const caseWeight = definition.packMode === "weight_loose" ? Math.max(0, caseWeightKg || getDefaultPaneerCaseWeightKg(definition)) : getDefaultPaneerCaseWeightKg(definition);
   const looseWeight = definition.packMode === "weight_loose" ? Math.max(0, looseWeightKg) : Math.max(0, loose) * definition.unitWeightKg;
   return Math.max(0, cases) * caseWeight + looseWeight;
-}
-
-// src/lib/paneerBalance.ts
-function calculatePaneerRemainingBalance(outputWeight, sppRecordedWeight = 0, packedSkus = [], clothWeightKg = 0) {
-  const packedWeight = packedSkus.reduce((total, pack) => {
-    const weight = pack.weightKg !== void 0 ? pack.weightKg : getPaneerPackWeight(
-      paneerSkuByCode[pack.sku],
-      pack.cases || 0,
-      pack.loose || 0,
-      pack.looseWeightKg || 0,
-      0,
-      pack.caseWeightKg
-    );
-    return total + weight;
-  }, 0);
-  return Math.round((outputWeight - Math.max(0, clothWeightKg) - Math.max(0, sppRecordedWeight) - packedWeight) * 1e9) / 1e9;
-}
-function getPaneerRoundRemainingBalance(round) {
-  if (round.type !== "D" && round.type !== "C/S") return round.remainingBalance ?? round.outputWeight;
-  if (round.remainingBalance === void 0 && round.sppRecordedWeight === void 0 && !round.packedSkus?.length && round.paneerCuttingDetails?.clothKg == null) return void 0;
-  return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || [], round.paneerCuttingDetails?.clothKg ?? 0);
-}
-
-// src/lib/halloumiRecipe.ts
-var HALLOUMI_RECIPE_MILK_LITRES = 240;
-var HALLOUMI_DEFAULT_SALT_G = 750;
-var quantity = (n) => Math.round(n * 1e9) / 1e9;
-function halloumiPlanningRecipe(milkLitres, saltGPer240L = HALLOUMI_DEFAULT_SALT_G) {
-  if (![milkLitres, saltGPer240L].every((n) => Number.isFinite(n) && n >= 0)) throw Error("Halloumi milk and salt allowance must be zero or positive.");
-  const rounds = milkLitres / HALLOUMI_RECIPE_MILK_LITRES;
-  return { milkLitres, rounds, calciumChlorideKg: quantity(rounds * 0.192), rennetMl: quantity(rounds * 15), saltKg: quantity(rounds * saltGPer240L / 1e3), calciumWaterLitres: quantity(rounds * 3.8), rennetWaterLitres: quantity(rounds * 0.5), saltGPer240L };
-}
-
-// src/traceability/liquidIngredients.ts
-var ml = (n) => Math.round(n * 1e9) / 1e9;
-function liquidChecklistForecast(plan) {
-  const recipe = halloumiPlanningRecipe(plan.planHalloumiLitres ?? 0, plan.halloumiSaltGPer240L);
-  return recipe.milkLitres > 0 ? [{ id: "rennet", name: "Rennet", unit: "mL", total: recipe.rennetMl }] : [];
-}
-function liquidPrepared(row) {
-  if (row.floorBalanceMl === null || row.containers.some((c) => c.volumeMl === null)) return null;
-  return ml(row.floorBalanceMl + row.containers.reduce((n, c) => n + (c.volumeMl ?? 0), 0));
-}
-function liquidGaps(row, requiredMl) {
-  const gaps = [];
-  if (!row.responsible.trim()) gaps.push("Enter the responsible person\u2019s name.");
-  if (row.floorBalanceMl === null) gaps.push("Enter the floor balance in mL, or 0 if none.");
-  else if (row.floorBalanceMl > 0 && !row.floorBatchCodes.trim()) gaps.push("Enter the floor bottle\u2019s batch/lot code.");
-  if (row.containers.some((c) => c.volumeMl === null || !c.batchCode.trim())) gaps.push("Enter the volume and batch/lot code of each bottle brought from storage.");
-  const prepared = liquidPrepared(row);
-  if (prepared !== null && prepared < requiredMl) gaps.push(`Shortfall: ${ml(requiredMl - prepared)} mL (${prepared} mL prepared / ${requiredMl} mL required).`);
-  return gaps;
-}
-function recordLiquidReadiness(state, lotId, entry, expectedRevision, actor, role, at, id) {
-  const plan = state.lots[lotId], revision = plan?.audit[plan.audit.length - 1]?.id || "";
-  if (!plan || !revision || revision !== expectedRevision) throw Error("The production plan changed. Reload the checklist.");
-  const required = liquidChecklistForecast(plan.value).find((r) => r.id === entry.ingredientId);
-  if (!required) throw Error("This liquid ingredient is not required by the latest plan.");
-  const previous = state.liquidReadiness?.[lotId]?.[entry.ingredientId], draft = entry.draft;
-  if ((previous?.audit[previous.audit.length - 1]?.id || "") !== entry.expectedCheckId) throw Error("This ingredient check changed elsewhere. Reload before saving.");
-  if (!draft || !Array.isArray(draft.containers) || typeof draft.responsible !== "string" || typeof draft.floorBatchCodes !== "string" || typeof draft.supplier !== "string" || typeof draft.onSite !== "boolean") throw Error("Enter valid liquid preparation details.");
-  for (const n of [draft.floorBalanceMl, ...draft.containers.map((c) => c.volumeMl)]) if (n !== null && (!Number.isFinite(n) || n < 0)) throw Error("Liquid quantities must be zero or positive, in mL.");
-  if (new Set(draft.containers.map((c) => c.id)).size !== draft.containers.length || draft.containers.some((c) => !c.id || typeof c.batchCode !== "string" || c.volumeMl === 0)) throw Error("Each storage bottle needs its own entry and a positive volume.");
-  if (!["owner", "admin"].includes(role) && draft.supplier !== (previous?.value.supplier || "")) throw Error("Only Owner/Admin can change the supplier.");
-  if (previous && previous.value.checkedBy !== actor && previous.value.planRevision === revision && !["owner", "admin"].includes(role)) throw Error("Only the original checker or Owner/Admin may revise this check.");
-  const gaps = liquidGaps(draft, required.total);
-  if (draft.onSite && gaps.length) throw Error(`Rennet: ${gaps.join(" ")}`);
-  const value = { ...draft, planRevision: revision, requiredMl: required.total, checkedBy: actor, checkedAt: at };
-  const physical = (v) => ({ ...v, supplier: "", checkedBy: "", checkedAt: "" });
-  if (previous && JSON.stringify(physical(previous.value)) === JSON.stringify(physical(value))) {
-    value.checkedBy = previous.value.checkedBy;
-    value.checkedAt = previous.value.checkedAt;
-  }
-  if (previous && JSON.stringify(previous.value) === JSON.stringify(value)) return state;
-  const audit = { id, at, actor, role, reason: draft.onSite ? "Confirmed ready at factory" : "Readiness progress recorded", before: previous?.value ?? null, after: value };
-  const saved = { value, audit: [...previous?.audit || [], audit] };
-  return { ...state, liquidReadiness: { ...state.liquidReadiness, [lotId]: { ...state.liquidReadiness?.[lotId], [entry.ingredientId]: saved } } };
 }
 
 // src/lib/paneerRecipe.ts
@@ -479,6 +397,103 @@ function changeRecord(previous, value, actor, role, reason, at, id, allowComplet
   if (previous && !completing && !["owner", "admin"].includes(role)) throw Error("Owner/admin must correct an existing traceability record.");
   if (previous && !completing && reason.trim().length < 5) throw Error("Enter a correction reason of at least 5 characters.");
   return { value, audit: [...previous?.audit || [], { id, at, actor, role, reason: reason.trim() || (previous ? "Completed missing details" : "Initial entry"), before: previous?.value ?? null, after: value }] };
+}
+
+// src/traceability/productionStart.ts
+function lotsWithRecordedProductionStart(lots, shifts2) {
+  return lots.map((lot) => {
+    if (lot.traceabilityProductionDate) return lot;
+    const dates = new Set(shifts2.filter((s) => s.shiftNumber === 1 && s.status !== "scheduled" && (s.milkLotId === lot.id || !s.milkLotId && s.milkLotCode === lot.lotCode)).flatMap((s) => {
+      if (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:?\d{2})$/.test(s.startedAt)) return [];
+      const time = new Date(s.startedAt);
+      if (!Number.isFinite(time.getTime())) return [];
+      const date = time.toLocaleDateString("en-CA", { timeZone: "Africa/Johannesburg" });
+      return validDate(date) ? [date] : [];
+    }));
+    return dates.size === 1 ? { ...lot, traceabilityProductionDate: [...dates][0] } : lot;
+  });
+}
+
+// src/data/mockData.ts
+var milkProductionTypes = ["D", "C/S", "Halloumi", "Amassi"];
+function isMilkProductionRound(round) {
+  return milkProductionTypes.includes(round.type);
+}
+function getRoundMilkInput(round) {
+  if (round.status === "scheduled" || round.status === "cancelled") return 0;
+  if (round.actualInput > 0) return round.actualInput;
+  return Math.max(0, round.plannedInput);
+}
+function getMilkLotAccounting(lot, rounds) {
+  const lotRounds = rounds.filter(
+    (round) => (round.milkLotId === lot.id || round.milkLotCode === lot.lotCode) && isMilkProductionRound(round)
+  );
+  const accountableRounds = lotRounds.filter((round) => getRoundMilkInput(round) > 0);
+  const consumed = accountableRounds.length > 0 ? accountableRounds.reduce((total, round) => total + getRoundMilkInput(round), 0) : Math.max(0, lot.litresConsumed);
+  const sold = Math.max(0, lot.litresSold || 0);
+  const accountedOther = Math.max(0, lot.litresRejected) + Math.max(0, lot.litresSpilled);
+  const rawRemaining = lot.litresReceived - consumed - sold - accountedOther;
+  const overdraw = Math.max(0, -rawRemaining);
+  const remaining = Math.max(0, rawRemaining);
+  return { consumed, sold, remaining, overdraw, rawRemaining };
+}
+var milkStorageVessels = [
+  { id: "direct-production", label: "Direct to production", capacity: 3e3 },
+  { id: "bmc-2", label: "BMC #2 (Holding Tank)", capacity: 2500 },
+  { id: "silo", label: "Silo", capacity: 1e4 },
+  { id: "bmc-1", label: "BMC #1", capacity: 3e3 },
+  { id: "bmc-3", label: "BMC #3", capacity: 3e3 },
+  { id: "auxiliary", label: "Auxiliary storage (cans / buckets)", capacity: null },
+  ...Array.from({ length: 10 }, (_, index) => ({
+    id: `ibc-${index + 1}`,
+    label: `IBC #${index + 1}`,
+    capacity: 1e3
+  }))
+];
+
+// src/lib/milkRejection.ts
+function milkRejectionQuote(lot, rounds) {
+  const a = getMilkLotAccounting(lot, rounds);
+  return { received: lot.litresReceived, consumed: a.consumed, rejected: lot.litresRejected, spilled: lot.litresSpilled, sold: a.sold, remaining: a.remaining, overdraw: a.overdraw };
+}
+var litres = (n) => Math.round(n * 1e6) / 1e6;
+function recordMilkRejection(lots, rounds, p, actor, role, at, id) {
+  if (!["owner", "admin"].includes(role)) throw Error("Only Owner/Admin can record rejected milk.");
+  const lot = lots.find((l) => l.id === p.lotId);
+  if (!lot) throw Error("Milk lot not found.");
+  if (lot.receiptStatus === "planned" || lot.litresReceived <= 0) throw Error("Record the delivered milk volume before recording a rejection.");
+  const before = milkRejectionQuote(lot, rounds);
+  if (!p.expected || Object.entries(before).some(([key, value]) => p.expected[key] !== value)) throw Error("The milk balance changed. Reopen Reject milk and check the current balance.");
+  if (!Number.isFinite(p.quantity) || p.quantity <= 0) throw Error("Enter the rejected litres, greater than zero.");
+  if (p.quantity > before.remaining) throw Error(`Only ${before.remaining.toLocaleString()} L remains unaccounted for. Review existing production, sales or rejection records first.`);
+  if (typeof p.reason !== "string" || p.reason.trim().length < 3) throw Error("Enter a reason for rejecting the milk.");
+  if (typeof p.rejectionDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(p.rejectionDate) || !Number.isFinite(Date.parse(p.rejectionDate)) || new Date(p.rejectionDate).toISOString().slice(0, 10) !== p.rejectionDate) throw Error("Enter a valid rejection date.");
+  const rejected = litres(before.rejected + p.quantity), remaining = litres(before.remaining - p.quantity);
+  const after = { ...before, rejected, remaining, overdraw: 0 };
+  const review = { id: "milk-rejection-" + id, kind: "milk_rejection", eventDate: p.rejectionDate, rejectedLitres: p.quantity, reviewedAt: at, reviewedBy: actor, reviewerRole: role, reason: p.reason.trim(), before, after, roundCorrections: [] };
+  const allRejected = Math.abs(rejected - before.received) < 1e-6 && before.consumed === 0 && before.sold === 0 && before.spilled === 0;
+  return lots.map((l) => l.id !== lot.id ? l : { ...l, litresRejected: rejected, litresRemaining: remaining, status: allRejected ? "rejected" : l.status, milkBalanceReviews: [...l.milkBalanceReviews || [], review] });
+}
+
+// src/lib/paneerBalance.ts
+function calculatePaneerRemainingBalance(outputWeight, sppRecordedWeight = 0, packedSkus = [], clothWeightKg = 0) {
+  const packedWeight = packedSkus.reduce((total, pack) => {
+    const weight = pack.weightKg !== void 0 ? pack.weightKg : getPaneerPackWeight(
+      paneerSkuByCode[pack.sku],
+      pack.cases || 0,
+      pack.loose || 0,
+      pack.looseWeightKg || 0,
+      0,
+      pack.caseWeightKg
+    );
+    return total + weight;
+  }, 0);
+  return Math.round((outputWeight - Math.max(0, clothWeightKg) - Math.max(0, sppRecordedWeight) - packedWeight) * 1e9) / 1e9;
+}
+function getPaneerRoundRemainingBalance(round) {
+  if (round.type !== "D" && round.type !== "C/S") return round.remainingBalance ?? round.outputWeight;
+  if (round.remainingBalance === void 0 && round.sppRecordedWeight === void 0 && !round.packedSkus?.length && round.paneerCuttingDetails?.clothKg == null) return void 0;
+  return calculatePaneerRemainingBalance(round.outputWeight, round.sppRecordedWeight, round.packedSkus || [], round.paneerCuttingDetails?.clothKg ?? 0);
 }
 
 // src/traceability/labels.ts
@@ -769,7 +784,7 @@ function buildMixedPaneerCase(request, rounds, lots, state, actor, at) {
   const majority = [...groups.values()].sort((a, b) => b.packets - a.packets || latestShift(a.source, b.source))[0].source;
   const round = rounds.find((r) => r.id === majority.roundId);
   const label = majority.caseBatchCode || packingLabels(round, request.sku, lots.find((l) => l.id === majority.lotId), state).caseBatchCode;
-  if (!label) throw Error("Confirm this SKU\u2019s prefix and start of production date before assigning the case label.");
+  if (!label) throw Error(majority.productionDate ? `The ${request.sku} prefix is missing. Owner/Admin can confirm it in Batch Traceability.` : `Lot ${majority.lotCode}: start of production date is unavailable. Check its recorded Shift 1 date or set the lot\u2019s start of production date. Its receipt date is not used for this label.`);
   return { id: request.id, number: Math.max(0, ...Object.values(state.mixedCases || {}).map((c) => c.number || 0)) + 1, sku: request.sku, caseCount: request.caseCount, packetsPerCase: definition.unitsPerCase, caseBatchCode: label, productionDate: majority.productionDate, labelLotId: majority.lotId, labelShift: majority.shift, parts, recordedAt: at, recordedBy: actor, requestFingerprint: requestFingerprint(request) };
 }
 function recordMixedPaneerCase(state, request, rounds, lots, actor, at) {
@@ -1290,7 +1305,7 @@ function prepareTraceCommand(d, request, actor, role, at) {
       next.vejoy_traceability = recordReadiness(s, p.lotId, p.ingredientId, p.draft, p.revision, p.checkId, actor, role, at, request.id);
       break;
     case "assemble": {
-      const a = assembleMixedCaseStock(s, stock, p, r, l, actor, at);
+      const a = assembleMixedCaseStock(s, stock, p, r, lotsWithRecordedProductionStart(l, d.vejoy_productionShifts || []), actor, at);
       next.vejoy_traceability = a.state;
       next.vejoy_finishedStock = a.stock;
       break;

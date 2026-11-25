@@ -1,3 +1,4 @@
+import {lotsWithRecordedProductionStart} from '../productionStart';
 import {recordMilkRejection} from '../../lib/milkRejection';
 import {getPaneerRoundRemainingBalance} from '../../lib/paneerBalance';
 import {paneerSkuByCode,getAllowedPaneerSkus,getPaneerPackWeight} from '../../data/skuConfig';
@@ -15,7 +16,7 @@ import { recordPaneerIngredientAllocation } from '../../lib/paneerRecipe';
 import type { ProductionRound,MilkLot,FinishedStockLot,IntermediateLot } from '../../data/mockData';
 export const traceKeys=['vejoy_distributionHandovers','vejoy_finishedStock','vejoy_intermediateLots','vejoy_milkLots','vejoy_productionRounds','vejoy_traceability'] as const;
 export type TraceCommand={id:string;kind:string;payload:any};
-export type TraceDocuments={vejoy_distributionHandovers:import('../../data/mockData').DistributionHandover[];vejoy_finishedStock:FinishedStockLot[];vejoy_intermediateLots:IntermediateLot[];vejoy_milkLots:MilkLot[];vejoy_productionRounds:ProductionRound[];vejoy_traceability:TraceState};
+export type TraceDocuments={vejoy_productionShifts?:import('../../data/mockData').ProductionShift[];vejoy_distributionHandovers:import('../../data/mockData').DistributionHandover[];vejoy_finishedStock:FinishedStockLot[];vejoy_intermediateLots:IntermediateLot[];vejoy_milkLots:MilkLot[];vejoy_productionRounds:ProductionRound[];vejoy_traceability:TraceState};
 export function prepareTraceCommand(d:TraceDocuments,request:TraceCommand,actor:string,role:string,at:string){
  if(!['owner','admin','staff'].includes(role))throw Error('Approved production access required.');
  if(!request.id||request.id.length>120)throw Error('A save reference is required.');
@@ -37,7 +38,7 @@ export function prepareTraceCommand(d:TraceDocuments,request:TraceCommand,actor:
  }
  case 'checklist':lot(p.lotId);next.vejoy_traceability=recordChecklist(s,p.lotId,p.entries,p.revision,actor,role,at,request.id,p.liquidEntries||[]);break;
  case 'readiness':lot(p.lotId);next.vejoy_traceability=recordReadiness(s,p.lotId,p.ingredientId,p.draft,p.revision,p.checkId,actor,role,at,request.id);break;
- case 'assemble':{const a=assembleMixedCaseStock(s,stock,p,r,l,actor,at);next.vejoy_traceability=a.state;next.vejoy_finishedStock=a.stock;break;}
+ case 'assemble':{const a=assembleMixedCaseStock(s,stock,p,r,lotsWithRecordedProductionStart(l,d.vejoy_productionShifts||[]),actor,at);next.vejoy_traceability=a.state;next.vejoy_finishedStock=a.stock;break;}
  case 'cancel_assembly':{const a=cancelMixedCaseStock(s,stock,p.id,p.reason,actor,role,at);next.vejoy_traceability=a.state;next.vejoy_finishedStock=a.stock;break;}
  case 'link_assembly':{const a=linkExistingMixedCaseStock(s,stock,p.id,r,l,actor,role,at);next.vejoy_traceability=a.state;next.vejoy_finishedStock=a.stock;break;}
  case 'return':{const a=returnMixedCaseStock(s,stock,p,actor,role,at);next.vejoy_traceability=a.state;next.vejoy_finishedStock=a.stock;break;}

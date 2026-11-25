@@ -24,6 +24,7 @@ if(!process.argv.includes('--before-fast-guard'))sql+=translate((await fs.readFi
 sql+=translate((await fs.readFile('supabase/migrations/20261124150000_deduct_paneer_cloth_from_packing_balance.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
 sql+=translate((await fs.readFile('supabase/migrations/20261124170000_protect_milk_rejection_history.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
 sql+=translate((await fs.readFile('supabase/migrations/20261125120000_align_approved_paneer_prefixes.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
+sql+=translate((await fs.readFile('supabase/migrations/20261125140000_version_check_paneer_shift_date_dependency.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
 const measureIndex=process.argv.indexOf('--measure');
 if(measureIndex>=0){
  const sample=JSON.parse(await fs.readFile(path.resolve(process.argv[measureIndex+1]),'utf8')).rows[0].state;

@@ -249,3 +249,30 @@ begin
  if response->'round'->'packedSkus'->0->>'packetBatchCode'<>'15-1511A11' or response->'stock'->>'caseBatchCode'<>'15-1511A' then raise exception 'Approval relabeled a previously printed code';end if;
 end $$;
 select 'approved paneer prefixes / app-server alignment / historical printed-label preservation passed' as result;
+
+-- Read-only Shift 1 dates participate in the same CAS as a loose-case save.
+do $$ declare actor uuid; expected jsonb; stale jsonb; result jsonb; before_shifts jsonb;
+begin
+ select id into actor from pg_temp.profiles_test limit 1;
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ insert into pg_temp.state_test(key,value) values('vejoy_productionShifts','[{"id":"date-shift","shiftNumber":1,"startedAt":"2026-10-11T14:27:00Z"}]') on conflict(key) do nothing;
+ select value into before_shifts from pg_temp.state_test where key='vejoy_productionShifts';
+ select jsonb_agg(jsonb_build_object('key',k,'version',s.version)) into expected from unnest(array['vejoy_distributionHandovers','vejoy_finishedStock','vejoy_intermediateLots','vejoy_milkLots','vejoy_productionRounds','vejoy_traceability','vejoy_productionShifts']) k left join pg_temp.state_test s on s.key=k;
+ result:=pg_temp.commit_paneer_traceability(actor,'{"id":"shift-date-dependency","kind":"assemble","_role":"owner"}',expected,'{}','null');
+ if result->>'ok'<>'true' then raise exception 'Shift dependency save failed';end if;
+ if (select value from pg_temp.state_test where key='vejoy_productionShifts') is distinct from before_shifts then raise exception 'Read-only shifts changed';end if;
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ perform pg_temp.commit_paneer_traceability(actor,'{"id":"shift-date-dependency","kind":"assemble","_role":"owner"}','[]','{}','null');
+ select jsonb_agg(case when x->>'key'='vejoy_productionShifts' then jsonb_set(x,'{version}',to_jsonb(-999)) else x end) into stale from jsonb_array_elements(expected) x;
+ begin
+  perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ perform pg_temp.commit_paneer_traceability(actor,'{"id":"shift-date-stale","kind":"assemble","_role":"owner"}',stale,'{}','null');
+  raise exception 'Stale shift version accepted';
+ exception when serialization_failure then null;end;
+ begin
+  perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ perform pg_temp.commit_paneer_traceability(actor,'{"id":"shift-date-write","kind":"assemble","_role":"owner"}',expected,'{"vejoy_productionShifts":[]}','null');
+  raise exception 'Read-only shift write accepted';
+ exception when others then if sqlerrm<>'Unexpected collection' then raise;end if;end;
+end;$$;
+select 'Shift-date read dependency / stale retry / no shift writes / idempotent replay passed' as result;

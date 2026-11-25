@@ -17,11 +17,13 @@ Deno.serve(async(request)=>{
   const {data:receipt}=await db.from('paneer_traceability_commands').select('actor_id,request,result').eq('id',command.id).maybeSingle();
   if(receipt){commitAttempted=true;const {data,error}=await db.rpc('commit_paneer_traceability',{actor_id:user.id,command,expected:[],changes:{},command_result:null});if(error)throw error;return reply(data);}
   for(let attempt=0;attempt<5;attempt++){
-   const {data:rows,error:readError}=await db.from('app_state').select('key,value,version').in('key',traceKeys);if(readError)throw readError;
-   const documents=Object.fromEntries(traceKeys.map(key=>[key,rows.find(x=>x.key===key)?.value||(key==='vejoy_traceability'?{schema:1,lots:{},rounds:{},prefixes:{}}:[])]));
+   // Shift dates are a read-only dependency for historical loose-case labels.
+   const readKeys=command.kind==='assemble'?[...traceKeys,'vejoy_productionShifts']:traceKeys;
+   const {data:rows,error:readError}=await db.from('app_state').select('key,value,version').in('key',readKeys);if(readError)throw readError;
+   const documents=Object.fromEntries(readKeys.map(key=>[key,rows.find(x=>x.key===key)?.value||(key==='vejoy_traceability'?{schema:1,lots:{},rounds:{},prefixes:{}}:[])]));
    const prepared=prepareTraceCommand(documents,command,profile.username,profile.role,new Date().toISOString());
    const changes=Object.fromEntries(traceKeys.filter(key=>JSON.stringify(prepared.documents[key])!==JSON.stringify(documents[key])).map(key=>[key,prepared.documents[key]]));
-   const expected=traceKeys.map(key=>({key,version:rows.find(x=>x.key===key)?.version??null}));
+   const expected=readKeys.map(key=>({key,version:rows.find(x=>x.key===key)?.version??null}));
    commitAttempted=true;const {data,error}=await db.rpc('commit_paneer_traceability',{actor_id:user.id,command,expected,changes,command_result:prepared.result});
    if(!error)return reply(data);if(error.code!=='40001')throw error;
   }

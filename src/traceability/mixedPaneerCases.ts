@@ -70,7 +70,7 @@ export function buildMixedPaneerCase(request:MixedCaseRequest,rounds:ProductionR
  const majority=[...groups.values()].sort((a,b)=>b.packets-a.packets||latestShift(a.source,b.source))[0].source;
  const round=rounds.find(r=>r.id===majority.roundId)!;
  const label=majority.caseBatchCode||packingLabels(round,request.sku,lots.find(l=>l.id===majority.lotId),state).caseBatchCode;
- if(!label)throw Error('Confirm this SKU’s prefix and start of production date before assigning the case label.');
+ if(!label)throw Error(majority.productionDate?`The ${request.sku} prefix is missing. Owner/Admin can confirm it in Batch Traceability.`:`Lot ${majority.lotCode}: start of production date is unavailable. Check its recorded Shift 1 date or set the lot’s start of production date. Its receipt date is not used for this label.`);
  return {id:request.id,number:Math.max(0,...Object.values(state.mixedCases||{}).map(c=>c.number||0))+1,sku:request.sku,caseCount:request.caseCount,packetsPerCase:definition.unitsPerCase,caseBatchCode:label,productionDate:majority.productionDate,labelLotId:majority.lotId,labelShift:majority.shift,parts,recordedAt:at,recordedBy:actor,requestFingerprint:requestFingerprint(request)};
 }
 export function recordMixedPaneerCase(state:TraceState,request:MixedCaseRequest,rounds:ProductionRound[],lots:MilkLot[],actor:string,at:string):TraceState {
