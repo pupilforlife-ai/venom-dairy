@@ -660,7 +660,7 @@ export default function MilkReceiving() {
                                 <h3 className="text-sm font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200">
                                   Production reconciliation · {lot.lotCode}
                                 </h3>
-                                <p className="mb-4 text-xs text-slate-500">Calculated from recorded production rounds. Milk input uses actual input when present, otherwise the started round’s planned input.</p>
+                                <p className="mb-4 text-xs text-slate-500">Round counts include started production, even before block weights are entered. Paneer weight and yield use only rounds with recorded output. Milk input uses actual input when present, otherwise the started round’s planned input.</p>
                                 <div className="grid grid-cols-2 gap-x-6 gap-y-4">
                                   <div className="border-l-4 border-blue-500 pl-3">
                                     <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Paneer Recorded</p>

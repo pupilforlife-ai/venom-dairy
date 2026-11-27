@@ -120,6 +120,27 @@ describe('cream pool accounting', () => {
 });
 
 describe('milk-lot Paneer yield', () => {
+  it('counts started C/S rounds before weighing without inflating recorded output or yield', () => {
+    const rounds = [
+      ...Array.from({ length: 19 }, (_, index) => round({
+        id: `weighed-${index}`, type: 'C/S', outputWeight: 72, status: 'cut',
+      })),
+      ...Array.from({ length: 9 }, (_, index) => round({
+        id: `resting-${index}`, type: 'C/S', outputWeight: 0, status: 'resting',
+      })),
+      round({ id: 'scheduled', type: 'C/S', outputWeight: 0, status: 'scheduled' }),
+      round({ id: 'cancelled', type: 'C/S', outputWeight: 0, status: 'cancelled' }),
+    ];
+    const result = getMilkLotProductionReconciliation(milkLot(), rounds);
+    expect(result).toMatchObject({
+      csRounds: 28,
+      completedRounds: 19,
+      paneerRecorded: 19 * 72,
+      paneerInputLitres: 19 * 500,
+    });
+    expect(result.paneerYieldPer100L).toBeCloseTo(14.4);
+  });
+
   it('keeps recovered cream separate from Paneer output and yield', () => {
     const result = getMilkLotProductionReconciliation(milkLot(), [
       round({ type: 'C/S', outputWeight: 80, creamRecovered: 50 }),

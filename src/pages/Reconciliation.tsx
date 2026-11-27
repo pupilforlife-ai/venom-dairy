@@ -570,6 +570,7 @@ export default function Reconciliation() {
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200">
           <h3 className="text-sm font-semibold text-slate-900">Production Outputs from Lot {recon.lotCode}</h3>
+          <p className="mt-1 text-xs text-slate-500">Paneer round counts include started rounds; quantities and yields use recorded output.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

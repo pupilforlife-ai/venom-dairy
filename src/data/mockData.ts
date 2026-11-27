@@ -405,6 +405,12 @@ export function getMilkLotProductionReconciliation(lot: MilkLot, rounds: Product
   const lotRounds = rounds.filter((round) => round.milkLotId === lot.id || round.milkLotCode === lot.lotCode);
   const completedRounds = lotRounds.filter((round) => round.outputWeight > 0 && !['scheduled', 'cancelled', 'spoiled'].includes(round.status));
   const accountedRounds = lotRounds.filter((round) => !['cancelled', 'spoiled'].includes(round.status));
+  // Round counts reflect production that has started. Output weight is entered
+  // later, so using completedRounds here hides rounds still in pressing,
+  // resting or awaiting cutting from the Milk Receiving reconciliation.
+  const startedPaneerRounds = lotRounds.filter((round) =>
+    (round.type === 'D' || round.type === 'C/S') && getRoundMilkInput(round) > 0
+  );
   const paneerRounds = completedRounds.filter((round) => round.type === 'D' || round.type === 'C/S');
   const paneerRecorded = paneerRounds.reduce((total, round) => total + Math.max(0, round.outputWeight), 0);
   const paneerInputLitres = paneerRounds.reduce((total, round) => total + getRoundMilkInput(round), 0);
@@ -423,8 +429,8 @@ export function getMilkLotProductionReconciliation(lot: MilkLot, rounds: Product
     paneerRecorded,
     yieldLPerKg: paneerRecorded > 0 ? paneerInputLitres / paneerRecorded : 0,
     paneerYieldPer100L: paneerInputLitres > 0 ? (paneerRecorded / paneerInputLitres) * 100 : 0,
-    dRounds: paneerRounds.filter((round) => round.type === 'D').length,
-    csRounds: paneerRounds.filter((round) => round.type === 'C/S').length,
+    dRounds: startedPaneerRounds.filter((round) => round.type === 'D').length,
+    csRounds: startedPaneerRounds.filter((round) => round.type === 'C/S').length,
     cream,
     pan111,
     paneerForSpp,
