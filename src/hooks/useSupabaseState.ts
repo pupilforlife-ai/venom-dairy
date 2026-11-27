@@ -113,17 +113,9 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const serverValueRef = useRef<T | undefined>(undefined);
   const serverVersionRef = useRef(0);
   const pendingWritesRef = useRef(0);
-  const unversionedCommitRef = useRef(false);
   const deferredRealtimeRowRef = useRef<AppStateRow<T> | null>(null);
-  const versionRefreshRef = useRef<Promise<void> | null>(null);
-  const versionTargetRef = useRef(0);
 
-  const applyServerValue = (row: AppStateRow<T>, restoreRejectedEdit = false) => {
-    if (row.version < serverVersionRef.current) return;
-    // A version identifies an immutable committed snapshot. A failed optimistic
-    // edit is the exception: restore it even when the server version is equal.
-    if (!restoreRejectedEdit && !unversionedCommitRef.current && serverValueRef.current !== undefined && row.version === serverVersionRef.current) return;
-    unversionedCommitRef.current = false;
+  const applyServerValue = (row: AppStateRow<T>) => {
     serverValueRef.current = row.value;
     serverVersionRef.current = row.version || 0;
     valueRef.current = row.value;
@@ -138,9 +130,6 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   // RPCs have already committed their change. Reflect the returned record in
   // this browser without issuing a second whole-collection write.
   const applyCommittedValue = (value: T | ((currentValue: T) => T)) => {
-    // Legacy RPCs return records without the collection version. Preserve the
-    // next authoritative equal-version refresh when its event preceded the RPC.
-    unversionedCommitRef.current = true;
     const nextValue = value instanceof Function ? value(valueRef.current) : value;
     valueRef.current = nextValue;
     serverValueRef.current = nextValue;
@@ -188,14 +177,6 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
             return;
           }
 
-          // Another client may already have committed this exact edit. Avoid
-          // running every write guard again for a document that will not change.
-          if (jsonEqual(mergedValue, remoteRow.value)) {
-            serverValueRef.current = remoteRow.value;
-            if (localWriteVersionRef.current === localVersion) applyServerValue(remoteRow);
-            return;
-          }
-
           // Compare-and-swap: if another device updates this collection after
           // our read, zero rows match and we retry against its newer snapshot.
           const { data: savedRow, error: saveError } = await client
@@ -224,7 +205,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
           .select('key, value, version')
           .eq('key', key)
           .maybeSingle<AppStateRow<T>>();
-        if (data) applyServerValue(data, true);
+        if (data) applyServerValue(data);
       })
       .finally(() => {
         pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
@@ -282,7 +263,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
 
     const committed = (event: Event) => {
       const row = (event as CustomEvent<AppStateRow<T>>).detail;
-      if (!row || row.key !== key || row.version < serverVersionRef.current || (!unversionedCommitRef.current && serverValueRef.current !== undefined && row.version === serverVersionRef.current)) return;
+      if (!row || row.key !== key || row.version < serverVersionRef.current) return;
       if (pendingWritesRef.current > 0) {
         if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) deferredRealtimeRowRef.current = row;
       } else {
@@ -292,27 +273,6 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
       }
     };
     window.addEventListener('vejoy:committed-app-state', committed);
-    // Compact replies still advertise every committed version. Recover missed
-    // updates after a phone was offline, fetching only out-of-date collections.
-    const refreshVersions = (event: Event) => {
-      const versions = (event as CustomEvent<{key:string;version:number}[]>).detail;
-      const advertised = Array.isArray(versions) ? versions.find(row => row.key === key) : undefined;
-      if (!advertised || typeof advertised.version !== 'number') return;
-      versionTargetRef.current = Math.max(versionTargetRef.current,advertised.version);
-      if (advertised.version <= Math.max(serverVersionRef.current, deferredRealtimeRowRef.current?.version || 0) || versionRefreshRef.current) return;
-      const requestedVersion = versionTargetRef.current;
-      versionRefreshRef.current = (async () => {
-        const {data,error} = await client.from('app_state').select('key, value, version').eq('key',key).maybeSingle<AppStateRow<T>>();
-        if (cancelled) return;
-        if (error) { console.error(`Error refreshing ${key} after save:`,error); return; }
-        if (data) committed({detail:data} as CustomEvent<AppStateRow<T>>);
-      })().finally(() => {
-        versionRefreshRef.current = null;
-        if (!cancelled && versionTargetRef.current > requestedVersion) refreshVersions({detail:[{key,version:versionTargetRef.current}]} as CustomEvent<{key:string;version:number}[]>);
-      });
-    };
-    window.addEventListener('vejoy:server-state-versions', refreshVersions);
-
 
     const channel = client
       .channel(`app-state-${key}`)
@@ -321,7 +281,8 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
         { event: '*', schema: 'public', table: 'app_state', filter: `key=eq.${key}` },
         (payload) => {
           const row = payload.new as AppStateRow<T>;
-          if (!row?.key || row.key !== key || row.version < serverVersionRef.current || (!unversionedCommitRef.current && serverValueRef.current !== undefined && row.version === serverVersionRef.current)) return;
+          if (!row?.key || row.key !== key || row.version < serverVersionRef.current) return;
+          serverValueRef.current = row.value;
           if (pendingWritesRef.current === 0) {
             applyServerValue(row);
           } else if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) {
@@ -334,7 +295,6 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
     return () => {
       cancelled = true;
       window.removeEventListener('vejoy:committed-app-state', committed);
-      window.removeEventListener('vejoy:server-state-versions', refreshVersions);
       void client.removeChannel(channel);
     };
   }, [key]);
