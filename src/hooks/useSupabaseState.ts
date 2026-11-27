@@ -125,12 +125,19 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const serverVersionRef = useRef(0);
   const pendingWritesRef = useRef(0);
   const deferredRealtimeRowRef = useRef<AppStateRow<T> | null>(null);
+  // Some older RPCs return a record without its collection version. The next
+  // equal-version event must still be allowed to reconcile that optimistic view.
+  const unversionedCommitRef = useRef(false);
 
-  const applyServerValue = (row: AppStateRow<T>) => {
+  const applyServerValue = (row: AppStateRow<T>, restoreRejectedEdit = false) => {
     if (!isCompleteAppStateRow(row, key, initialValue)) {
       console.error(`Incomplete ${key} app_state row was not applied`);
       return;
     }
+    if (row.version < serverVersionRef.current) return;
+    if (!restoreRejectedEdit && !unversionedCommitRef.current && serverValueRef.current !== undefined
+      && row.version === serverVersionRef.current && jsonEqual(row.value, serverValueRef.current)) return;
+    unversionedCommitRef.current = false;
     serverValueRef.current = row.value;
     serverVersionRef.current = row.version || 0;
     valueRef.current = row.value;
@@ -145,6 +152,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   // RPCs have already committed their change. Reflect the returned record in
   // this browser without issuing a second whole-collection write.
   const applyCommittedValue = (value: T | ((currentValue: T) => T)) => {
+    unversionedCommitRef.current = true;
     const nextValue = value instanceof Function ? value(valueRef.current) : value;
     valueRef.current = nextValue;
     serverValueRef.current = nextValue;
@@ -178,6 +186,14 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
           }
           const remoteValue = remoteRow?.value ?? serverValueRef.current ?? baseValue;
           const mergedValue = mergePersistedValue(baseValue, nextValue, remoteValue);
+
+          // An older tab can submit an edit that has already been committed.
+          // Avoid running all whole-document guards for an unchanged document.
+          if (remoteRow && jsonEqual(mergedValue, remoteRow.value)) {
+            if (localWriteVersionRef.current === localVersion) applyServerValue(remoteRow);
+            else serverValueRef.current = remoteRow.value;
+            return;
+          }
 
           if (!remoteRow) {
             const { data: insertedRow, error: insertError } = await client
@@ -223,7 +239,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
           .select('key, value, version')
           .eq('key', key)
           .maybeSingle<AppStateRow<T>>();
-        if (data) applyServerValue(data);
+        if (data) applyServerValue(data, true);
       })
       .finally(() => {
         pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
@@ -300,7 +316,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
             console.error(`Could not refresh complete ${key} state after a partial realtime event`, error);
             return;
           }
-          if (data.version >= serverVersionRef.current) {
+          if (data.version >= refreshRequestedVersion && data.version >= serverVersionRef.current) {
             if (pendingWritesRef.current > 0) {
               if (!deferredRealtimeRowRef.current || data.version > deferredRealtimeRowRef.current.version) {
                 deferredRealtimeRowRef.current = data;
@@ -322,6 +338,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
         refreshAfterIncompleteEvent(row.version);
         return;
       }
+      if (!unversionedCommitRef.current && row.version === serverVersionRef.current && jsonEqual(row.value, serverValueRef.current)) return;
       if (pendingWritesRef.current > 0) {
         if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) deferredRealtimeRowRef.current = row;
       } else {
@@ -332,6 +349,18 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
     };
     window.addEventListener('vejoy:committed-app-state', committed);
 
+    // Compact responses advertise all committed versions. Recover only a
+    // collection this browser missed while offline or during another save.
+    const refreshVersions = (event: Event) => {
+      const versions = (event as CustomEvent<{key: string; version: number}[]>).detail;
+      const advertised = Array.isArray(versions) ? versions.find(row => row.key === key) : undefined;
+      if (!advertised || typeof advertised.version !== 'number') return;
+      if (advertised.version <= Math.max(serverVersionRef.current, deferredRealtimeRowRef.current?.version || 0)
+        && !unversionedCommitRef.current) return;
+      refreshAfterIncompleteEvent(advertised.version);
+    };
+    window.addEventListener('vejoy:server-state-versions', refreshVersions);
+
     const channel = client
       .channel(`app-state-${key}`)
       .on(
@@ -341,9 +370,11 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
           const row: unknown = payload.new;
           if (!isRecord(row) || row.key !== key || typeof row.version !== 'number' || row.version < serverVersionRef.current) return;
           if (!isCompleteAppStateRow(row, key, initialValue)) {
+            if (row.version <= serverVersionRef.current && !unversionedCommitRef.current) return;
             refreshAfterIncompleteEvent(row.version);
             return;
           }
+          if (!unversionedCommitRef.current && row.version === serverVersionRef.current && jsonEqual(row.value, serverValueRef.current)) return;
           if (pendingWritesRef.current === 0) {
             applyServerValue(row);
           } else if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) {
@@ -356,6 +387,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
     return () => {
       cancelled = true;
       window.removeEventListener('vejoy:committed-app-state', committed);
+      window.removeEventListener('vejoy:server-state-versions', refreshVersions);
       void client.removeChannel(channel);
     };
   }, [key]);
