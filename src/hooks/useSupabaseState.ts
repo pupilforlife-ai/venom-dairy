@@ -7,6 +7,17 @@ interface AppStateRow<T> {
   version: number;
 }
 
+// Realtime can omit a large JSONB column from a change notification. Never
+// treat that notification as a complete app_state row: doing so replaces an
+// array with undefined and crashes every view that reads it.
+export function isCompleteAppStateRow<T>(row: unknown, key: string, initialValue: T): row is AppStateRow<T> {
+  if (!isRecord(row) || row.key !== key || typeof row.version !== 'number' || !Number.isFinite(row.version)) return false;
+  if (!Object.prototype.hasOwnProperty.call(row, 'value')) return false;
+  if (Array.isArray(initialValue)) return Array.isArray(row.value);
+  if (isRecord(initialValue)) return isRecord(row.value);
+  return row.value !== undefined && typeof row.value === typeof initialValue;
+}
+
 type JsonRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -116,6 +127,10 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const deferredRealtimeRowRef = useRef<AppStateRow<T> | null>(null);
 
   const applyServerValue = (row: AppStateRow<T>) => {
+    if (!isCompleteAppStateRow(row, key, initialValue)) {
+      console.error(`Incomplete ${key} app_state row was not applied`);
+      return;
+    }
     serverValueRef.current = row.value;
     serverVersionRef.current = row.version || 0;
     valueRef.current = row.value;
@@ -158,6 +173,9 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
             .maybeSingle<AppStateRow<T>>();
           if (readError) throw readError;
 
+          if (remoteRow && !isCompleteAppStateRow(remoteRow, key, initialValue)) {
+            throw new Error(`Incomplete ${key} app_state read; save was not attempted`);
+          }
           const remoteValue = remoteRow?.value ?? serverValueRef.current ?? baseValue;
           const mergedValue = mergePersistedValue(baseValue, nextValue, remoteValue);
 
@@ -241,6 +259,10 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
       }
 
       if (data) {
+        if (!isCompleteAppStateRow(data, key, initialValue)) {
+          console.error(`Incomplete ${key} app_state read; retaining current view`);
+          return;
+        }
         // Do not let a slow initial read overwrite an edit made while that
         // read was in flight. The edit is already queued for persistence.
         if (localWriteVersionRef.current !== loadVersion) {
@@ -261,9 +283,45 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
 
     if (!client) return undefined;
 
+    let refreshInFlight = false;
+    let refreshRequestedVersion = 0;
+    const refreshAfterIncompleteEvent = (version: number) => {
+      refreshRequestedVersion = Math.max(refreshRequestedVersion, version);
+      if (refreshInFlight) return;
+      refreshInFlight = true;
+      void (async () => {
+        // A second change can arrive while the first full read is in flight.
+        // Read again if that response predates the newest notification.
+        for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
+          const { data, error } = await client.from('app_state')
+            .select('key, value, version').eq('key', key).maybeSingle<AppStateRow<T>>();
+          if (cancelled) return;
+          if (error || !isCompleteAppStateRow(data, key, initialValue)) {
+            console.error(`Could not refresh complete ${key} state after a partial realtime event`, error);
+            return;
+          }
+          if (data.version >= serverVersionRef.current) {
+            if (pendingWritesRef.current > 0) {
+              if (!deferredRealtimeRowRef.current || data.version > deferredRealtimeRowRef.current.version) {
+                deferredRealtimeRowRef.current = data;
+              }
+            } else {
+              applyServerValue(data);
+              setHasLoaded(true);
+            }
+          }
+          if (data.version >= refreshRequestedVersion) return;
+        }
+      })().finally(() => { refreshInFlight = false; });
+    };
+
     const committed = (event: Event) => {
-      const row = (event as CustomEvent<AppStateRow<T>>).detail;
-      if (!row || row.key !== key || row.version < serverVersionRef.current) return;
+      const row = (event as CustomEvent<unknown>).detail;
+      if (!isRecord(row) || row.key !== key || typeof row.version !== 'number' || row.version < serverVersionRef.current) return;
+      if (!isCompleteAppStateRow(row, key, initialValue)) {
+        refreshAfterIncompleteEvent(row.version);
+        return;
+      }
       if (pendingWritesRef.current > 0) {
         if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) deferredRealtimeRowRef.current = row;
       } else {
@@ -280,9 +338,12 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'app_state', filter: `key=eq.${key}` },
         (payload) => {
-          const row = payload.new as AppStateRow<T>;
-          if (!row?.key || row.key !== key || row.version < serverVersionRef.current) return;
-          serverValueRef.current = row.value;
+          const row: unknown = payload.new;
+          if (!isRecord(row) || row.key !== key || typeof row.version !== 'number' || row.version < serverVersionRef.current) return;
+          if (!isCompleteAppStateRow(row, key, initialValue)) {
+            refreshAfterIncompleteEvent(row.version);
+            return;
+          }
           if (pendingWritesRef.current === 0) {
             applyServerValue(row);
           } else if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) {
