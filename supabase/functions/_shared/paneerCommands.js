@@ -1254,6 +1254,13 @@ function savePaneerAfterCutting(rounds, state, lots, request, actor, role, at) {
   return rounds.map((r) => r.id === round.id ? next : r);
 }
 
+// src/traceability/server/response.ts
+function compactCommittedReply(reply, before) {
+  if (!reply?.ok || reply.replayed !== false || !Array.isArray(reply.rows)) return reply;
+  const versions = new Map(before.map((row) => [row.key, row.version]));
+  return { ...reply, rows: reply.rows.filter((row) => !versions.has(row.key) || typeof row.version !== "number" || row.version !== versions.get(row.key)) };
+}
+
 // src/traceability/server/commands.ts
 var traceKeys = ["vejoy_distributionHandovers", "vejoy_finishedStock", "vejoy_intermediateLots", "vejoy_milkLots", "vejoy_productionRounds", "vejoy_traceability"];
 function prepareTraceCommand(d, request, actor, role, at) {
@@ -1399,6 +1406,7 @@ function prepareTraceCommand(d, request, actor, role, at) {
   return { documents: next, result };
 }
 export {
+  compactCommittedReply,
   prepareTraceCommand,
   traceKeys
 };

@@ -1,5 +1,5 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.98.0';
-import {prepareTraceCommand,traceKeys} from '../_shared/paneerCommands.js';
+import {prepareTraceCommand,traceKeys,compactCommittedReply} from '../_shared/paneerCommands.js';
 const headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type','Content-Type':'application/json'};
 Deno.serve(async(request)=>{
  if(request.method==='OPTIONS')return new Response('ok',{headers});
@@ -25,7 +25,7 @@ Deno.serve(async(request)=>{
    const changes=Object.fromEntries(traceKeys.filter(key=>JSON.stringify(prepared.documents[key])!==JSON.stringify(documents[key])).map(key=>[key,prepared.documents[key]]));
    const expected=readKeys.map(key=>({key,version:rows.find(x=>x.key===key)?.version??null}));
    commitAttempted=true;const {data,error}=await db.rpc('commit_paneer_traceability',{actor_id:user.id,command,expected,changes,command_result:prepared.result});
-   if(!error)return reply(data);if(error.code!=='40001')throw error;
+   if(!error)return reply(compactCommittedReply(data,rows));if(error.code!=='40001')throw error;
   }
   throw Error('Production is busy. Retry this same save.');
  }catch(error){return reply({error:error?.message||'Save was not confirmed.',uncertain:commitAttempted&&!error?.code},400);}

@@ -115,7 +115,11 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const pendingWritesRef = useRef(0);
   const deferredRealtimeRowRef = useRef<AppStateRow<T> | null>(null);
 
-  const applyServerValue = (row: AppStateRow<T>) => {
+  const applyServerValue = (row: AppStateRow<T>, restoreRejectedEdit = false) => {
+    if (row.version < serverVersionRef.current) return;
+    // A version identifies an immutable committed snapshot. A failed optimistic
+    // edit is the exception: restore it even when the server version is equal.
+    if (!restoreRejectedEdit && serverValueRef.current !== undefined && row.version === serverVersionRef.current) return;
     serverValueRef.current = row.value;
     serverVersionRef.current = row.version || 0;
     valueRef.current = row.value;
@@ -177,6 +181,14 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
             return;
           }
 
+          // Another client may already have committed this exact edit. Avoid
+          // running every write guard again for a document that will not change.
+          if (jsonEqual(mergedValue, remoteRow.value)) {
+            serverValueRef.current = remoteRow.value;
+            if (localWriteVersionRef.current === localVersion) applyServerValue(remoteRow);
+            return;
+          }
+
           // Compare-and-swap: if another device updates this collection after
           // our read, zero rows match and we retry against its newer snapshot.
           const { data: savedRow, error: saveError } = await client
@@ -205,7 +217,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
           .select('key, value, version')
           .eq('key', key)
           .maybeSingle<AppStateRow<T>>();
-        if (data) applyServerValue(data);
+        if (data) applyServerValue(data, true);
       })
       .finally(() => {
         pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
@@ -263,7 +275,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
 
     const committed = (event: Event) => {
       const row = (event as CustomEvent<AppStateRow<T>>).detail;
-      if (!row || row.key !== key || row.version < serverVersionRef.current) return;
+      if (!row || row.key !== key || row.version < serverVersionRef.current || (serverValueRef.current !== undefined && row.version === serverVersionRef.current)) return;
       if (pendingWritesRef.current > 0) {
         if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) deferredRealtimeRowRef.current = row;
       } else {
@@ -281,8 +293,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
         { event: '*', schema: 'public', table: 'app_state', filter: `key=eq.${key}` },
         (payload) => {
           const row = payload.new as AppStateRow<T>;
-          if (!row?.key || row.key !== key || row.version < serverVersionRef.current) return;
-          serverValueRef.current = row.value;
+          if (!row?.key || row.key !== key || row.version < serverVersionRef.current || (serverValueRef.current !== undefined && row.version === serverVersionRef.current)) return;
           if (pendingWritesRef.current === 0) {
             applyServerValue(row);
           } else if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) {

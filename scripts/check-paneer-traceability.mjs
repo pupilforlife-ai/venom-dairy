@@ -6,7 +6,7 @@ const captured=JSON.parse(await fs.readFile(path.join(main,'backups/traceability
 const backupRoot=path.join(main,'backups','paneer-server-checks');await fs.mkdir(backupRoot,{recursive:true,mode:0o700});
 const dir=await fs.mkdtemp(path.join(backupRoot,'rollback-'));await fs.chmod(dir,0o700);
 let migration=await fs.readFile('supabase/migrations/20261115120000_shared_paneer_traceability.sql','utf8');
-const translate=s=>s.replaceAll('public.guard_milk_rejection_history','pg_temp.guard_milk_rejection_history').replaceAll('public.prepare_paneer_packing','pg_temp.prepare_paneer_packing').replaceAll('public.app_state_history','pg_temp.history_test').replaceAll('public.app_state','pg_temp.state_test').replaceAll('public.profiles','pg_temp.profiles_test').replaceAll('public.paneer_traceability_commands','pg_temp.commands_test').replaceAll('public.commit_paneer_traceability','pg_temp.commit_paneer_traceability').replaceAll('public.guard_paneer_traceability','pg_temp.guard_paneer_traceability').replaceAll('public.guard_ghee_numeric_state','pg_temp.guard_ghee_numeric_state').replaceAll('public.guard_ghee_af_oil_state','pg_temp.guard_ghee_af_oil_state').replaceAll('public.commit_paneer_packing_before_traceability','pg_temp.commit_paneer_packing_before_traceability').replaceAll('public.commit_paneer_packing','pg_temp.commit_paneer_packing').replaceAll('app_state.value','state_test.value');
+const translate=s=>s.replaceAll('public.enforce_late_butter_accounting','pg_temp.enforce_late_butter_accounting').replaceAll('public.guard_milk_rejection_history','pg_temp.guard_milk_rejection_history').replaceAll('public.prepare_paneer_packing','pg_temp.prepare_paneer_packing').replaceAll('public.app_state_history','pg_temp.history_test').replaceAll('public.app_state','pg_temp.state_test').replaceAll('public.profiles','pg_temp.profiles_test').replaceAll('public.paneer_traceability_commands','pg_temp.commands_test').replaceAll('public.commit_paneer_traceability','pg_temp.commit_paneer_traceability').replaceAll('public.guard_paneer_traceability','pg_temp.guard_paneer_traceability').replaceAll('public.guard_ghee_numeric_state','pg_temp.guard_ghee_numeric_state').replaceAll('public.guard_ghee_af_oil_state','pg_temp.guard_ghee_af_oil_state').replaceAll('public.commit_paneer_packing_before_traceability','pg_temp.commit_paneer_packing_before_traceability').replaceAll('public.commit_paneer_packing','pg_temp.commit_paneer_packing').replaceAll('app_state.value','state_test.value');
 const packing=captured.functions.find(f=>f.name==='commit_paneer_packing').definition.replace('public.commit_paneer_packing(','public.commit_paneer_packing_before_traceability(');
 migration=migration.replace(/do \$\$ begin\s*if to_regprocedure\('public.commit_paneer_packing_before_traceability\(jsonb\)'\)[\s\S]*?end \$\$;/,packing+';\n');
 migration=translate(migration).replace(/^begin;$/m,'').replace(/^commit;$/m,'');
@@ -25,6 +25,8 @@ sql+=translate((await fs.readFile('supabase/migrations/20261124150000_deduct_pan
 sql+=translate((await fs.readFile('supabase/migrations/20261124170000_protect_milk_rejection_history.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
 sql+=translate((await fs.readFile('supabase/migrations/20261125120000_align_approved_paneer_prefixes.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
 sql+=translate((await fs.readFile('supabase/migrations/20261125140000_version_check_paneer_shift_date_dependency.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
+sql+=translate((await fs.readFile('supabase/migrations/20261127120000_report_paneer_command_replays.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
+sql+=translate((await fs.readFile('supabase/migrations/20261127130000_index_late_butter_audit_lookups.sql','utf8')).replace(/^begin;$/m,'').replace(/^commit;$/m,''));
 const measureIndex=process.argv.indexOf('--measure');
 if(measureIndex>=0){
  const sample=JSON.parse(await fs.readFile(path.resolve(process.argv[measureIndex+1]),'utf8')).rows[0].state;
@@ -36,7 +38,7 @@ if(measureIndex>=0){
  select set_config('request.jwt.claim.sub',(select id::text from pg_temp.profiles_test),true);
  select set_config('request.jwt.claims',jsonb_build_object('sub',(select id from pg_temp.profiles_test),'role','authenticated')::text,true);\n`;
  for(let i=0;i<3;i++)sql+=`explain (analyze,format json) update pg_temp.state_test set value=jsonb_set(value,array[(jsonb_array_length(value)-1)::text,'notes'],'"performance-${i}"'::jsonb) where key='vejoy_productionRounds';\n`;
-}else sql+=await fs.readFile('supabase/tests/paneer_traceability.sql','utf8');
+}else {sql+=await fs.readFile('supabase/tests/paneer_traceability.sql','utf8');sql+=await fs.readFile('supabase/tests/save_performance.sql','utf8');}
 sql+='\nrollback;\n';const file=path.join(dir,'paneer-rollback.sql');await fs.writeFile(file,sql,{mode:0o600});
 if(process.argv.includes('--prepare-only')){console.log(file);process.exit(0);}
 try{const output=execFileSync('supabase',['db','query','--linked','--project-ref',ref,'--file',file,'--output','json'],{cwd:main,encoding:'utf8',maxBuffer:4*1024*1024,stdio:['ignore','pipe','pipe']});const result=JSON.parse(output);console.log(JSON.stringify({sqlFile:file,rows:result.rows,rolledBack:true}));}catch(e){throw Error(String(e.stderr||e.message).slice(0,4500));}

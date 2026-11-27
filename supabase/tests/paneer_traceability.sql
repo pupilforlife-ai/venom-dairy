@@ -276,3 +276,17 @@ begin
  exception when others then if sqlerrm<>'Unexpected collection' then raise;end if;end;
 end;$$;
 select 'Shift-date read dependency / stale retry / no shift writes / idempotent replay passed' as result;
+
+-- Response compaction must distinguish a fresh commit from a lost/racing replay.
+do $$ declare actor uuid; expected jsonb; response jsonb;
+begin
+ select id into actor from pg_temp.profiles_test limit 1;
+ select jsonb_agg(jsonb_build_object('key',k,'version',s.version)) into expected from unnest(array['vejoy_distributionHandovers','vejoy_finishedStock','vejoy_intermediateLots','vejoy_milkLots','vejoy_productionRounds','vejoy_traceability']) k left join pg_temp.state_test s on s.key=k;
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ response:=pg_temp.commit_paneer_traceability(actor,'{"id":"replay-flag-check","kind":"save","_role":"owner"}',expected,'{}','null');
+ if response->'replayed' is distinct from 'false'::jsonb then raise exception 'First commit misidentified as replay';end if;
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ response:=pg_temp.commit_paneer_traceability(actor,'{"id":"replay-flag-check","kind":"save","_role":"owner"}','[]','{}','null');
+ if response->'replayed' is distinct from 'true'::jsonb or jsonb_array_length(response->'rows')<>6 then raise exception 'Replay must recover all six source snapshots';end if;
+end;$$;
+select 'Save replay flag / unchanged legacy full reply / dependency locks passed' as result;

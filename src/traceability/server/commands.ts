@@ -95,3 +95,5 @@ export function prepareTraceCommand(d:TraceDocuments,request:TraceCommand,actor:
  }
  return {documents:next,result};
 }
+
+export {compactCommittedReply} from './response';
