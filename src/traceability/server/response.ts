@@ -5,5 +5,5 @@ interface CommittedReply {ok?:boolean;replayed?:boolean;rows?:VersionedRow[];[ke
 export function compactCommittedReply<T extends CommittedReply>(reply:T,before:VersionedRow[]):T {
  if(!reply?.ok||reply.replayed!==false||!Array.isArray(reply.rows))return reply;
  const versions=new Map(before.map(row=>[row.key,row.version]));
- return {...reply,rows:reply.rows.filter(row=>!versions.has(row.key)||typeof row.version!=='number'||row.version!==versions.get(row.key))};
+ return {...reply,versions:reply.rows.map(({key,version})=>({key,version})),rows:reply.rows.filter(row=>!versions.has(row.key)||typeof row.version!=='number'||row.version!==versions.get(row.key))};
 }

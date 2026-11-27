@@ -115,6 +115,8 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const pendingWritesRef = useRef(0);
   const unversionedCommitRef = useRef(false);
   const deferredRealtimeRowRef = useRef<AppStateRow<T> | null>(null);
+  const versionRefreshRef = useRef<Promise<void> | null>(null);
+  const versionTargetRef = useRef(0);
 
   const applyServerValue = (row: AppStateRow<T>, restoreRejectedEdit = false) => {
     if (row.version < serverVersionRef.current) return;
@@ -290,6 +292,27 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
       }
     };
     window.addEventListener('vejoy:committed-app-state', committed);
+    // Compact replies still advertise every committed version. Recover missed
+    // updates after a phone was offline, fetching only out-of-date collections.
+    const refreshVersions = (event: Event) => {
+      const versions = (event as CustomEvent<{key:string;version:number}[]>).detail;
+      const advertised = Array.isArray(versions) ? versions.find(row => row.key === key) : undefined;
+      if (!advertised || typeof advertised.version !== 'number') return;
+      versionTargetRef.current = Math.max(versionTargetRef.current,advertised.version);
+      if (advertised.version <= Math.max(serverVersionRef.current, deferredRealtimeRowRef.current?.version || 0) || versionRefreshRef.current) return;
+      const requestedVersion = versionTargetRef.current;
+      versionRefreshRef.current = (async () => {
+        const {data,error} = await client.from('app_state').select('key, value, version').eq('key',key).maybeSingle<AppStateRow<T>>();
+        if (cancelled) return;
+        if (error) { console.error(`Error refreshing ${key} after save:`,error); return; }
+        if (data) committed({detail:data} as CustomEvent<AppStateRow<T>>);
+      })().finally(() => {
+        versionRefreshRef.current = null;
+        if (!cancelled && versionTargetRef.current > requestedVersion) refreshVersions({detail:[{key,version:versionTargetRef.current}]} as CustomEvent<{key:string;version:number}[]>);
+      });
+    };
+    window.addEventListener('vejoy:server-state-versions', refreshVersions);
+
 
     const channel = client
       .channel(`app-state-${key}`)
@@ -311,6 +334,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
     return () => {
       cancelled = true;
       window.removeEventListener('vejoy:committed-app-state', committed);
+      window.removeEventListener('vejoy:server-state-versions', refreshVersions);
       void client.removeChannel(channel);
     };
   }, [key]);

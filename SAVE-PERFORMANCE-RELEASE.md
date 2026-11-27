@@ -6,7 +6,7 @@ Scope:
 - Ignore repeated committed/realtime versions without extra rendering or synchronous cache writes.
 - Retain forced authoritative rollback of rejected optimistic edits, ordered writes, stale-write merging and newest deferred events.
 - Avoid no-op whole-document writes when the exact edit is already committed.
-- Compact first-success Edge responses by version; return full state on retry/replay and older RPC responses. All six/seven CAS dependencies remain checked and locked.
+- Compact first-success Edge responses by version; return full state on retry/replay and older RPC responses. All six/seven CAS dependencies remain checked and locked. Compact replies are opt-in; older clients retain the original full response. A small version list lets updated clients fetch only unrelated collections that became stale while offline.
 - Index late-butter history lookups while preserving the same source/history validation decisions and every guard.
 
 Validation: unit suite, real-hook offline lifecycle tests (duplicate notifications, concurrent staff updates, rejected edits, queued saves), rollback-only SQL comparisons, original versus optimized late-butter guard checks, record-based response-size measurements, phone/desktop renderer checks and unchanged historical stock totals. No production test entries are created.

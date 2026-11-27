@@ -12,7 +12,7 @@ Deno.serve(async(request)=>{
   const db=createClient(Deno.env.get('SUPABASE_URL'),Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),{auth:{persistSession:false,autoRefreshToken:false}});
   const {data:profile,error:profileError}=await db.from('profiles').select('username,role,status').eq('id',user.id).single();
   if(profileError||profile?.status!=='approved'||!['owner','admin','staff'].includes(profile.role))return reply({error:'Approved production access required.'},403);
-  const submitted=await request.json();const command={...submitted,_role:profile.role};if(command.kind==='ping'){const {error}=await db.from('paneer_traceability_commands').select('id').limit(0);if(error)throw error;return reply({ok:true,ready:true});}if(JSON.stringify(command).length>2_000_000)return reply({error:'The save is too large.'},400);
+  const {replyMode,...submitted}=await request.json();const command={...submitted,_role:profile.role};if(command.kind==='ping'){const {error}=await db.from('paneer_traceability_commands').select('id').limit(0);if(error)throw error;return reply({ok:true,ready:true});}if(JSON.stringify(command).length>2_000_000)return reply({error:'The save is too large.'},400);
   // Replay before recalculation: a lost response never repeats the operation.
   const {data:receipt}=await db.from('paneer_traceability_commands').select('actor_id,request,result').eq('id',command.id).maybeSingle();
   if(receipt){commitAttempted=true;const {data,error}=await db.rpc('commit_paneer_traceability',{actor_id:user.id,command,expected:[],changes:{},command_result:null});if(error)throw error;return reply(data);}
@@ -25,7 +25,7 @@ Deno.serve(async(request)=>{
    const changes=Object.fromEntries(traceKeys.filter(key=>JSON.stringify(prepared.documents[key])!==JSON.stringify(documents[key])).map(key=>[key,prepared.documents[key]]));
    const expected=readKeys.map(key=>({key,version:rows.find(x=>x.key===key)?.version??null}));
    commitAttempted=true;const {data,error}=await db.rpc('commit_paneer_traceability',{actor_id:user.id,command,expected,changes,command_result:prepared.result});
-   if(!error)return reply(compactCommittedReply(data,rows));if(error.code!=='40001')throw error;
+   if(!error)return reply(replyMode==='changed_versions_v1'?compactCommittedReply(data,rows):data);if(error.code!=='40001')throw error;
   }
   throw Error('Production is busy. Retry this same save.');
  }catch(error){return reply({error:error?.message||'Save was not confirmed.',uncertain:commitAttempted&&!error?.code},400);}
