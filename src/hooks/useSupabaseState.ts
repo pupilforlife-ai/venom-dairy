@@ -113,13 +113,15 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   const serverValueRef = useRef<T | undefined>(undefined);
   const serverVersionRef = useRef(0);
   const pendingWritesRef = useRef(0);
+  const unversionedCommitRef = useRef(false);
   const deferredRealtimeRowRef = useRef<AppStateRow<T> | null>(null);
 
   const applyServerValue = (row: AppStateRow<T>, restoreRejectedEdit = false) => {
     if (row.version < serverVersionRef.current) return;
     // A version identifies an immutable committed snapshot. A failed optimistic
     // edit is the exception: restore it even when the server version is equal.
-    if (!restoreRejectedEdit && serverValueRef.current !== undefined && row.version === serverVersionRef.current) return;
+    if (!restoreRejectedEdit && !unversionedCommitRef.current && serverValueRef.current !== undefined && row.version === serverVersionRef.current) return;
+    unversionedCommitRef.current = false;
     serverValueRef.current = row.value;
     serverVersionRef.current = row.version || 0;
     valueRef.current = row.value;
@@ -134,6 +136,9 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
   // RPCs have already committed their change. Reflect the returned record in
   // this browser without issuing a second whole-collection write.
   const applyCommittedValue = (value: T | ((currentValue: T) => T)) => {
+    // Legacy RPCs return records without the collection version. Preserve the
+    // next authoritative equal-version refresh when its event preceded the RPC.
+    unversionedCommitRef.current = true;
     const nextValue = value instanceof Function ? value(valueRef.current) : value;
     valueRef.current = nextValue;
     serverValueRef.current = nextValue;
@@ -275,7 +280,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
 
     const committed = (event: Event) => {
       const row = (event as CustomEvent<AppStateRow<T>>).detail;
-      if (!row || row.key !== key || row.version < serverVersionRef.current || (serverValueRef.current !== undefined && row.version === serverVersionRef.current)) return;
+      if (!row || row.key !== key || row.version < serverVersionRef.current || (!unversionedCommitRef.current && serverValueRef.current !== undefined && row.version === serverVersionRef.current)) return;
       if (pendingWritesRef.current > 0) {
         if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) deferredRealtimeRowRef.current = row;
       } else {
@@ -293,7 +298,7 @@ export function useSupabaseState<T>(key: string, initialValue: T) {
         { event: '*', schema: 'public', table: 'app_state', filter: `key=eq.${key}` },
         (payload) => {
           const row = payload.new as AppStateRow<T>;
-          if (!row?.key || row.key !== key || row.version < serverVersionRef.current || (serverValueRef.current !== undefined && row.version === serverVersionRef.current)) return;
+          if (!row?.key || row.key !== key || row.version < serverVersionRef.current || (!unversionedCommitRef.current && serverValueRef.current !== undefined && row.version === serverVersionRef.current)) return;
           if (pendingWritesRef.current === 0) {
             applyServerValue(row);
           } else if (!deferredRealtimeRowRef.current || row.version > deferredRealtimeRowRef.current.version) {
